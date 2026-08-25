@@ -31,6 +31,8 @@ An opencode skill (CLI via bash, Node + `node:sqlite`) that lets an agent store,
 
 - [CLI entry and commands](issues/04-cli-entry.md): `bin/memory.js` (plain JS, executable) maps all 9 commands to `Store` methods; stdout JSON results, stderr errors, exit 1 on failure; `--db` override, `--metadata` JSON, `--where` raw SQL; 14/14 smoke tests + 6 error paths green; typecheck clean.
 
+- [Skill authoring](issues/05-skill-authoring.md): `.agents/skills/ai-memory/SKILL.md` authored — when to use, one-line CLI examples (links to `--help` for full ref), `CONTEXT.md` for vocabulary, `memory://` link convention, frontier exploration loop; thin contract, no duplication.
+
 ## Not yet specified
 
 <!-- see "Fog of war": in-scope fog you can't ticket yet; graduates as the frontier advances -->
