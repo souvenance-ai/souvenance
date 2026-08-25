@@ -170,6 +170,34 @@ test("integration: CLI-reachable end-to-end via execSync", async () => {
     assert.equal(tagsNotesMap.get("animal"), 2, "animal in notes");
     assert.equal(tagsNotesMap.get("greeting"), undefined, "greeting not in notes");
 
+    // supersede a memory
+    const d = run(`store "original content" --metadata '{"kind":"note","tags":["draft"]}'`);
+    const supersededId = run(`supersede ${d} --content "revised content" --metadata '{"kind":"note","tags":["final"]}'`);
+    assert.ok(supersededId.length > 0, "supersede should print new id");
+
+    // deprecate a memory
+    const e = run(`store "to be deprecated"`);
+    run(`deprecate ${e}`);
+
+    // merge two memories
+    const f = run(`store "merge candidate one" --metadata '{"kind":"note","tags":["duplicate"]}'`);
+    const g = run(`store "merge candidate two" --metadata '{"kind":"note","tags":["duplicate"]}'`);
+    const mergedId = run(`merge ${f} ${g} --content "merged result" --metadata '{"kind":"note","tags":["merged"]}'`);
+    assert.ok(mergedId.length > 0, "merge should print new id");
+
+    // search defaults to active only — superseded original should not appear
+    const activeResults = JSON.parse(run(`search "original"`));
+    assert.equal(activeResults.length, 0, "superseded memory should not appear in default search");
+
+    // search with --all includes superseded memory
+    const allResults = JSON.parse(run(`search "original" --all`));
+    assert.ok(allResults.length >= 1, "superseded memory should appear with --all");
+
+    // delete without --force should fail
+    const deleteErr = runExpectError(`delete ${b}`);
+    assert.equal(deleteErr.code, 1);
+    assert.ok(deleteErr.stderr.includes("deprecate"), `stderr should suggest deprecate, got: ${deleteErr.stderr}`);
+
     // relations
     const aRels = JSON.parse(run(`relations ${a} --direction out`));
     assert.equal(aRels.length, 1);
@@ -182,10 +210,10 @@ test("integration: CLI-reachable end-to-end via execSync", async () => {
     assert.ok(errResult.stderr.includes("not found"), `stderr should say 'not found', got: ${errResult.stderr}`);
 
     // delete a — cascade edges
-    run(`delete ${a}`);
+    run(`delete ${a} --force`);
     const stats = JSON.parse(run(`stats`));
-    assert.equal(stats.memories, 2);
-    assert.equal(stats.edges, 0, "edge should cascade after delete");
+    assert.equal(stats.memories, 8);
+    assert.equal(stats.edges, 3, "supersedes + 2 merges edges remain after a deleted");
 
     // verify a is gone via get
     const errResult2 = runExpectError(`get ${a}`);

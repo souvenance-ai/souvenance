@@ -152,3 +152,33 @@ test("tags: duplicate tags in one memory count per json_each row", () => {
     cleanup();
   }
 });
+
+test("tags: defaults to active memories only", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("m1", { metadata: { tags: ["alpha"] } });
+    store.store("m2", { metadata: { tags: ["alpha", "beta"] } });
+    store.deprecate(a);
+    const result = store.tags();
+    const map = new Map(result.map((r) => [r.tag, r.count]));
+    assert.equal(map.get("alpha"), 1);
+    assert.equal(map.get("beta"), 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test("tags: includeLegacy includes deprecated memories", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("m1", { metadata: { tags: ["alpha"] } });
+    store.store("m2", { metadata: { tags: ["alpha", "beta"] } });
+    store.deprecate(a);
+    const result = store.tags({ includeLegacy: true });
+    const map = new Map(result.map((r) => [r.tag, r.count]));
+    assert.equal(map.get("alpha"), 2);
+    assert.equal(map.get("beta"), 1);
+  } finally {
+    cleanup();
+  }
+});

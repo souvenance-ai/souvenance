@@ -39,3 +39,19 @@ _Avoid_: browsing, scanning
 **Store**:
 The SQLite database file (`.ai-memory/memory.db`) holding all memories and relations for a project.
 _Avoid_: database, db (use "store" in domain prose; "database" for the implementation)
+
+**Status**:
+The lifecycle state of a memory: `active`, `superseded`, `deprecated`, or `merged`. Determined by the addition-only model — memories are never overwritten or deleted, only superseded, deprecated, or merged. `search` and `list` default to `active` memories only; use `--all` to include others.
+_Avoid_: state, lifecycle
+
+**Supersede**:
+Store a new version of a memory and mark the old one as `superseded`. The old memory's content is preserved; a `supersedes` relation links old to new. The new memory starts with a clean relation set (no inherited edges).
+_Avoid_: replace, update (use "update" only for metadata changes)
+
+**Deprecate**:
+Mark a memory as `deprecated`, removing it from default `search` and `list` results without deleting it. The soft-delete equivalent of `delete`. The memory and its relations remain in the store.
+_Avoid_: delete, remove, archive
+
+**Merge**:
+Combine two or more duplicate memories into a single new memory. Originals are marked `merged`; a `merges` relation links each original to the merged result. The merged memory starts with a clean relation set.
+_Avoid_: combine, deduplicate, consolidate

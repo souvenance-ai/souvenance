@@ -5,15 +5,19 @@ const HELP = `Usage: memory <command> [args] [flags]
 
 Commands:
   store <content> [--metadata <json>]          Store a new memory, print its id
-  update <id> [--content <text>] [--metadata <json>]   Update a memory
-  delete <id>                                 Delete a memory (cascades edges)
+  supersede <old-id> --content <text> [--metadata <json>]
+      Store a new version, mark old as superseded
+  deprecate <id>                               Soft-delete a memory (mark as deprecated)
+  merge <id1> <id2> [<id3> ...] --content <text> [--metadata <json>]  Combine memories into one
+  update <id> --metadata <json>               Update a memory's metadata (content is immutable)
+  delete <id> --force                           Delete a memory (destructive; prefer 'deprecate')
   link <from-id> <to-id> --kind <kind> [--metadata <json>]  Create a typed edge
-  search <query> [--where <sql>] [--limit N]  FTS5 search, ranked results as JSON
+  search <query> [--where <sql>] [--limit N] [--all]  FTS5 search, ranked results as JSON
   get <id>                                    Print a memory as JSON (or "not found")
-  list [--where <sql>] [--limit N] [--offset N]  List memories by metadata filter
+  list [--where <sql>] [--limit N] [--offset N] [--all]  List memories by metadata filter
   relations <id> [--direction out|in|both]    List edges to/from a memory
   stats                                       Print store statistics as JSON
-  tags [--where <sql>]                       List all distinct tags with counts, as JSON
+  tags [--where <sql>] [--all]               List all distinct tags with counts, as JSON
 
 Flags:
   --db <path>   Override the DB path (default: .ai-memory/memory.db)
@@ -28,7 +32,10 @@ Notes:
   --metadata accepts a JSON string: '{"tags":["a"],"kind":"note"}'
   --where accepts a raw SQL fragment on the metadata JSON column using SQLite
     JSON operators, e.g.: metadata->>'$.kind' = 'note'
+  --all includes superseded/deprecated/merged memories in search/list/tags results
 `;
+
+const BOOLEAN_FLAGS = new Set(["--all", "--force"]);
 
 function parseArgs(argv) {
   const args = [];
@@ -41,6 +48,10 @@ function parseArgs(argv) {
     }
     if (a.startsWith("--")) {
       const key = a;
+      if (BOOLEAN_FLAGS.has(key)) {
+        flags[key] = true;
+        continue;
+      }
       const val = a.includes("=") ? a.slice(a.indexOf("=") + 1) : argv[i + 1];
       if (!a.includes("=")) i++;
       flags[key] = val;
@@ -105,20 +116,47 @@ function main() {
         process.stdout.write(id + "\n");
         break;
       }
+      case "supersede": {
+        if (rest.length < 1) fail("supersede requires <old-id>");
+        const oldId = rest[0];
+        const content = flags["--content"];
+        if (!content) fail("supersede requires --content <text>");
+        const metadata = parseMetadata(flags["--metadata"]);
+        const id = store.supersede(oldId, content, metadata ? { metadata } : {});
+        process.stdout.write(id + "\n");
+        break;
+      }
+      case "deprecate": {
+        if (rest.length < 1) fail("deprecate requires <id>");
+        store.deprecate(rest[0]);
+        process.stdout.write("deprecated\n");
+        break;
+      }
+      case "merge": {
+        if (rest.length < 2) fail("merge requires at least 2 ids");
+        const content = flags["--content"];
+        if (!content) fail("merge requires --content <text>");
+        const metadata = parseMetadata(flags["--metadata"]);
+        const id = store.merge(rest, content, metadata ? { metadata } : {});
+        process.stdout.write(id + "\n");
+        break;
+      }
       case "update": {
         if (rest.length < 1) fail("update requires <id>");
         const id = rest[0];
-        const content = flags["--content"];
         const metadata = parseMetadata(flags["--metadata"]);
-        store.update(id, {
-          ...(content !== undefined ? { content } : {}),
-          ...(metadata !== undefined ? { metadata } : {}),
-        });
+        if (!metadata) {
+          fail("update requires --metadata (content is immutable; use 'supersede' to revise)");
+        }
+        store.update(id, metadata);
         process.stdout.write("updated\n");
         break;
       }
       case "delete": {
         if (rest.length < 1) fail("delete requires <id>");
+        if (!flags["--force"]) {
+          fail("delete is destructive; use 'deprecate' instead, or pass --force to proceed");
+        }
         store.delete(rest[0]);
         process.stdout.write("deleted\n");
         break;
@@ -139,6 +177,7 @@ function main() {
         const results = store.search(query, {
           ...(flags["--where"] ? { where: flags["--where"] } : {}),
           ...(flags["--limit"] ? { limit: num(flags["--limit"]) } : {}),
+          ...(flags["--all"] ? { includeLegacy: true } : {}),
         });
         print(results);
         break;
@@ -159,6 +198,7 @@ function main() {
           ...(flags["--where"] ? { where: flags["--where"] } : {}),
           ...(flags["--limit"] ? { limit: num(flags["--limit"]) } : {}),
           ...(flags["--offset"] ? { offset: num(flags["--offset"]) } : {}),
+          ...(flags["--all"] ? { includeLegacy: true } : {}),
         });
         print(results);
         break;
@@ -179,6 +219,7 @@ function main() {
       case "tags": {
         const results = store.tags({
           ...(flags["--where"] ? { where: flags["--where"] } : {}),
+          ...(flags["--all"] ? { includeLegacy: true } : {}),
         });
         print(results);
         break;

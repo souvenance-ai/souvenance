@@ -85,42 +85,11 @@ test("store: FTS index stays in sync after insert", () => {
   }
 });
 
-test("update: changes content and keeps FTS in sync", () => {
-  const { store, cleanup } = tempStore();
-  try {
-    const id = store.store("hello world");
-    store.update(id, { content: "hello universe" });
-
-    const m = row<{ content: string }>(
-      store,
-      "SELECT content FROM memories WHERE id = ?",
-      id,
-    );
-    assert.equal(m.content, "hello universe");
-
-    const oldFts = row<{ c: number }>(
-      store,
-      "SELECT count(*) as c FROM memories_fts f JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ?",
-      "world",
-    );
-    assert.equal(oldFts.c, 0);
-
-    const newFts = row<{ c: number }>(
-      store,
-      "SELECT count(*) as c FROM memories_fts f JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ?",
-      "universe",
-    );
-    assert.equal(newFts.c, 1);
-  } finally {
-    cleanup();
-  }
-});
-
 test("update: changes metadata", () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store("content", { metadata: { tags: ["a"] } });
-    store.update(id, { metadata: { tags: ["b"], kind: "note" } });
+    store.update(id, { tags: ["b"], kind: "note" });
 
     const m = row<{ metadata: string | null }>(
       store,
@@ -137,7 +106,7 @@ test("update: throws on unknown id", () => {
   const { store, cleanup } = tempStore();
   try {
     assert.throws(
-      () => store.update("nope", { content: "x" }),
+      () => store.update("nope", { tags: ["x"] }),
       /memory not found: nope/,
     );
   } finally {
@@ -145,21 +114,256 @@ test("update: throws on unknown id", () => {
   }
 });
 
-test("update: throws when no fields provided", () => {
+test("supersede: stores new memory, links old, marks old as superseded", () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store("content");
-    assert.throws(() => store.update(id, {}), /at least one of/);
+    const oldId = store.store("hello world");
+    const newId = store.supersede(oldId, "hello universe");
+
+    assert.ok(uuidRegex(newId), "new id should be a UUID");
+
+    const oldMem = store.get(oldId);
+    assert.ok(oldMem);
+    assert.equal(oldMem!.status, "superseded");
+
+    const newMem = store.get(newId);
+    assert.ok(newMem);
+    assert.equal(newMem!.content, "hello universe");
+    assert.equal(newMem!.status, "active");
+
+    const rels = store.relations(oldId, { direction: "out" });
+    assert.equal(rels.length, 1);
+    assert.equal(rels[0]!.kind, "supersedes");
+    assert.equal(rels[0]!.to_id, newId);
   } finally {
     cleanup();
   }
 });
 
-test("update: throws on empty content", () => {
+test("supersede: FTS stays in sync (old excluded from default search, new findable)", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store("hello world");
+    store.supersede(oldId, "hello universe");
+
+    const defaultResults = store.search("world");
+    assert.equal(defaultResults.length, 0, "superseded memory should not appear in default search");
+
+    const legacyResults = store.search("world", { includeLegacy: true });
+    assert.equal(legacyResults.length, 1, "superseded memory should appear with includeLegacy");
+
+    const newResults = store.search("universe");
+    assert.equal(newResults.length, 1);
+    assert.equal(newResults[0]!.status, "active");
+  } finally {
+    cleanup();
+  }
+});
+
+test("supersede: stores metadata on the new memory", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store("hello world");
+    const newId = store.supersede(oldId, "hello universe", {
+      metadata: { tags: ["greeting"] },
+    });
+
+    const newMem = store.get(newId);
+    assert.ok(newMem);
+    assert.deepEqual(newMem!.metadata, { tags: ["greeting"] });
+  } finally {
+    cleanup();
+  }
+});
+
+test("supersede: throws on unknown old id", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    assert.throws(
+      () => store.supersede("nope", "new content"),
+      /memory not found: nope/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("supersede: throws on empty content", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store("old content");
+    assert.throws(
+      () => store.supersede(oldId, ""),
+      /content must be non-empty/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("supersede: throws when old memory is not active", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store("old content");
+    store.deprecate(oldId);
+    assert.throws(
+      () => store.supersede(oldId, "new content"),
+      /cannot supersede a memory with status 'deprecated'/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("deprecate: marks a memory as deprecated", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const id = store.store("to be deprecated");
+    store.deprecate(id);
+
+    const m = store.get(id);
+    assert.ok(m);
+    assert.equal(m!.status, "deprecated");
+  } finally {
+    cleanup();
+  }
+});
+
+test("deprecate: throws on unknown id", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    assert.throws(() => store.deprecate("nope"), /memory not found: nope/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("deprecate: throws when memory is not active", () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store("content");
-    assert.throws(() => store.update(id, { content: "" }), /content must be non-empty/);
+    store.deprecate(id);
+    assert.throws(
+      () => store.deprecate(id),
+      /cannot deprecate a memory with status 'deprecated'/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("merge: combines memories, marks originals as merged", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    const mergedId = store.merge([a, b], "combined content");
+
+    assert.ok(uuidRegex(mergedId), "merged id should be a UUID");
+
+    const merged = store.get(mergedId);
+    assert.ok(merged);
+    assert.equal(merged!.content, "combined content");
+    assert.equal(merged!.status, "active");
+
+    const memA = store.get(a);
+    assert.equal(memA!.status, "merged");
+    const memB = store.get(b);
+    assert.equal(memB!.status, "merged");
+
+    const relsA = store.relations(a, { direction: "out" });
+    assert.equal(relsA.length, 1);
+    assert.equal(relsA[0]!.kind, "merges");
+    assert.equal(relsA[0]!.to_id, mergedId);
+
+    const relsB = store.relations(b, { direction: "out" });
+    assert.equal(relsB.length, 1);
+    assert.equal(relsB[0]!.kind, "merges");
+    assert.equal(relsB[0]!.to_id, mergedId);
+  } finally {
+    cleanup();
+  }
+});
+
+test("merge: stores metadata on the merged memory", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    const mergedId = store.merge([a, b], "combined", {
+      metadata: { tags: ["merged"] },
+    });
+
+    const merged = store.get(mergedId);
+    assert.deepEqual(merged!.metadata, { tags: ["merged"] });
+  } finally {
+    cleanup();
+  }
+});
+
+test("merge: throws on fewer than 2 ids", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("only one");
+    assert.throws(
+      () => store.merge([a], "content"),
+      /merge requires at least 2 memories/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("merge: throws on duplicate ids", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    assert.throws(
+      () => store.merge([a, a], "content"),
+      /duplicate id in merge/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("merge: throws on unknown id", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    assert.throws(
+      () => store.merge([a, "nope"], "content"),
+      /memory not found: nope/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("merge: throws on empty content", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    assert.throws(
+      () => store.merge([a, b], ""),
+      /content must be non-empty/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("merge: throws when an original is not active", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    store.deprecate(b);
+    assert.throws(
+      () => store.merge([a, b], "content"),
+      /cannot merge a memory with status 'deprecated'/,
+    );
   } finally {
     cleanup();
   }

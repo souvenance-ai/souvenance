@@ -24,17 +24,21 @@ All commands go through `bin/memory.js` (`node bin/memory.js <command> ...`, or 
 
 ```
 memory store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}'
-memory update <id> --content "Updated content" --metadata '{"kind":"note"}'
-memory delete <id>
+memory supersede <old-id> --content "Revised decision: use spaces" --metadata '{"kind":"preference"}'
+memory deprecate <id>
+memory merge <id1> <id2> --content "Combined decision" --metadata '{"kind":"decision"}'
+memory update <id> --metadata '{"kind":"note"}'
+memory delete <id> --force
 memory link <from-id> <to-id> --kind references
 memory search "tabs spaces" --where "metadata->>'$.kind' = 'note'" --limit 5
 memory get <id>
 memory list --where "metadata->>'$.kind' = 'decision'" --limit 20
 memory relations <id> --direction both
 memory stats
+memory tags
 ```
 
-Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store` prints the bare id; `update`/`delete`/`link` print a one-word confirmation.
+Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`/`delete`/`link`/`deprecate` print a one-word confirmation.
 
 `--db <path>` overrides the store location (default: `.ai-memory/memory.db`).
 
@@ -62,6 +66,16 @@ A **memory link** is a `memory://<uuid>` reference inside a memory's content. Th
 
 A memory link is distinct from a **relation**: a link is authored text in content; a relation is a searchable graph edge created via `link`. A link may optionally be materialized into a relation, but the two are separate concepts.
 
+## Evolving memories (addition-only model)
+
+Content is immutable — never overwrite a memory. Instead of updating or deleting, use these operations:
+
+- **Revise a decision**: `memory supersede <old-id> --content "new content" [--metadata <json>]` — stores a new version (status `active`), links the old one to it via a `supersedes` relation, and marks the old as `superseded`.
+- **Soft-delete**: `memory deprecate <id>` — marks the memory as `deprecated`, hiding it from default `search` and `list` results without removing it.
+- **Combine duplicates**: `memory merge <id1> <id2> [<id3> ...] --content "merged content" [--metadata <json>]` — stores a merged memory (status `active`), marks each original as `merged`, and links each original to the merged result via a `merges` relation.
+
+`search` and `list` default to `active` memories only; pass `--all` to include superseded, deprecated, and merged memories in results. `get` always returns the memory as-is, including its status — follow `supersedes` or `merges` relations to find the current version.
+
 ## Writing good memories
 
 A memory is read by a future session that has no prior context — write accordingly:
@@ -69,6 +83,7 @@ A memory is read by a future session that has no prior context — write accordi
 - **Self-contained.** Each memory should make sense on its own. A reader who never saw this session should understand it without preamble.
 - **One concept per memory.** Split dense paragraphs covering multiple decisions into separate memories, then `link` them. Single-concept memories are more retrievable (better search hits) and more linkable (sharper graph edges).
 - **Include search keywords.** Use the words you'd search for — terms of art, names, identifiers — directly in the content. FTS5 matches tokens, not semantics; if the keyword isn't in the text, the search won't find it.
+- **Revise, don't overwrite.** When a decision changes, `supersede` the old memory rather than updating its content. This preserves the history of what was decided and when it changed.
 
 ## Exploration: the frontier loop
 

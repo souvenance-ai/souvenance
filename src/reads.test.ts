@@ -43,6 +43,7 @@ test("search: returns ranked FTS5 results", () => {
       assert.ok("content" in r);
       assert.ok("metadata" in r);
       assert.ok("created_at" in r);
+      assert.ok("status" in r);
       assert.ok("rank" in r);
       assert.ok(typeof r.rank === "number");
     }
@@ -369,6 +370,94 @@ test("stats: counts update after deletion", () => {
     assert.equal(s.edges, 1, "cascade should remove a's edge");
     assert.equal(s.edges_by_kind["references"], undefined);
     assert.equal(s.edges_by_kind["extends"], 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test("search: defaults to active memories only", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("searchable fox content");
+    store.supersede(a, "searchable fox replacement");
+    const results = store.search("fox");
+    assert.equal(results.length, 1);
+    assert.equal(results[0]!.status, "active");
+  } finally {
+    cleanup();
+  }
+});
+
+test("search: --all (includeLegacy) includes superseded memories", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("searchable fox content");
+    store.supersede(a, "searchable fox replacement");
+    const results = store.search("fox", { includeLegacy: true });
+    assert.equal(results.length, 2);
+    const statuses = results.map((r) => r.status).sort();
+    assert.deepEqual(statuses, ["active", "superseded"]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("list: defaults to active memories only", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    store.store("memory b");
+    store.deprecate(a);
+    const results = store.list();
+    assert.equal(results.length, 1);
+    assert.equal(results[0]!.status, "active");
+  } finally {
+    cleanup();
+  }
+});
+
+test("list: --all (includeLegacy) includes deprecated memories", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    store.store("memory b");
+    store.deprecate(a);
+    const results = store.list({ includeLegacy: true });
+    assert.equal(results.length, 2);
+    const statuses = results.map((r) => r.status).sort();
+    assert.deepEqual(statuses, ["active", "deprecated"]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("get: returns status field", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const id = store.store("content");
+    const m = store.get(id);
+    assert.ok(m);
+    assert.equal(m!.status, "active");
+  } finally {
+    cleanup();
+  }
+});
+
+test("stats: includes active_memories and memories_by_status", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    store.store("memory c");
+    store.deprecate(a);
+    store.supersede(b, "memory b replacement");
+
+    const s = store.stats();
+    assert.equal(s.memories, 4);
+    assert.equal(s.active_memories, 2);
+    assert.equal(s.memories_by_status["active"], 2);
+    assert.equal(s.memories_by_status["deprecated"], 1);
+    assert.equal(s.memories_by_status["superseded"], 1);
   } finally {
     cleanup();
   }
