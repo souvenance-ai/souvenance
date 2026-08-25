@@ -29,15 +29,18 @@ The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
 | Command | Description |
 |---|---|
 | `store <content> [--metadata <json>]` | Store a new memory, print its id |
-| `update <id> [--content <text>] [--metadata <json>]` | Update a memory |
-| `delete <id>` | Delete a memory (cascades edges) |
+| `supersede <old-id> --content <text> [--metadata <json>]` | Store a new version, mark old as superseded |
+| `deprecate <id>` | Soft-delete a memory (mark as deprecated) |
+| `merge <id1> <id2> [<id3> ...] --content <text> [--metadata <json>]` | Combine memories into one |
+| `update <id> --metadata <json>` | Update a memory's metadata (content is immutable) |
+| `delete <id> --force` | Delete a memory (destructive; prefer `deprecate`) |
 | `link <from-id> <to-id> --kind <kind> [--metadata <json>]` | Create a typed edge |
-| `search <query> [--where <sql>] [--limit N]` | FTS5 search, ranked results as JSON |
+| `search <query> [--where <sql>] [--limit N] [--all]` | FTS5 search, ranked results as JSON |
 | `get <id>` | Print a memory as JSON |
-| `list [--where <sql>] [--limit N] [--offset N]` | List memories by metadata filter |
+| `list [--where <sql>] [--limit N] [--offset N] [--all]` | List memories by metadata filter |
 | `relations <id> [--direction out\|in\|both]` | List edges to/from a memory |
 | `stats` | Print store statistics as JSON |
-| `tags [--where <sql>]` | List all distinct metadata tags with counts |
+| `tags [--where <sql>] [--all]` | List all distinct metadata tags with counts |
 
 Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure.
 
