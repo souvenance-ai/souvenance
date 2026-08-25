@@ -42,14 +42,14 @@ Append this block under the existing `## Agent skills` heading (or create the he
 ```markdown
 ### Persistent memory
 
-Search memory at the start of non-trivial work and store decisions as you make them. Load the `/ai-memory` skill for the CLI reference. Before finishing a session, store a `kind: "summary"` memory recapping what was done and what's next.
+Search memory when you need context you don't have — before starting work, when asked a question, or when recalling a prior decision. Store decisions as you make them. Load the `/ai-memory` skill for the CLI reference. When you complete a non-trivial task, store a `kind: "summary"` memory before sending your final message.
 ```
 
 Adapt the wording to match the voice of the surrounding sections, but keep these three rules intact:
 
-1. **Search before starting** non-trivial work.
+1. **Search when you lack context** — before starting work, when asked a question, or when recalling a prior decision.
 2. **Store decisions** as they are made.
-3. **Write a session summary** before finishing.
+3. **Write a task summary** before sending your final message.
 
 ### 5. Verify
 

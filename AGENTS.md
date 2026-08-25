@@ -11,3 +11,7 @@ Five canonical roles; label strings equal role names. See `docs/agents/triage-la
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Persistent memory
+
+Search memory when you need context you don't have — before starting work, when asked a question, or when recalling a prior decision. Store decisions as you make them. Load the `/ai-memory` skill for the CLI reference. When you complete a non-trivial task, store a `kind: "summary"` memory before sending your final message.
