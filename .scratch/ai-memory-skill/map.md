@@ -25,6 +25,8 @@ An opencode skill (CLI via bash, Node + `node:sqlite`) that lets an agent store,
 
 - [Scaffold and schema](issues/01-scaffold-and-schema.md): project scaffold + `Store.open()` with WAL, FK pragmas, busy-retry, v1 schema (memories/edges/schema_version/memories_fts + triggers), migrate-on-open; 5/5 smoke tests green.
 
+- [Write operations](issues/02-write-operations.md): `store`/`update`/`delete`/`link` on `Store`; UUID v4 ids, idempotent edges (`INSERT OR IGNORE`), existence checks + clear errors, FTS/FK cascade via triggers; 25/25 tests green.
+
 ## Not yet specified
 
 <!-- see "Fog of war": in-scope fog you can't ticket yet; graduates as the frontier advances -->
