@@ -39,7 +39,7 @@ An opencode skill (CLI via bash, Node + `node:sqlite`) that lets an agent store,
 
 <!-- see "Fog of war": in-scope fog you can't ticket yet; graduates as the frontier advances -->
 
-_None yet._ The design tree is fully settled; the frontier is the build itself. If implementation surfaces a new decision (e.g. FTS5 tokenizer config, metadata index strategy, `memory://` link auto-materialization into edges), graduate it here into a ticket.
+_None yet._ The two-agent evaluation surfaced concrete improvements (FTS5 query guidance, memory-writing best practices, `tags` command) now ticketed as 07 and 08. If implementation surfaces further decisions, graduate them here.
 
 ## Out of scope
 
