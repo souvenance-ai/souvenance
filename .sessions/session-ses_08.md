@@ -3307,8 +3307,8 @@ The map is complete. All 6 tickets are resolved, the frontier is empty, and the 
 
 ## User
 
-what do you thing if you could write a tutorial/plan for an AI to test this memory ? the goal => test the memory agains a real agent, and make another one eveluate it
-
+[what do you thing if you could write a tutorial/plan for an AI to test this memory ? the goal => test the memory agains a real agent, and make another one eveluate it
+]()
 ---
 
 ## Assistant (Build · euria-code · 34.9s)
