@@ -42,14 +42,15 @@ Append this block under the existing `## Agent skills` heading (or create the he
 ```markdown
 ### Persistent memory
 
-Search memory when you need context you don't have — before starting work, when asked a question, or when recalling a prior decision. Store decisions as you make them. Load the `/ai-memory` skill for the CLI reference. When you complete a non-trivial task, store a `kind: "summary"` memory before sending your final message.
+Check directives first: `list --where "metadata->>'$.kind' = 'directive'"`. Directives are strict rules, constraints, and gotchas that must be respected before acting. Then search memory when you need context you don't have — before starting work, when asked a question, or when recalling a prior decision. Store decisions as you make them. Load the `/ai-memory` skill for the CLI reference. When you complete a non-trivial task, store a `kind: "summary"` memory before sending your final message.
 ```
 
-Adapt the wording to match the voice of the surrounding sections, but keep these three rules intact:
+Adapt the wording to match the voice of the surrounding sections, but keep these four rules intact:
 
-1. **Search when you lack context** — before starting work, when asked a question, or when recalling a prior decision.
-2. **Store decisions** as they are made.
-3. **Write a task summary** before sending your final message.
+1. **Check directives first** — `list --where "metadata->>'$.kind' = 'directive'"`. These are strict rules that must be respected before acting.
+2. **Search when you lack context** — before starting work, when asked a question, or when recalling a prior decision.
+3. **Store decisions** as they are made.
+4. **Write a task summary** before sending your final message.
 
 ### 5. Verify
 

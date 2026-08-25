@@ -9,6 +9,7 @@ A persistent, searchable memory for agents: markdown documents stored in a per-p
 
 ## When to use this skill
 
+- **Directives**: before starting work, check for `kind: "directive"` memories — strict rules, constraints, and gotchas that must be respected before acting. Run `list --where "metadata->>'$.kind' = 'directive'"` first.
 - **Searching**: you need context you don't have — before starting work, when asked a question, or when recalling a prior decision. Search by keyword, optionally filtered by metadata.
 - **Storing**: a decision was made, a fact learned, a pattern noticed — anything worth recalling in a future session. Store it as a memory with metadata.
 - **Retrieving**: you need a specific memory by its id, or a `memory://` link referenced in content.
@@ -103,4 +104,5 @@ When the store is too large to load into context, explore it with the **frontier
 - WAL mode for concurrent reads; writes retry on busy.
 - Schema migrates on open — no manual migration step.
 - The library (`src/db.ts`) is the deep module; this skill is the thin agent-facing contract. For implementation detail, read the library, not this file.
+- **Directives.** Store strict rules, constraints, and gotchas as `kind: "directive"`. Check directives before acting: `list --where "metadata->>'$.kind' = 'directive'"`. Directives are few and high-signal; they should override routine memories when they conflict.
 - **Task summaries.** When you complete a non-trivial task, store a `kind: "summary"` memory recapping what was done, key decisions, and what's next — do this before sending your final message. A fresh session searches for `kind: "summary"` to get oriented before diving in. Link the summary to the memories it references.
