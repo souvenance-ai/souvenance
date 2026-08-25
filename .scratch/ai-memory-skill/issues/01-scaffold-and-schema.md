@@ -1,7 +1,7 @@
 # Scaffold and schema
 
 Type: task
-Status: open
+Status: claimed
 
 ## Question
 
