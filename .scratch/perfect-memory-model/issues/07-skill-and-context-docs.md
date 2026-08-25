@@ -1,7 +1,7 @@
 # 07-skill-and-context-docs
 
 Type: task
-Status: open
+Status: closed
 
 ## Question
 

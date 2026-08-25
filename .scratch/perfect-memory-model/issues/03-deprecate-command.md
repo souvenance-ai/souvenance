@@ -1,7 +1,7 @@
 # 03-deprecate-command
 
 Type: task
-Status: open
+Status: closed
 
 ## Question
 

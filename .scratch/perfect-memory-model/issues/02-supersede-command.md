@@ -1,7 +1,7 @@
 # 02-supersede-command
 
 Type: task
-Status: open
+Status: closed
 
 ## Question
 

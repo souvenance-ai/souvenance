@@ -1,7 +1,7 @@
 # 05-search-list-default-to-active
 
 Type: task
-Status: open
+Status: closed
 
 ## Question
 

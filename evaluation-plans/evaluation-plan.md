@@ -84,8 +84,8 @@ When you are done, write a short summary of what you did and what you stored in 
 
 After sub-agents finish, you run `node bin/memory.js --db <EVAL_DB> <command>` yourself and assert on the output. Each assertion is either PASS or FAIL.
 
-- **Exact**: `stats` returns a specific memory/edge count.
-- **Existence**: `search` or `list --where` returns at least one memory matching a condition.
+- **Exact**: `stats` returns a specific memory/edge count. Note: `stats` also reports `active_memories` and `memories_by_status` (a breakdown by status: `active`, `superseded`, `deprecated`, `merged`).
+- **Existence**: `search` or `list --where` returns at least one memory matching a condition. Note: `search`, `list`, and `tags` default to `active` memories only; pass `--all` to include superseded, deprecated, and merged memories.
 - **Content**: `get <id>` returns a memory whose content contains a specific keyword or phrase.
 - **Metadata**: `list --where "metadata->>'$.kind' = '...'"` returns the expected count.
 - **Graph**: `relations <id>` returns edges of the expected kind and direction.
@@ -97,7 +97,7 @@ Record the raw CLI output as evidence for each assertion.
 Read the sub-agent's final message and its tool-call trace. Check for:
 
 - **Skill discovery**: Did it load the `/ai-memory` skill (via the `skill` tool) before using memory commands?
-- **Correct CLI usage**: Did it use correct command syntax? Did it pass `--db`? Did it parse JSON output correctly?
+- **Correct CLI usage**: Did it use correct command syntax? Did it pass `--db`? Did it parse JSON output correctly? Did it use the addition-only commands (`supersede`, `deprecate`, `merge`) when revising or removing memories, rather than the removed `update --content` or bare `delete`?
 - **Memory quality**: Are stored memories self-contained, one-concept-per-memory, with searchable keywords? (Per the "Writing good memories" guidance in SKILL.md.)
 - **Frontier loop** (where applicable): Did it use search → read → traverse, or did it try to dump the whole DB?
 - **FTS5 query construction** (where applicable): When an initial search returned nothing, did it retry with simpler queries, OR, or quoted phrases?
@@ -554,9 +554,112 @@ Use `--db <EVAL_DB>` for all memory commands.
 
 ---
 
+### Scenario 7: Addition-only model — supersede, deprecate, merge
+
+**Goal**: A sub-agent uses the addition-only commands (`supersede`, `deprecate`, `merge`) to revise, soft-delete, and combine memories. A fresh sub-agent verifies the history is preserved by using `--all` and traversing `supersedes`/`merges` edges.
+
+#### Phase 1 — Revise, deprecate, and merge
+
+Spawn sub-agent #1:
+
+```
+You are maintaining a project's persistent memory. Three tasks:
+
+1. A decision was previously stored that says "We use REST for all APIs." Store a revised version: "We use REST for public APIs and tRPC for internal services." Supersede the old decision with the new one.
+
+2. An obsolete memory about "configuring Webpack for the build" is no longer relevant — the project moved to Vite. Deprecate it.
+
+3. Two duplicate memories exist about session caching: one says "We use Redis for session caching" and another says "Redis handles session cache." Merge them into a single memory: "Redis handles session caching and rate limiting." Merge the two originals into the new one.
+
+Before you start, search the store to find the relevant memories. Then use the appropriate memory commands to revise, deprecate, and merge.
+
+Use `--db <EVAL_DB>` for all memory commands.
+```
+
+**Pre-seed (evaluator does this before spawning #1):**
+
+```bash
+EVAL_DIR=$(mktemp -d -t ai-memory-eval-XXXXXX)
+EVAL_DB="$EVAL_DIR/memory.db"
+BIN="node $(pwd)/bin/memory.js"
+
+sm() { $BIN --db "$EVAL_DB" store "$1" --metadata "$2"; }
+
+# The REST decision (to be superseded)
+rest_id=$(sm "We use REST for all APIs." '{"kind":"decision","tags":["api","rest"]}')
+
+# The Webpack memory (to be deprecated)
+webpack_id=$(sm "Configure Webpack with splitChunks and TerserPlugin for production builds." '{"kind":"note","tags":["build","webpack"]}')
+
+# Two duplicate Redis memories (to be merged)
+redis1_id=$(sm "We use Redis for session caching." '{"kind":"decision","tags":["redis","cache"]}')
+redis2_id=$(sm "Redis handles session cache." '{"kind":"decision","tags":["redis","cache"]}')
+
+echo "Pre-seeded DB at: $EVAL_DB"
+echo "IDs: rest=$rest_id webpack=$webpack_id redis1=$redis1_id redis2=$redis2_id"
+```
+
+**DB assertions (after #1):**
+
+| # | Assertion | Command | Check |
+|---|-----------|---------|-------|
+| 7.1 | Total memories is 7 (4 original + 1 supersede + 1 merge) | `stats` | `memories == 7` |
+| 7.2 | Active memories is 3 (1 deprecated, 1 superseded, 2 merged) | `stats` | `active_memories == 3` |
+| 7.3 | memories_by_status has expected breakdown | `stats` | `memories_by_status` has `active: 3`, `superseded: 1`, `deprecated: 1`, `merged: 2` |
+| 7.4 | The old REST decision is superseded | `get <rest_id>` | `status` is `superseded` |
+| 7.5 | A supersedes edge links old to new | `relations <rest_id>` | an outgoing edge with kind `supersedes` |
+| 7.6 | The new REST decision is active | `search "tRPC"` | a result with `status: "active"` mentioning tRPC |
+| 7.7 | The Webpack memory is deprecated | `get <webpack_id>` | `status` is `deprecated` |
+| 7.8 | The Webpack memory does not appear in default search | `search "Webpack"` | results length == 0 |
+| 7.9 | The Webpack memory appears with --all | `search "Webpack" --all` | results length >= 1 |
+| 7.10 | Both Redis originals are merged | `get <redis1_id>` and `get <redis2_id>` | both have `status: "merged"` |
+| 7.11 | Merges edges link originals to the merged memory | `relations <redis1_id>` | an outgoing edge with kind `merges` |
+| 7.12 | The merged memory is active and findable | `search "rate limiting"` | a result with `status: "active"` mentioning "rate limiting" |
+
+**Transcript assertions:**
+
+| # | Assertion | Evidence |
+|---|-----------|----------|
+| 7.13 | Loaded the skill | `skill` tool call with name `ai-memory` |
+| 7.14 | Used `memory supersede` to revise the REST decision | bash call to `memory supersede <id> --content "..."` |
+| 7.15 | Used `memory deprecate` to soft-delete the Webpack memory | bash call to `memory deprecate <id>` |
+| 7.16 | Used `memory merge` to combine the Redis memories | bash call to `memory merge <id1> <id2> --content "..."` |
+| 7.17 | Did NOT use `memory delete` without `--force` | no bare `memory delete <id>` call (delete without --force errors) |
+| 7.18 | Did NOT use `memory update --content` | no `memory update <id> --content` call (removed in addition-only model) |
+
+#### Phase 2 — Recover history (fresh session)
+
+Spawn sub-agent #2 (fresh context, same `--db`):
+
+```
+You are joining a project. A previous session revised some decisions in persistent memory — some memories were superseded, deprecated, or merged. Your task:
+
+1. Search for the current decision about the API approach (REST / tRPC). Report what the current decision is.
+2. Find out if there was a previous, now-superseded version of that decision. Use --all to search for it, and follow the supersedes relation to understand the history.
+3. Check if any memories were deprecated. What was deprecated and why?
+4. Check if any memories were merged. What were the originals and what is the merged result?
+
+Use `--db <EVAL_DB>` for all memory commands.
+```
+
+**Transcript assertions:**
+
+| # | Assertion | Evidence |
+|---|-----------|----------|
+| 7.19 | Loaded the skill | `skill` tool call |
+| 7.20 | Found the current (active) API decision | `memory search "tRPC"` or `memory search "REST"` returns the active version |
+| 7.21 | Used `--all` to find superseded/deprecated/merged memories | bash call to `memory search "..." --all` or `memory list --all` |
+| 7.22 | Followed a `supersedes` relation to find the old version | `memory relations <id>` on the superseded or current memory |
+| 7.23 | Correctly reported the old REST-only decision was superseded | final message mentions the old decision and that it was superseded |
+| 7.24 | Correctly identified the deprecated Webpack memory | final message mentions Webpack was deprecated |
+| 7.25 | Correctly identified the merged Redis memories | final message mentions the two originals and the merged result |
+| 7.26 | Followed a `merges` relation to find the merged result | `memory relations <id>` on one of the merged originals |
+
+---
+
 ## Running the full evaluation
 
-Execute scenarios 1-6 **sequentially** (not in parallel). Each scenario uses its own temp DB, so there is no cross-contamination, but running sequentially keeps the output traceable.
+Execute scenarios 1-7 **sequentially** (not in parallel). Each scenario uses its own temp DB, so there is no cross-contamination, but running sequentially keeps the output traceable.
 
 For each scenario:
 1. Record the scenario name and start time.
@@ -593,7 +696,8 @@ Evaluator: <model name>
 | 4. Session summaries | 16 | 16 | 0 | 100% |
 | 5. FTS5 query construction | 12 | 10 | 2 | 83% |
 | 6. Metadata filtering | 14 | 14 | 0 | 100% |
-| **TOTAL** | **78** | **72** | **6** | **92%** |
+| 7. Addition-only model | 26 | 24 | 2 | 92% |
+| **TOTAL** | **104** | **96** | **8** | **92%** |
 
 ### Failed assertions detail
 

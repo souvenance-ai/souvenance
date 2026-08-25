@@ -1,7 +1,7 @@
 # 01-schema-migration-status-column
 
 Type: task
-Status: open
+Status: closed
 
 ## Question
 

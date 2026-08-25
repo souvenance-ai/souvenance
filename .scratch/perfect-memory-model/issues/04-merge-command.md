@@ -1,7 +1,7 @@
 # 04-merge-command
 
 Type: task
-Status: open
+Status: closed
 
 ## Question
 

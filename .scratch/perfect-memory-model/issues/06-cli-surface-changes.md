@@ -1,7 +1,7 @@
 # 06-cli-surface-changes
 
 Type: task
-Status: open
+Status: closed
 
 ## Question
 
