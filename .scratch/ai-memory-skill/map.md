@@ -33,6 +33,8 @@ An opencode skill (CLI via bash, Node + `node:sqlite`) that lets an agent store,
 
 - [Skill authoring](issues/05-skill-authoring.md): `.agents/skills/ai-memory/SKILL.md` authored — when to use, one-line CLI examples (links to `--help` for full ref), `CONTEXT.md` for vocabulary, `memory://` link convention, frontier exploration loop; thin contract, no duplication.
 
+- [Integration test and gitignore](issues/06-integration-test.md): two integration tests (library-level + CLI-level via `execSync`) exercising full flow against temp DBs; `.ai-memory/` gitignored; README expanded with CLI table, dev workflow, architecture summary; 53/53 tests green, typecheck clean.
+
 ## Not yet specified
 
 <!-- see "Fog of war": in-scope fog you can't ticket yet; graduates as the frontier advances -->

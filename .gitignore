@@ -159,6 +159,9 @@ dist
 /tmp
 /out-tsc
 
+# AI memory store
+.ai-memory/
+
 # misc
 .keys/
 .db/
