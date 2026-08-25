@@ -35,6 +35,8 @@ An opencode skill (CLI via bash, Node + `node:sqlite`) that lets an agent store,
 
 - [Integration test and gitignore](issues/06-integration-test.md): two integration tests (library-level + CLI-level via `execSync`) exercising full flow against temp DBs; `.ai-memory/` gitignored; README expanded with CLI table, dev workflow, architecture summary; 53/53 tests green, typecheck clean.
 
+- [SKILL.md: memory writing guidance + FTS5 query tips](issues/07-skill-guidance.md): added FTS5 query tips (tokenization, phrase/OR/combined queries), Writing good memories (self-contained, one concept, include keywords), Session summaries convention (`kind: "summary"` for orientation); SKILL.md only, no library/CLI changes.
+
 ## Not yet specified
 
 <!-- see "Fog of war": in-scope fog you can't ticket yet; graduates as the frontier advances -->

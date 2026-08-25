@@ -1,7 +1,7 @@
 # SKILL.md: memory writing guidance + FTS5 query tips
 
 Type: task
-Status: open
+Status: resolved
 
 ## Question
 
@@ -20,3 +20,16 @@ Update `.agents/skills/ai-memory/SKILL.md` to address three gaps surfaced by the
 - Do not touch the library or CLI — this is guidance, not a system change.
 
 **Acceptance:** SKILL.md has (a) an "FTS5 query tips" section with examples of phrase, OR, and single-word queries, (b) a "Writing good memories" section with the three guidelines, (c) a "Session summaries" convention in the exploration or conventions section. The file stays thin — one-line examples, no duplication of CLI reference.
+
+## Answer
+
+Updated `.agents/skills/ai-memory/SKILL.md` with three additions:
+
+1. **FTS5 query tips** (after CLI, before Memory links): explains FTS5 word-boundary tokenization, implicit AND, and shows four query forms — single word, OR, quoted phrase, phrase+term. Includes a "narrowed to nothing" fallback tip.
+
+2. **Writing good memories** (after Memory links, before Exploration): three guidelines — self-contained, one concept per memory, include search keywords. Each with a one-line rationale tying it to retrieval or graph properties.
+
+3. **Session summaries** (appended to Conventions): store `kind: "summary"` at session end, search for it to get oriented next session, link to referenced memories.
+
+All three placed in logical reading order. File stays thin: one-line CLI examples, no CLI reference duplication. No changes to CONTEXT.md, library, or CLI. Acceptance criteria met.
+
