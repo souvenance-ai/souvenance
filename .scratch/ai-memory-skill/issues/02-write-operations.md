@@ -1,7 +1,7 @@
 # Write operations
 
 Type: task
-Status: open
+Status: claimed
 Blocked by: 01
 
 ## Question

@@ -1,7 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { migrate } from "./migrations.ts";
+import type { StoreOptions, UpdateOptions } from "./types.ts";
 
 export const DEFAULT_DB_PATH = ".ai-memory/memory.db";
 
@@ -36,6 +38,86 @@ export class Store {
     execPragma(db);
     migrate(db);
     return new Store(db, dbPath);
+  }
+
+  store(content: string, opts: StoreOptions = {}): string {
+    if (!content) throw new Error("content must be non-empty");
+    const id = randomUUID();
+    const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
+    const created_at = new Date().toISOString();
+    this.run(() => {
+      this.db
+        .prepare(
+          "INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(id, content, metadata, created_at);
+    });
+    return id;
+  }
+
+  update(id: string, opts: UpdateOptions): void {
+    if (opts.content === undefined && opts.metadata === undefined) {
+      throw new Error("at least one of content or metadata must be provided");
+    }
+    const existing = this.db
+      .prepare("SELECT 1 FROM memories WHERE id = ?")
+      .get(id);
+    if (!existing) throw new Error(`memory not found: ${id}`);
+
+    const sets: string[] = [];
+    const params: (string | null)[] = [];
+    if (opts.content !== undefined) {
+      if (!opts.content) throw new Error("content must be non-empty");
+      sets.push("content = ?");
+      params.push(opts.content);
+    }
+    if (opts.metadata !== undefined) {
+      sets.push("metadata = ?");
+      params.push(JSON.stringify(opts.metadata));
+    }
+    params.push(id);
+    this.run(() => {
+      this.db
+        .prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`)
+        .run(...params);
+    });
+  }
+
+  delete(id: string): void {
+    const existing = this.db
+      .prepare("SELECT 1 FROM memories WHERE id = ?")
+      .get(id);
+    if (!existing) throw new Error(`memory not found: ${id}`);
+    this.run(() => {
+      this.db.prepare("DELETE FROM memories WHERE id = ?").run(id);
+    });
+  }
+
+  link(
+    fromId: string,
+    toId: string,
+    kind: string,
+    opts: StoreOptions = {},
+  ): void {
+    if (!kind) throw new Error("kind must be non-empty");
+    const fromExists = this.db
+      .prepare("SELECT 1 FROM memories WHERE id = ?")
+      .get(fromId);
+    if (!fromExists) throw new Error(`memory not found: ${fromId}`);
+    const toExists = this.db
+      .prepare("SELECT 1 FROM memories WHERE id = ?")
+      .get(toId);
+    if (!toExists) throw new Error(`memory not found: ${toId}`);
+
+    const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
+    const created_at = new Date().toISOString();
+    this.run(() => {
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO edges (from_id, to_id, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(fromId, toId, kind, metadata, created_at);
+    });
   }
 
   close(): void {
