@@ -27,6 +27,8 @@ An opencode skill (CLI via bash, Node + `node:sqlite`) that lets an agent store,
 
 - [Write operations](issues/02-write-operations.md): `store`/`update`/`delete`/`link` on `Store`; UUID v4 ids, idempotent edges (`INSERT OR IGNORE`), existence checks + clear errors, FTS/FK cascade via triggers; 25/25 tests green.
 
+- [Read operations](issues/03-read-operations.md): `search`/`get`/`list`/`relations`/`stats` on `Store`; FTS5 `bm25` ranking, metadata `where` filters (raw SQL on JSON), `get` returns `null` for unknown id, `relations` throws; 51/51 tests green.
+
 ## Not yet specified
 
 <!-- see "Fog of war": in-scope fog you can't ticket yet; graduates as the frontier advances -->
