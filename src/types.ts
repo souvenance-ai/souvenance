@@ -54,3 +54,12 @@ export interface SearchResult {
   created_at: string;
   rank: number;
 }
+
+export interface TagCount {
+  tag: string;
+  count: number;
+}
+
+export interface TagsOptions {
+  where?: string;
+}

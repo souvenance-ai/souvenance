@@ -37,11 +37,13 @@ An opencode skill (CLI via bash, Node + `node:sqlite`) that lets an agent store,
 
 - [SKILL.md: memory writing guidance + FTS5 query tips](issues/07-skill-guidance.md): added FTS5 query tips (tokenization, phrase/OR/combined queries), Writing good memories (self-contained, one concept, include keywords), Session summaries convention (`kind: "summary"` for orientation); SKILL.md only, no library/CLI changes.
 
+- [`tags` command implementation](issues/08-tags-command.md): `tags [--where <sql>]` CLI command listing distinct metadata tags with counts via `json_each` + `json_type` array guard; `TagCount`/`TagsOptions` types, `Store.tags()` method, 9 new tests + CLI smoke test; 62/62 tests green, typecheck clean.
+
 ## Not yet specified
 
 <!-- see "Fog of war": in-scope fog you can't ticket yet; graduates as the frontier advances -->
 
-_None yet._ The two-agent evaluation surfaced concrete improvements (FTS5 query guidance, memory-writing best practices, `tags` command) now ticketed as 07 and 08. If implementation surfaces further decisions, graduate them here.
+_None._ All tickets (01–08) are resolved. The two-agent evaluation's improvements (07, 08) are done. No new fog has graduated. The frontier is clear — the way to the destination is fully charted. If future use surfaces further decisions, graduate them here.
 
 ## Out of scope
 

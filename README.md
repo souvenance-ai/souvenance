@@ -37,6 +37,7 @@ The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
 | `list [--where <sql>] [--limit N] [--offset N]` | List memories by metadata filter |
 | `relations <id> [--direction out\|in\|both]` | List edges to/from a memory |
 | `stats` | Print store statistics as JSON |
+| `tags [--where <sql>]` | List all distinct metadata tags with counts |
 
 Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure.
 

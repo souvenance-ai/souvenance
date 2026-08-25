@@ -13,6 +13,7 @@ Commands:
   list [--where <sql>] [--limit N] [--offset N]  List memories by metadata filter
   relations <id> [--direction out|in|both]    List edges to/from a memory
   stats                                       Print store statistics as JSON
+  tags [--where <sql>]                       List all distinct tags with counts, as JSON
 
 Flags:
   --db <path>   Override the DB path (default: .ai-memory/memory.db)
@@ -173,6 +174,13 @@ function main() {
       }
       case "stats": {
         print(store.stats());
+        break;
+      }
+      case "tags": {
+        const results = store.tags({
+          ...(flags["--where"] ? { where: flags["--where"] } : {}),
+        });
+        print(results);
         break;
       }
       default:

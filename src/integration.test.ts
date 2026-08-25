@@ -139,9 +139,9 @@ test("integration: CLI-reachable end-to-end via execSync", async () => {
 
   try {
     // store three memories
-    const a = run(`store "The quick brown fox" --metadata '{"kind":"note"}'`);
-    const b = run(`store "Hello from the fox club" --metadata '{"kind":"log"}'`);
-    const c = run(`store "A lazy dog sleeps" --metadata '{"kind":"note"}'`);
+    const a = run(`store "The quick brown fox" --metadata '{"kind":"note","tags":["animal"]}'`);
+    const b = run(`store "Hello from the fox club" --metadata '{"kind":"log","tags":["greeting"]}'`);
+    const c = run(`store "A lazy dog sleeps" --metadata '{"kind":"note","tags":["animal"]}'`);
     assert.ok(a.length > 0, "store should print an id");
     assert.ok(b.length > 0);
     assert.ok(c.length > 0);
@@ -156,6 +156,19 @@ test("integration: CLI-reachable end-to-end via execSync", async () => {
     // list with metadata filter
     const notes = JSON.parse(run(`list --where "metadata->>'$.kind' = 'note'"`));
     assert.equal(notes.length, 2, "should find 2 notes via CLI");
+
+    // tags command — should return tag counts
+    const tagsResult = JSON.parse(run(`tags`));
+    assert.ok(Array.isArray(tagsResult), "tags should return an array");
+    const tagsMap = new Map(tagsResult.map((r: { tag: string; count: number }) => [r.tag, r.count]));
+    assert.equal(tagsMap.get("animal"), 2, "animal tag should have count 2");
+    assert.equal(tagsMap.get("greeting"), 1, "greeting tag should have count 1");
+
+    // tags with --where filter
+    const tagsNotesOnly = JSON.parse(run(`tags --where "metadata->>'$.kind' = 'note'"`));
+    const tagsNotesMap = new Map(tagsNotesOnly.map((r: { tag: string; count: number }) => [r.tag, r.count]));
+    assert.equal(tagsNotesMap.get("animal"), 2, "animal in notes");
+    assert.equal(tagsNotesMap.get("greeting"), undefined, "greeting not in notes");
 
     // relations
     const aRels = JSON.parse(run(`relations ${a} --direction out`));

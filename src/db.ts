@@ -8,12 +8,14 @@ import type {
   UpdateOptions,
   SearchOptions,
   ListOptions,
+  TagsOptions,
   RelationsOptions,
   Direction,
   Memory,
   Relation,
   Stats,
   SearchResult,
+  TagCount,
 } from "./types.ts";
 
 export const DEFAULT_DB_PATH = ".ai-memory/memory.db";
@@ -272,6 +274,19 @@ export class Store {
       edges: edgeCount.c,
       edges_by_kind,
     };
+  }
+
+  tags(opts: TagsOptions = {}): TagCount[] {
+    let sql = `SELECT json_each.value AS tag, count(*) AS count
+               FROM memories, json_each(metadata->'$.tags')
+               WHERE metadata IS NOT NULL
+                 AND json_type(metadata->'$.tags') = 'array'`;
+    if (opts.where) {
+      sql += ` AND ${opts.where}`;
+    }
+    sql += ` GROUP BY tag ORDER BY count DESC, tag ASC`;
+    const rows = this.db.prepare(sql).all() as { tag: string; count: number }[];
+    return rows;
   }
 
   /**
