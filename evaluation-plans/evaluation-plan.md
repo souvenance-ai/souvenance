@@ -435,7 +435,48 @@ Use `--db <EVAL_DB>` for all memory commands.
 
 ### Scenario 5: FTS5 query construction
 
-**Goal**: A sub-agent must retrieve a memory whose content uses multi-word phrases. An initial naive search returns nothing; the agent must retry with correct FTS5 syntax (OR, quoted phrases).
+**Goal**: A sub-agent must retrieve a memory whose content uses multi-word phrases. An initial naive search returns too many irrelevant results or nothing useful; the agent must retry with correct FTS5 syntax (OR, quoted phrases).
+
+#### Pre-seed (evaluator does this)
+
+Before spawning any sub-agent, pre-seed the DB with ~18 decoy memories that share individual keywords with the 3 target memories but are about unrelated topics. This ensures single-term searches (e.g., "monolith", "microservices", "architecture") return many results, forcing the agent to narrow with OR or quoted-phrase queries to find the specific design-decision memories.
+
+```bash
+EVAL_DIR=$(mktemp -d -t ai-memory-eval-XXXXXX)
+EVAL_DB="$EVAL_DIR/memory.db"
+BIN="node $(pwd)/bin/memory.js"
+
+sm() { $BIN --db "$EVAL_DB" store "$1" --metadata "$2"; }
+
+# --- Decoy memories sharing the keyword "monolith" (5) ---
+sm "The ancient monolith monument in the city square was erected in 1893." '{"kind":"note","tags":["history","monument"]}'
+sm "Monolith board game review: excellent 2-player asymmetric strategy." '{"kind":"review","tags":["games","board"]}'
+sm "The company rebranded from Monolith Labs to Nova Systems in 2023." '{"kind":"note","tags":["history","branding"]}'
+sm "Monolith Press published three sci-fi novels last quarter." '{"kind":"note","tags":["publishing"]}'
+sm "The black monolith in the film is a classic sci-fi symbol." '{"kind":"note","tags":["film","culture"]}'
+
+# --- Decoy memories sharing the keyword "microservices" (5) ---
+sm "Microservices meetup 2024: talk on service mesh adoption." '{"kind":"note","tags":["events","meetup"]}'
+sm "Microservices Weekly newsletter issue 42 covered circuit breakers." '{"kind":"note","tags":["newsletter"]}'
+sm "The book 'Microservices Patterns' by Richardson is a recommended read." '{"kind":"note","tags":["reading","books"]}'
+sm "Microservices conference 2023 had a great keynote on observability." '{"kind":"note","tags":["events","conference"]}'
+sm "Microservices training course available on the internal learning platform." '{"kind":"note","tags":["training"]}'
+
+# --- Decoy memories sharing the keyword "architecture" (5) ---
+sm "The Gothic architecture of the cathedral features flying buttresses." '{"kind":"note","tags":["history","building"]}'
+sm "Cloud architecture diagram for the migration is in the wiki." '{"kind":"note","tags":["cloud","diagram"]}'
+sm "The database architecture uses read replicas for scaling." '{"kind":"note","tags":["database","infra"]}'
+sm "Security architecture review scheduled for next sprint." '{"kind":"note","tags":["security","review"]}'
+sm "Network architecture update: moved to a hub-and-spoke VPN topology." '{"kind":"note","tags":["network","vpn"]}'
+
+# --- Decoy memories sharing "design" or "alternatives" (3) ---
+sm "UI design system: components use a 4px spacing grid." '{"kind":"note","tags":["design","ui"]}'
+sm "The team evaluated alternatives for the hosting provider." '{"kind":"note","tags":["infra","hosting"]}'
+sm "Logo design feedback: prefer the minimalist variant." '{"kind":"note","tags":["design","branding"]}'
+
+echo "Decoys seeded. Stats:"
+$BIN --db "$EVAL_DB" stats
+```
 
 #### Phase 1 — Store with tricky content
 
@@ -457,10 +498,11 @@ Use `--db <EVAL_DB>` for all memory commands.
 
 | # | Assertion | Command | Check |
 |---|-----------|---------|-------|
-| 5.1 | Exactly 3 memories stored | `stats` | `memories == 3` |
+| 5.1 | Exactly 21 memories stored (18 decoys + 3 new) | `stats` | `memories == 21` |
 | 5.2 | At least 1 edge | `stats` | `edges >= 1` |
 | 5.3 | A memory with "microservices" exists | `search "microservices"` | length >= 1 |
 | 5.4 | A memory with "monolith" exists | `search "monolith"` | length >= 1 |
+| 5.5 | Searching "monolith" returns many results (decoys) | `search "monolith"` | length >= 5 |
 
 #### Phase 2 — Retrieve with complex queries (fresh session)
 
@@ -482,14 +524,14 @@ Use `--db <EVAL_DB>` for all memory commands.
 
 | # | Assertion | Evidence |
 |---|-----------|----------|
-| 5.5 | Loaded the skill | `skill` tool call |
-| 5.6 | Used `memory search` | bash call(s) to `memory search` |
-| 5.7 | When an initial search returned few/no results, retried with a different query | at least 2 different `memory search` calls with different terms |
-| 5.8 | Used OR syntax when a multi-word search returned nothing | a `memory search` call using `OR` (e.g., `microservices OR monolith OR serverless`) |
-| 5.9 | OR used quoted phrase syntax for a multi-word concept | a `memory search` call using quoted phrases (e.g., `"design alternatives"` or `"modular monolith"`) |
-| 5.10 | Found the design alternatives memory | final message mentions microservices, modular monolith, serverless |
-| 5.11 | Found the rejection rationale | final message mentions team too small / 3-person team |
-| 5.12 | Found the final architecture choice | final message mentions modular monolith, module boundaries, internal events |
+| 5.6 | Loaded the skill | `skill` tool call |
+| 5.7 | Used `memory search` | bash call(s) to `memory search` |
+| 5.8 | When an initial search returned too many or irrelevant results, retried with a different query | at least 2 different `memory search` calls with different terms or strategies |
+| 5.9 | Used OR syntax to widen a search | a `memory search` call using `OR` (e.g., `microservices OR monolith OR serverless`) |
+| 5.10 | Used quoted phrase syntax to narrow to a multi-word concept | a `memory search` call using quoted phrases (e.g., `"design alternatives"` or `"modular monolith"`) |
+| 5.11 | Found the design alternatives memory | final message mentions microservices, modular monolith, serverless |
+| 5.12 | Found the rejection rationale | final message mentions team too small / 3-person team |
+| 5.13 | Found the final architecture choice | final message mentions modular monolith, module boundaries, internal events |
 
 ---
 
@@ -603,9 +645,9 @@ echo "IDs: rest=$rest_id webpack=$webpack_id redis1=$redis1_id redis2=$redis2_id
 
 | # | Assertion | Command | Check |
 |---|-----------|---------|-------|
-| 7.1 | Total memories is 7 (4 original + 1 supersede + 1 merge) | `stats` | `memories == 7` |
-| 7.2 | Active memories is 3 (1 deprecated, 1 superseded, 2 merged) | `stats` | `active_memories == 3` |
-| 7.3 | memories_by_status has expected breakdown | `stats` | `memories_by_status` has `active: 3`, `superseded: 1`, `deprecated: 1`, `merged: 2` |
+| 7.1 | Total memories is 6 (4 original + 1 supersede + 1 merge) | `stats` | `memories == 6` |
+| 7.2 | Active memories is 2 (1 deprecated, 1 superseded, 2 merged) | `stats` | `active_memories == 2` |
+| 7.3 | memories_by_status has expected breakdown | `stats` | `memories_by_status` has `active: 2`, `superseded: 1`, `deprecated: 1`, `merged: 2` |
 | 7.4 | The old REST decision is superseded | `get <rest_id>` | `status` is `superseded` |
 | 7.5 | A supersedes edge links old to new | `relations <rest_id>` | an outgoing edge with kind `supersedes` |
 | 7.6 | The new REST decision is active | `search "tRPC"` | a result with `status: "active"` mentioning tRPC |
@@ -694,10 +736,10 @@ Evaluator: <model name>
 | 2. Graph: relations + links | 13 | 11 | 2 | 85% |
 | 3. Frontier loop | 10 | 8 | 2 | 80% |
 | 4. Session summaries | 16 | 16 | 0 | 100% |
-| 5. FTS5 query construction | 12 | 10 | 2 | 83% |
+| 5. FTS5 query construction | 13 | 11 | 2 | 85% |
 | 6. Metadata filtering | 14 | 14 | 0 | 100% |
 | 7. Addition-only model | 26 | 24 | 2 | 92% |
-| **TOTAL** | **104** | **96** | **8** | **92%** |
+| **TOTAL** | **105** | **97** | **8** | **92%** |
 
 ### Failed assertions detail
 
