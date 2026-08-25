@@ -29,6 +29,8 @@ An opencode skill (CLI via bash, Node + `node:sqlite`) that lets an agent store,
 
 - [Read operations](issues/03-read-operations.md): `search`/`get`/`list`/`relations`/`stats` on `Store`; FTS5 `bm25` ranking, metadata `where` filters (raw SQL on JSON), `get` returns `null` for unknown id, `relations` throws; 51/51 tests green.
 
+- [CLI entry and commands](issues/04-cli-entry.md): `bin/memory.js` (plain JS, executable) maps all 9 commands to `Store` methods; stdout JSON results, stderr errors, exit 1 on failure; `--db` override, `--metadata` JSON, `--where` raw SQL; 14/14 smoke tests + 6 error paths green; typecheck clean.
+
 ## Not yet specified
 
 <!-- see "Fog of war": in-scope fog you can't ticket yet; graduates as the frontier advances -->
