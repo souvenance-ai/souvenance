@@ -59,6 +59,8 @@ memory search '"design alternatives" rejected'  # phrase AND term
 - **Quoted phrase** (`"design alternatives"`): the words must appear consecutively. Use when order matters.
 - **Combined** (`"design alternatives" rejected`): phrase plus additional terms (implicit AND).
 
+- **Hyphenated identifiers** (`better-sqlite3`, `node:sqlite`): FTS5 tokenizes on hyphens and colons, splitting `better-sqlite3` into `better` and `sqlite3`. The bare token `sqlite3` may be interpreted as a column reference, causing a syntax error. Always quote hyphenated or colon-containing identifiers: `'"better-sqlite3"'` or `'"node:sqlite"'`.
+
 If a search returns nothing, try simpler queries, OR alternatives, or individual keywords drawn from what you're looking for.
 
 ## Memory links
