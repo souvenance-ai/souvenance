@@ -32,6 +32,7 @@ interface MemoryRow {
   created_at: string;
   status: string;
   weight: number;
+  access_count: number;
 }
 
 interface SearchRow {
@@ -41,6 +42,7 @@ interface SearchRow {
   created_at: string;
   status: string;
   weight: number;
+  access_count: number;
   rank: number;
 }
 
@@ -60,6 +62,7 @@ function parseMemoryRow(row: MemoryRow): Memory {
     created_at: row.created_at,
     status: row.status as MemoryStatus,
     weight: row.weight,
+    access_count: row.access_count,
   };
 }
 
@@ -71,6 +74,7 @@ function parseSearchRow(row: SearchRow): SearchResult {
     created_at: row.created_at,
     status: row.status as MemoryStatus,
     weight: row.weight,
+    access_count: row.access_count,
     rank: row.rank,
   };
 }
@@ -303,7 +307,7 @@ export class Store {
    */
   dump(): { memories: IterableIterator<Memory>; edges: IterableIterator<Relation> } {
     const memStmt = this.db.prepare(
-      "SELECT id, content, metadata, created_at, status, weight FROM memories ORDER BY created_at ASC",
+      "SELECT id, content, metadata, created_at, status, weight, access_count FROM memories ORDER BY created_at ASC",
     );
     const edgeStmt = this.db.prepare(
       "SELECT from_id, to_id, kind, metadata, created_at FROM edges ORDER BY created_at ASC",
@@ -328,8 +332,8 @@ export class Store {
   search(query: string, opts: SearchOptions = {}): SearchResult[] {
     if (!query) throw new Error("query must be non-empty");
     const limit = opts.limit ?? 20;
-    let sql = `SELECT m.id, m.content, m.metadata, m.created_at, m.status, m.weight,` +
-      ` (bm25(memories_fts) * m.weight * (1.0 / (1.0 + (julianday('now') - julianday(m.created_at))))) AS rank` +
+    let sql = `SELECT m.id, m.content, m.metadata, m.created_at, m.status, m.weight, m.access_count,` +
+      ` (bm25(memories_fts) * m.weight * (1.0 / (1.0 + (julianday('now') - julianday(m.created_at)))) * (1.0 + ln(m.access_count + 1) * 0.1)) AS rank` +
       ` FROM memories_fts f` +
       ` JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ?`;
     const params: (string | number)[] = [query];
@@ -342,21 +346,36 @@ export class Store {
     sql += ` ORDER BY rank LIMIT ?`;
     params.push(limit);
     const rows = this.db.prepare(sql).all(...params) as unknown as SearchRow[];
-    return rows.map(parseSearchRow);
+    const results = rows.map(parseSearchRow);
+    if (results.length > 0) {
+      const fraction = 1.0 / results.length;
+      this.run(() => {
+        const stmt = this.db.prepare("UPDATE memories SET access_count = access_count + ? WHERE id = ?");
+        for (const r of results) {
+          stmt.run(fraction, r.id);
+        }
+      });
+    }
+    return results;
   }
 
   get(id: string): Memory | null {
     const row = this.db
-      .prepare("SELECT id, content, metadata, created_at, status, weight FROM memories WHERE id = ?")
+      .prepare("SELECT id, content, metadata, created_at, status, weight, access_count FROM memories WHERE id = ?")
       .get(id) as unknown as MemoryRow | undefined;
     if (!row) return null;
+    this.run(() => {
+      this.db
+        .prepare("UPDATE memories SET access_count = access_count + 1 WHERE id = ?")
+        .run(id);
+    });
     return parseMemoryRow(row);
   }
 
   list(opts: ListOptions = {}): Memory[] {
     const limit = opts.limit ?? 20;
     const offset = opts.offset ?? 0;
-    let sql = `SELECT id, content, metadata, created_at, status, weight FROM memories`;
+    let sql = `SELECT id, content, metadata, created_at, status, weight, access_count FROM memories`;
     const params: (string | number)[] = [];
     const conditions: string[] = [];
     if (!opts.includeLegacy) {
@@ -427,6 +446,9 @@ export class Store {
     const edgeCount = this.db
       .prepare("SELECT count(*) AS c FROM edges")
       .get() as { c: number };
+    const readsRow = this.db
+      .prepare("SELECT COALESCE(sum(access_count), 0) AS c FROM memories")
+      .get() as { c: number };
     const kindRows = this.db
       .prepare("SELECT kind, count(*) AS c FROM edges GROUP BY kind ORDER BY kind")
       .all() as { kind: string; c: number }[];
@@ -440,6 +462,7 @@ export class Store {
       memories_by_status,
       edges: edgeCount.c,
       edges_by_kind,
+      total_accesses: readsRow.c,
     };
   }
 

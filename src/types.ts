@@ -9,6 +9,7 @@ export interface Memory {
   created_at: string;
   status: MemoryStatus;
   weight: number;
+  access_count: number;
 }
 
 export interface Relation {
@@ -55,6 +56,7 @@ export interface Stats {
   memories_by_status: Record<string, number>;
   edges: number;
   edges_by_kind: Record<string, number>;
+  total_accesses: number;
 }
 
 export interface SearchResult {
@@ -64,6 +66,7 @@ export interface SearchResult {
   created_at: string;
   status: MemoryStatus;
   weight: number;
+  access_count: number;
   rank: number;
 }
 

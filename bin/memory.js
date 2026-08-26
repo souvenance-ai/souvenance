@@ -15,8 +15,8 @@ Commands:
   update <id> [--metadata <json>] [--weight <0-1>]  Update a memory's metadata and/or weight (content is immutable)
   delete <id> --force                           Delete a memory (destructive; prefer 'deprecate')
   link <from-id> <to-id> --kind <kind> [--metadata <json>]  Create a typed edge
-  search <query> [--where <sql>] [--limit N] [--all]  FTS5 search, ranked by bm25 × weight × recency
-  get <id>                                    Print a memory as JSON (or "not found")
+  search <query> [--where <sql>] [--limit N] [--all]  FTS5 search, ranked by bm25 × weight × recency × access_boost
+  get <id>                                    Print a memory as JSON (or "not found"); increments access_count
   list [--where <sql>] [--limit N] [--offset N] [--all] [--min-weight <0-1>]  List memories by metadata filter
   relations <id> [--direction out|in|both]    List edges to/from a memory
   stats                                       Print store statistics as JSON
