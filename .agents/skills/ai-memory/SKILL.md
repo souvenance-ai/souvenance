@@ -97,6 +97,59 @@ When the store is too large to load into context, explore it with the **frontier
 
 `LIMIT` at every step. The point is to follow a thread through the graph, not to dump the database.
 
+## Dreaming: graph consolidation
+
+Memories accumulate during action. Links lag behind content. Redundant or stale memories persist. The store needs periodic consolidation — **dreaming** — just as a human brain consolidates during sleep.
+
+### When to dream
+
+Dreaming is **threshold-triggered**, not self-selected. Check these thresholds at the end of a non-trivial session, or when the store feels tangled:
+
+1. **Edge ratio**: run `memory stats`. If `edges / active_memories < 1.5`, the graph is under-linked — dream.
+2. **Volume**: if `+10` or more new memories were stored since the last dream, dream.
+3. **Session end**: after any non-trivial session, dream before sending your final message.
+
+If none of the thresholds are met, skip dreaming. Do not dream on every session — it is costly and should happen when the store has accumulated enough to benefit from it.
+
+### The four dream operations
+
+Run them in order. Each uses existing CLI commands — dreaming is a workflow, not new machinery.
+
+1. **Relink** — find memories that mention entities (names, IDs, concepts) without graph edges to the corresponding memories. Audit a sample of recent memories: read their content, check `memory relations <id>`, and `memory link` missing connections. Target: bring the edge ratio above 2.0.
+
+2. **Merge** — find active memories that cover the same concept, decision, or event. Search by keyword for each topic; if two memories say substantially the same thing, `memory merge <id1> <id2> --content "merged content" --metadata '{...}'`. Preserve the history — the originals are marked `merged`, the new one is `active`.
+
+3. **Supersede** — find active decisions or summaries that are factually outdated. If a memory states something that a later memory contradicts or replaces, `memory supersede <old-id> --content "current truth" --metadata '{...}'`. The old memory stays as `superseded`, preserving the history.
+
+4. **Synthesize** — after relinking, merging, and superseding, look for **emergent patterns** the graph reveals that no single memory captures. Store a `kind: "dream"` memory that narrates the pattern — connections, tensions, or themes that surfaced during consolidation. This is the dream itself: not a fact, but a revelation. Link it to the memories it draws from.
+
+### Dream memory format
+
+```markdown
+# Dream: <title>
+
+## Date
+<date>
+
+## Trigger
+<which threshold triggered the dream>
+
+## What I found
+<findings from each operation: links added, memories merged, memories superseded>
+
+## Pattern
+<the emergent insight — what the graph revealed that no single memory contained>
+
+## Links
+<memory:// links to the memories this dream draws from>
+```
+
+### What dreaming is not
+
+- Not a search. You are not looking for something specific — you are seeing what is already there.
+- Not a rewrite. You are not editing content — you are adding edges, merging duplicates, and superseding stale facts.
+- Not optional when triggered. If a threshold is met, dream. The store's integrity depends on it.
+
 ## Conventions
 
 - The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
