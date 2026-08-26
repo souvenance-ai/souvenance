@@ -1,5 +1,8 @@
 #!/usr/bin/env node
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Store } from "../src/db.ts";
+import { slugify, filenameFor, renderMemory } from "../src/export.ts";
 
 const HELP = `Usage: memory <command> [args] [flags]
 
@@ -18,10 +21,12 @@ Commands:
   relations <id> [--direction out|in|both]    List edges to/from a memory
   stats                                       Print store statistics as JSON
   tags [--where <sql>] [--all]               List all distinct tags with counts, as JSON
+  export [--output <dir>]                     Export the entire store as a flat directory of markdown files
 
 Flags:
-  --db <path>   Override the DB path (default: .ai-memory/memory.db)
-  --help, -h    Show this help
+  --db <path>      Override the DB path (default: .ai-memory/memory.db)
+  --output <dir>   Export output directory (default: .ai-memory/export/)
+  --help, -h       Show this help
 
 Output:
   stdout: JSON results (one document per command)
@@ -33,6 +38,8 @@ Notes:
   --where accepts a raw SQL fragment on the metadata JSON column using SQLite
     JSON operators, e.g.: metadata->>'$.kind' = 'note'
   --all includes superseded/deprecated/merged memories in search/list/tags results
+  export writes one .md file per memory (all statuses) with YAML frontmatter;
+    memory:// links are rewritten to relative file links; idempotent
 `;
 
 const BOOLEAN_FLAGS = new Set(["--all", "--force"]);
@@ -222,6 +229,35 @@ function main() {
           ...(flags["--all"] ? { includeLegacy: true } : {}),
         });
         print(results);
+        break;
+      }
+      case "export": {
+        const outputDir = flags["--output"] ?? ".ai-memory/export";
+        mkdirSync(outputDir, { recursive: true });
+        const { memories, edges } = store.dump();
+
+        const edgesByMemory = new Map();
+        for (const edge of edges) {
+          if (!edgesByMemory.has(edge.from_id)) edgesByMemory.set(edge.from_id, []);
+          if (!edgesByMemory.has(edge.to_id)) edgesByMemory.set(edge.to_id, []);
+          edgesByMemory.get(edge.from_id).push(edge);
+          edgesByMemory.get(edge.to_id).push(edge);
+        }
+
+        const idToFilename = new Map();
+        const memArray = [...memories];
+        for (const mem of memArray) {
+          idToFilename.set(mem.id, filenameFor(mem));
+        }
+
+        let count = 0;
+        for (const mem of memArray) {
+          const rels = edgesByMemory.get(mem.id) ?? [];
+          const markdown = renderMemory(mem, rels, idToFilename);
+          writeFileSync(join(outputDir, idToFilename.get(mem.id)), markdown);
+          count++;
+        }
+        process.stdout.write(`exported ${count} memories to ${outputDir}\n`);
         break;
       }
       default:

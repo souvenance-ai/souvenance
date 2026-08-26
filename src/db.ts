@@ -277,6 +277,29 @@ export class Store {
         .run(fromId, toId, kind, metadata, created_at);
     });
   }
+  /**
+   * Bulk read for export/dump operations; not part of the stable API.
+   * Yields all memories and edges lazily as lazy iterators.
+   */
+  dump(): { memories: IterableIterator<Memory>; edges: IterableIterator<Relation> } {
+    const memStmt = this.db.prepare(
+      "SELECT id, content, metadata, created_at, status FROM memories ORDER BY created_at ASC",
+    );
+    const edgeStmt = this.db.prepare(
+      "SELECT from_id, to_id, kind, metadata, created_at FROM edges ORDER BY created_at ASC",
+    );
+    const memories = (function* () {
+      for (const row of memStmt.iterate() as unknown as IterableIterator<MemoryRow>) {
+        yield parseMemoryRow(row);
+      }
+    })();
+    const edges = (function* () {
+      for (const row of edgeStmt.iterate() as unknown as IterableIterator<RelationRow>) {
+        yield parseRelationRow(row);
+      }
+    })();
+    return { memories, edges };
+  }
 
   close(): void {
     this.db.close();
