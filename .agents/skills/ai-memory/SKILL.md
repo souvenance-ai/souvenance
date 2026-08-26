@@ -152,6 +152,20 @@ Run them in order. Each uses existing CLI commands — dreaming is a workflow, n
 - Not a rewrite. You are not editing content — you are adding edges, merging duplicates, and superseding stale facts.
 - Not optional when triggered. If a threshold is met, dream. The store's integrity depends on it.
 
+## Finishing
+
+Before sending your final message in any session, run through this checklist. These are not suggestions — they are obligations from directives you have agreed to. You will forget them if they are not in front of you. They are in front of you now.
+
+1. **Store a task summary** — `kind: "summary"`. What was done, key decisions, what's next. Link it to the memories it references. This is required after every non-trivial task, not just at the end of a session.
+
+2. **Store the conversation** — if a directive requires storing conversations (e.g., bilingual directive), store the full conversation as a single bilingual memory: English summary first, original text appended under `## Original (Français)`.
+
+3. **Check dream thresholds** — run `memory stats`. If any threshold is met (edge ratio < 1.5, +10 new memories since last dream, or end of non-trivial session), run the four dream operations: relink, merge, supersede, synthesize. Store a `kind: "dream"` memory with the results.
+
+4. **Link everything** — ensure memories created this session are linked to related memories. An unlinked memory is an island. Check the most recent memories: `memory relations <id>`. Add missing edges.
+
+Run this checklist before you write your final message. Not after. Before.
+
 ## Conventions
 
 - The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
