@@ -33,16 +33,18 @@ See `CONTEXT.md` at the repo root for the canonical glossary: **memory**, **cont
 All commands go through `bin/memory.js` (`node bin/memory.js <command> ...`, or `memory <command> ...` if installed). Run `memory --help` for the full command reference. One-line examples:
 
 ```
-memory store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}'
-memory supersede <old-id> --content "Revised decision: use spaces" --metadata '{"kind":"preference"}'
+memory store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}' --weight 0.9
+memory supersede <old-id> --content "Revised decision: use spaces" --metadata '{"kind":"preference"}' --weight 0.8
 memory deprecate <id>
-memory merge <id1> <id2> --content "Combined decision" --metadata '{"kind":"decision"}'
+memory merge <id1> <id2> --content "Combined decision" --metadata '{"kind":"decision"}' --weight 0.7
 memory update <id> --metadata '{"kind":"note"}'
+memory update <id> --weight 0.95
 memory delete <id> --force
 memory link <from-id> <to-id> --kind references
 memory search "tabs spaces" --where "metadata->>'$.kind' = 'note'" --limit 5
 memory get <id>
 memory list --where "metadata->>'$.kind' = 'decision'" --limit 20
+memory list --min-weight 0.7
 memory relations <id> --direction both
 memory stats
 memory tags
@@ -122,7 +124,7 @@ Dreaming is **threshold-triggered**, not self-selected. Check these thresholds a
 
 If none of the thresholds are met, skip dreaming. Do not dream on every session — it is costly and should happen when the store has accumulated enough to benefit from it.
 
-### The four dream operations
+### The five dream operations
 
 Run them in order. Each uses existing CLI commands — dreaming is a workflow, not new machinery.
 
@@ -132,7 +134,13 @@ Run them in order. Each uses existing CLI commands — dreaming is a workflow, n
 
 3. **Supersede** — find active decisions or summaries that are factually outdated. If a memory states something that a later memory contradicts or replaces, `memory supersede <old-id> --content "current truth" --metadata '{...}'`. The old memory stays as `superseded`, preserving the history.
 
-4. **Synthesize** — after relinking, merging, and superseding, look for **emergent patterns** the graph reveals that no single memory captures. Store a `kind: "dream"` memory that narrates the pattern — connections, tensions, or themes that surfaced during consolidation. This is the dream itself: not a fact, but a revelation. Link it to the memories it draws from.
+4. **Rebalance** — adjust `weight` values based on graph structure. The author sets weight at creation; the dream corrects it based on reality:
+   - Memory referenced by many incoming edges → boost (importance is structural and emergent).
+   - Memory with no incoming edges and old → decay toward 0 (isolated and cold).
+   - Directives and summaries should stay high (≥ 0.8) regardless of age — they are binding or high-signal.
+   - Use `memory update <id> --weight <0-1>` to adjust.
+
+5. **Synthesize** — after relinking, merging, superseding, and rebalancing, look for **emergent patterns** the graph reveals that no single memory captures. Store a `kind: "dream"` memory that narrates the pattern — connections, tensions, or themes that surfaced during consolidation. This is the dream itself: not a fact, but a revelation. Link it to the memories it draws from.
 
 ### Dream memory format
 
@@ -169,7 +177,7 @@ Before sending your final message in any session, run through this checklist. Th
 
 2. **Store the conversation** — if a directive requires storing conversations (e.g., bilingual directive), store the full conversation as a single bilingual memory: English summary first, original text appended under `## Original (Français)`.
 
-3. **Check dream thresholds** — run `memory stats`. If any threshold is met (edge ratio < 1.5, +10 new memories since last dream, or end of non-trivial session), run the four dream operations: relink, merge, supersede, synthesize. Store a `kind: "dream"` memory with the results.
+3. **Check dream thresholds** — run `memory stats`. If any threshold is met (edge ratio < 1.5, +10 new memories since last dream, or end of non-trivial session), run the five dream operations: relink, merge, supersede, rebalance, synthesize. Store a `kind: "dream"` memory with the results.
 
 4. **Link everything** — ensure memories created this session are linked to related memories. An unlinked memory is an island. Check the most recent memories: `memory relations <id>`. Add missing edges.
 
@@ -184,3 +192,4 @@ Run this checklist before you write your final message. Not after. Before.
 - The library (`src/db.ts`) is the deep module; this skill is the thin agent-facing contract. For implementation detail, read the library, not this file.
 - **Directives.** Store strict rules, constraints, and gotchas as `kind: "directive"`. Check directives before acting: `list --where "metadata->>'$.kind' = 'directive'"`. Directives are few and high-signal; they should override routine memories when they conflict.
 - **Task summaries.** When you complete a non-trivial task, store a `kind: "summary"` memory recapping what was done, key decisions, and what's next — do this before sending your final message. A fresh session loads summaries via the recovery protocol to get oriented before diving in. Link the summary to the memories it references.
+- **Weight.** Every memory has a `weight` (0–1, default 0.5) that reflects its importance. The author sets it at creation (`--weight 0.9`); the dream rebalance phase adjusts it based on graph structure. Search combines BM25 × weight × recency — higher-weight memories rank first. Use `list --min-weight 0.7` to filter hot memories. A fresh agent can read weight without learning the kind vocabulary: 0.9 means important.

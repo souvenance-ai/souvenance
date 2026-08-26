@@ -26,6 +26,7 @@ function makeMemory(overrides: Partial<Memory> = {}): Memory {
     metadata: { kind: "note", tags: ["api", "store"] },
     created_at: "2026-01-15T10:30:00.000Z",
     status: "active",
+    weight: 0.5,
     ...overrides,
   };
 }
@@ -98,6 +99,7 @@ test("renderFrontmatter: basic memory with kind and tags", () => {
   assert.ok(fm.includes("- store"));
   assert.ok(fm.includes("status: active"));
   assert.ok(fm.includes("created_at: 2026-01-15T10:30:00.000Z"));
+  assert.ok(fm.includes("weight: 0.5"));
   assert.ok(!fm.includes("metadata:"));
 });
 

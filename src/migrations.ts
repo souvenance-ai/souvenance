@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const V1 = `
 CREATE TABLE IF NOT EXISTS memories (
@@ -48,9 +48,14 @@ const V2 = `
 ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
 `;
 
+const V3 = `
+ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 0.5;
+`;
+
 const migrations: Record<number, string> = {
   1: V1,
   2: V2,
+  3: V3,
 };
 
 function ensureVersionTable(db: DatabaseSync): number {

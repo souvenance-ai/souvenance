@@ -60,11 +60,11 @@ test("FTS5 stays in sync: insert, update, delete", () => {
   try {
     const db = store.db;
     db.prepare(
-      "INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)",
-    ).run("a1", "hello world", null, new Date().toISOString());
+      "INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)",
+    ).run("a1", "hello world", null, new Date().toISOString(), 0.5);
     db.prepare(
-      "INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)",
-    ).run("a2", "goodbye cruel world", null, new Date().toISOString());
+      "INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)",
+    ).run("a2", "goodbye cruel world", null, new Date().toISOString(), 0.5);
 
     const match = db.prepare(
       "SELECT m.id FROM memories_fts f JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ? ORDER BY rank",
@@ -93,8 +93,8 @@ test("FK cascade: deleting a memory removes its edges", () => {
   try {
     const db = store.db;
     const now = new Date().toISOString();
-    db.prepare("INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)").run("a1", "one", null, now);
-    db.prepare("INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)").run("a2", "two", null, now);
+    db.prepare("INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)").run("a1", "one", null, now, 0.5);
+    db.prepare("INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)").run("a2", "two", null, now, 0.5);
     db.prepare("INSERT INTO edges (from_id, to_id, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)").run("a1", "a2", "references", null, now);
 
     db.prepare("DELETE FROM memories WHERE id = ?").run("a1");

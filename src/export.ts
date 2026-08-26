@@ -83,6 +83,7 @@ export function renderFrontmatter(memory: Memory): string {
   lines.push(`id: ${memory.id}`);
   lines.push(`status: ${memory.status}`);
   lines.push(`created_at: ${memory.created_at}`);
+  lines.push(`weight: ${memory.weight}`);
 
   const meta = memory.metadata;
   if (meta) {

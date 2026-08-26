@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import { migrate } from "./migrations.ts";
 import type {
   StoreOptions,
+  UpdateOptions,
   SearchOptions,
   ListOptions,
   TagsOptions,
@@ -30,6 +31,7 @@ interface MemoryRow {
   metadata: string | null;
   created_at: string;
   status: string;
+  weight: number;
 }
 
 interface SearchRow {
@@ -38,6 +40,7 @@ interface SearchRow {
   metadata: string | null;
   created_at: string;
   status: string;
+  weight: number;
   rank: number;
 }
 
@@ -56,6 +59,7 @@ function parseMemoryRow(row: MemoryRow): Memory {
     metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : null,
     created_at: row.created_at,
     status: row.status as MemoryStatus,
+    weight: row.weight,
   };
 }
 
@@ -66,6 +70,7 @@ function parseSearchRow(row: SearchRow): SearchResult {
     metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : null,
     created_at: row.created_at,
     status: row.status as MemoryStatus,
+    weight: row.weight,
     rank: row.rank,
   };
 }
@@ -123,13 +128,14 @@ export class Store {
     if (!content) throw new Error("content must be non-empty");
     const id = randomUUID();
     const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
+    const weight = opts.weight ?? 0.5;
     const created_at = new Date().toISOString();
     this.run(() => {
       this.db
         .prepare(
-          "INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)",
+          "INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)",
         )
-        .run(id, content, metadata, created_at);
+        .run(id, content, metadata, created_at, weight);
     });
     return id;
   }
@@ -142,6 +148,7 @@ export class Store {
     if (!content) throw new Error("content must be non-empty");
     const newId = randomUUID();
     const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
+    const weight = opts.weight ?? 0.5;
     const created_at = new Date().toISOString();
     this.run(() => {
       this.db.exec("BEGIN");
@@ -149,9 +156,9 @@ export class Store {
         this.assertActive(oldId, "supersede");
         this.db
           .prepare(
-            "INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)",
           )
-          .run(newId, content, metadata, created_at);
+          .run(newId, content, metadata, created_at, weight);
         this.db
           .prepare(
             "INSERT OR IGNORE INTO edges" +
@@ -185,6 +192,7 @@ export class Store {
     }
     const newId = randomUUID();
     const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
+    const weight = opts.weight ?? 0.5;
     const created_at = new Date().toISOString();
     this.run(() => {
       this.db.exec("BEGIN");
@@ -194,9 +202,9 @@ export class Store {
         }
         this.db
           .prepare(
-            "INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)",
           )
-          .run(newId, content, metadata, created_at);
+          .run(newId, content, metadata, created_at, weight);
         for (const id of ids) {
           this.db
             .prepare(
@@ -218,15 +226,27 @@ export class Store {
     return newId;
   }
 
-  update(id: string, metadata: Record<string, unknown>): void {
+  update(id: string, opts: UpdateOptions = {}): void {
     const existing = this.db
       .prepare("SELECT 1 FROM memories WHERE id = ?")
       .get(id);
     if (!existing) throw new Error(`memory not found: ${id}`);
+    const sets: string[] = [];
+    const params: (string | number)[] = [];
+    if (opts.metadata !== undefined) {
+      sets.push("metadata = ?");
+      params.push(JSON.stringify(opts.metadata));
+    }
+    if (opts.weight !== undefined) {
+      sets.push("weight = ?");
+      params.push(opts.weight);
+    }
+    if (sets.length === 0) throw new Error("update requires at least one of --metadata or --weight");
+    params.push(id);
     this.run(() => {
       this.db
-        .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
-        .run(JSON.stringify(metadata), id);
+        .prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`)
+        .run(...params);
     });
   }
 
@@ -283,7 +303,7 @@ export class Store {
    */
   dump(): { memories: IterableIterator<Memory>; edges: IterableIterator<Relation> } {
     const memStmt = this.db.prepare(
-      "SELECT id, content, metadata, created_at, status FROM memories ORDER BY created_at ASC",
+      "SELECT id, content, metadata, created_at, status, weight FROM memories ORDER BY created_at ASC",
     );
     const edgeStmt = this.db.prepare(
       "SELECT from_id, to_id, kind, metadata, created_at FROM edges ORDER BY created_at ASC",
@@ -308,8 +328,9 @@ export class Store {
   search(query: string, opts: SearchOptions = {}): SearchResult[] {
     if (!query) throw new Error("query must be non-empty");
     const limit = opts.limit ?? 20;
-    let sql = `SELECT m.id, m.content, m.metadata, m.created_at, m.status,` +
-      ` bm25(memories_fts) AS rank FROM memories_fts f` +
+    let sql = `SELECT m.id, m.content, m.metadata, m.created_at, m.status, m.weight,` +
+      ` (bm25(memories_fts) * m.weight * (1.0 / (1.0 + (julianday('now') - julianday(m.created_at))))) AS rank` +
+      ` FROM memories_fts f` +
       ` JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ?`;
     const params: (string | number)[] = [query];
     if (!opts.includeLegacy) {
@@ -326,7 +347,7 @@ export class Store {
 
   get(id: string): Memory | null {
     const row = this.db
-      .prepare("SELECT id, content, metadata, created_at, status FROM memories WHERE id = ?")
+      .prepare("SELECT id, content, metadata, created_at, status, weight FROM memories WHERE id = ?")
       .get(id) as unknown as MemoryRow | undefined;
     if (!row) return null;
     return parseMemoryRow(row);
@@ -335,7 +356,7 @@ export class Store {
   list(opts: ListOptions = {}): Memory[] {
     const limit = opts.limit ?? 20;
     const offset = opts.offset ?? 0;
-    let sql = `SELECT id, content, metadata, created_at, status FROM memories`;
+    let sql = `SELECT id, content, metadata, created_at, status, weight FROM memories`;
     const params: (string | number)[] = [];
     const conditions: string[] = [];
     if (!opts.includeLegacy) {
@@ -343,6 +364,10 @@ export class Store {
     }
     if (opts.where) {
       conditions.push(opts.where);
+    }
+    if (opts.minWeight !== undefined) {
+      conditions.push("weight >= ?");
+      params.push(opts.minWeight);
     }
     if (conditions.length > 0) {
       sql += ` WHERE ${conditions.join(" AND ")}`;

@@ -89,7 +89,7 @@ test("update: changes metadata", () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store("content", { metadata: { tags: ["a"] } });
-    store.update(id, { tags: ["b"], kind: "note" });
+    store.update(id, { metadata: { tags: ["b"], kind: "note" } });
 
     const m = row<{ metadata: string | null }>(
       store,
@@ -106,7 +106,7 @@ test("update: throws on unknown id", () => {
   const { store, cleanup } = tempStore();
   try {
     assert.throws(
-      () => store.update("nope", { tags: ["x"] }),
+      () => store.update("nope", { metadata: { tags: ["x"] } }),
       /memory not found: nope/,
     );
   } finally {

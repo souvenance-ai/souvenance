@@ -8,6 +8,7 @@ export interface Memory {
   metadata: Record<string, unknown> | null;
   created_at: string;
   status: MemoryStatus;
+  weight: number;
 }
 
 export interface Relation {
@@ -20,6 +21,12 @@ export interface Relation {
 
 export interface StoreOptions {
   metadata?: Record<string, unknown>;
+  weight?: number;
+}
+
+export interface UpdateOptions {
+  metadata?: Record<string, unknown>;
+  weight?: number;
 }
 
 export interface SearchOptions {
@@ -33,6 +40,7 @@ export interface ListOptions {
   limit?: number;
   offset?: number;
   includeLegacy?: boolean;
+  minWeight?: number;
 }
 
 export type Direction = "in" | "out" | "both";
@@ -55,6 +63,7 @@ export interface SearchResult {
   metadata: Record<string, unknown> | null;
   created_at: string;
   status: MemoryStatus;
+  weight: number;
   rank: number;
 }
 

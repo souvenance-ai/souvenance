@@ -7,17 +7,17 @@ import { slugify, filenameFor, renderMemory } from "../src/export.ts";
 const HELP = `Usage: memory <command> [args] [flags]
 
 Commands:
-  store <content> [--metadata <json>]          Store a new memory, print its id
-  supersede <old-id> --content <text> [--metadata <json>]
+  store <content> [--metadata <json>] [--weight <0-1>]  Store a new memory, print its id
+  supersede <old-id> --content <text> [--metadata <json>] [--weight <0-1>]
       Store a new version, mark old as superseded
   deprecate <id>                               Soft-delete a memory (mark as deprecated)
-  merge <id1> <id2> [<id3> ...] --content <text> [--metadata <json>]  Combine memories into one
-  update <id> --metadata <json>               Update a memory's metadata (content is immutable)
+  merge <id1> <id2> [<id3> ...] --content <text> [--metadata <json>] [--weight <0-1>]  Combine memories into one
+  update <id> [--metadata <json>] [--weight <0-1>]  Update a memory's metadata and/or weight (content is immutable)
   delete <id> --force                           Delete a memory (destructive; prefer 'deprecate')
   link <from-id> <to-id> --kind <kind> [--metadata <json>]  Create a typed edge
-  search <query> [--where <sql>] [--limit N] [--all]  FTS5 search, ranked results as JSON
+  search <query> [--where <sql>] [--limit N] [--all]  FTS5 search, ranked by bm25 × weight × recency
   get <id>                                    Print a memory as JSON (or "not found")
-  list [--where <sql>] [--limit N] [--offset N] [--all]  List memories by metadata filter
+  list [--where <sql>] [--limit N] [--offset N] [--all] [--min-weight <0-1>]  List memories by metadata filter
   relations <id> [--direction out|in|both]    List edges to/from a memory
   stats                                       Print store statistics as JSON
   tags [--where <sql>] [--all]               List all distinct tags with counts, as JSON
@@ -119,7 +119,11 @@ function main() {
         if (rest.length < 1) fail("store requires <content>");
         const content = rest[0];
         const metadata = parseMetadata(flags["--metadata"]);
-        const id = store.store(content, metadata ? { metadata } : {});
+        const weight = num(flags["--weight"]);
+        const opts = {};
+        if (metadata) opts.metadata = metadata;
+        if (weight !== undefined) opts.weight = weight;
+        const id = store.store(content, opts);
         process.stdout.write(id + "\n");
         break;
       }
@@ -129,7 +133,11 @@ function main() {
         const content = flags["--content"];
         if (!content) fail("supersede requires --content <text>");
         const metadata = parseMetadata(flags["--metadata"]);
-        const id = store.supersede(oldId, content, metadata ? { metadata } : {});
+        const weight = num(flags["--weight"]);
+        const opts = {};
+        if (metadata) opts.metadata = metadata;
+        if (weight !== undefined) opts.weight = weight;
+        const id = store.supersede(oldId, content, opts);
         process.stdout.write(id + "\n");
         break;
       }
@@ -144,7 +152,11 @@ function main() {
         const content = flags["--content"];
         if (!content) fail("merge requires --content <text>");
         const metadata = parseMetadata(flags["--metadata"]);
-        const id = store.merge(rest, content, metadata ? { metadata } : {});
+        const weight = num(flags["--weight"]);
+        const opts = {};
+        if (metadata) opts.metadata = metadata;
+        if (weight !== undefined) opts.weight = weight;
+        const id = store.merge(rest, content, opts);
         process.stdout.write(id + "\n");
         break;
       }
@@ -152,10 +164,14 @@ function main() {
         if (rest.length < 1) fail("update requires <id>");
         const id = rest[0];
         const metadata = parseMetadata(flags["--metadata"]);
-        if (!metadata) {
-          fail("update requires --metadata (content is immutable; use 'supersede' to revise)");
+        const weight = num(flags["--weight"]);
+        if (metadata === undefined && weight === undefined) {
+          fail("update requires at least one of --metadata or --weight (content is immutable; use 'supersede' to revise)");
         }
-        store.update(id, metadata);
+        const opts = {};
+        if (metadata !== undefined) opts.metadata = metadata;
+        if (weight !== undefined) opts.weight = weight;
+        store.update(id, opts);
         process.stdout.write("updated\n");
         break;
       }
@@ -206,6 +222,7 @@ function main() {
           ...(flags["--limit"] ? { limit: num(flags["--limit"]) } : {}),
           ...(flags["--offset"] ? { offset: num(flags["--offset"]) } : {}),
           ...(flags["--all"] ? { includeLegacy: true } : {}),
+          ...(flags["--min-weight"] ? { minWeight: num(flags["--min-weight"]) } : {}),
         });
         print(results);
         break;
