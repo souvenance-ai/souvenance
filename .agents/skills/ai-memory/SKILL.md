@@ -9,11 +9,20 @@ A persistent, searchable memory for agents: markdown documents stored in a per-p
 
 ## When to use this skill
 
-- **Directives**: before starting work, check for `kind: "directive"` memories — strict rules, constraints, and gotchas that must be respected before acting. Run `list --where "metadata->>'$.kind' = 'directive'"` first.
+- **Recovering**: at the start of a session, follow the recovery protocol below to load prior context efficiently.
 - **Searching**: you need context you don't have — before starting work, when asked a question, or when recalling a prior decision. Search by keyword, optionally filtered by metadata.
 - **Storing**: a decision was made, a fact learned, a pattern noticed — anything worth recalling in a future session. Store it as a memory with metadata.
 - **Retrieving**: you need a specific memory by its id, or a `memory://` link referenced in content.
 - **Exploring**: the store is too large for context — follow the frontier loop (search → read → traverse relations → repeat).
+
+## Recovery protocol
+
+At the start of a session, recover prior context in two steps — then stop recovering and start working.
+
+1. **Load directives** — `list --where "metadata->>'$.kind' = 'directive'" --limit 20`. These are binding rules that must be respected before acting.
+2. **Load recent summaries** — `list --where "metadata->>'$.kind' = 'summary'" --limit 3`. These are the handoff from prior sessions: what was done, key decisions, what's next.
+
+Trust the summaries. They are the recovery point — not a hint to re-derive, but the prior session's finished work. Do not re-run verification (tests, typecheck, git log, stats) that the summaries already report as done. If you need deeper context, follow links from the summaries — the frontier loop starts there, not from scratch.
 
 ## Domain vocabulary
 
@@ -174,4 +183,4 @@ Run this checklist before you write your final message. Not after. Before.
 - Schema migrates on open — no manual migration step.
 - The library (`src/db.ts`) is the deep module; this skill is the thin agent-facing contract. For implementation detail, read the library, not this file.
 - **Directives.** Store strict rules, constraints, and gotchas as `kind: "directive"`. Check directives before acting: `list --where "metadata->>'$.kind' = 'directive'"`. Directives are few and high-signal; they should override routine memories when they conflict.
-- **Task summaries.** When you complete a non-trivial task, store a `kind: "summary"` memory recapping what was done, key decisions, and what's next — do this before sending your final message. A fresh session searches for `kind: "summary"` to get oriented before diving in. Link the summary to the memories it references.
+- **Task summaries.** When you complete a non-trivial task, store a `kind: "summary"` memory recapping what was done, key decisions, and what's next — do this before sending your final message. A fresh session loads summaries via the recovery protocol to get oriented before diving in. Link the summary to the memories it references.
