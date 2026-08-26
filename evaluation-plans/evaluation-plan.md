@@ -559,7 +559,7 @@ Use `--db <EVAL_DB>` for all memory commands.
 
 | # | Assertion | Command | Check |
 |---|-----------|---------|-------|
-| 6.1 | Exactly 5 memories stored | `stats` | `memories == 5` |
+| 6.1 | At least 5 task memories stored | `stats` | `memories >= 5` (may be 6 if sub-agent stores a kind:summary, which the skill encourages) |
 | 6.2 | 2 bugs, 2 decisions, 1 note | `list --where "metadata->>'$.kind' = 'bug'"` → 2; `= 'decision'"` → 2; `= 'note'"` → 1 | counts match |
 | 6.3 | Tags include "critical" | `tags` | a tag with `tag: "critical"` and `count: 1` |
 | 6.4 | Tags include "auth" | `tags` | a tag with `tag: "auth"` and `count: 1` |

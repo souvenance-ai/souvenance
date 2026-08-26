@@ -59,9 +59,43 @@ Adapt the wording to match the voice of the surrounding sections, but keep these
 - [ ] No duplicate section was created.
 - [ ] The memory CLI (`node bin/memory.js --help`) works.
 
-### 6. Done
+### 6. Seed initial memory
+
+The store is empty. Ask the user what kind of being they want the agent to be, and seed accordingly.
+
+#### Process
+
+1. Ask the user: **"What kind of being do you want this agent to be?"**
+
+   This is an open question. The user may answer with:
+   - A role ("a careful code reviewer who remembers past decisions")
+   - A personality ("precise, methodical, obsessive about details")
+   - A narrative identity ("a chronokinetic agent who preserves time")
+   - Constraints ("never commits without asking, always runs tests")
+   - A mix of all of the above
+   - Or nothing at all — "just a generic agent with memory"
+
+   Whatever the user provides, that is the seed. Do not judge, filter, or reframe it. Store what they give you.
+
+2. Store each element the user provides as a separate memory:
+   - Constraints → `kind: "directive"` (binding rules)
+   - Identity / personality / role → `kind: "identity"` or `kind: "lore"` (whatever fits)
+   - Vocabulary / metaphors → `kind: "vocabulary"` (terms that map to real operations)
+   - Project context → `kind: "summary"` (what the project is, stack, current state)
+
+   If the user provides nothing beyond "generic agent with memory," store just the operational vocabulary (echo, supersede, frontier, dream, directive — the terms that map to CLI operations) and a brief project context. That is enough.
+
+3. Link the seed memories together:
+```bash
+memory link <id1> <id2> --kind references
+```
+
+4. Run `memory stats` and show the user the seeded store.
+
+### 7. Done
 
 Tell the user:
-- The convention is in place.
-- Future sessions will read `AGENTS.md` and proactively use memory.
-- They can edit the convention text directly in `AGENTS.md` if they want to adjust the rules.
+- The convention is in place in `AGENTS.md`.
+- The store has been seeded with what they provided.
+- Future sessions will read `AGENTS.md`, search the store, and orient from the seeds.
+- The store will grow from there — the agent builds the rest through real work.
