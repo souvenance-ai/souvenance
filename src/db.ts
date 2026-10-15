@@ -1,7 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { migrate } from "./migrations.ts";
 import type {
   StoreOptions,
@@ -17,9 +18,17 @@ import type {
   Stats,
   SearchResult,
   TagCount,
+  DoctorFinding,
+  DoctorOptions,
+  DoctorReport,
 } from "./types.ts";
 
 export const DEFAULT_DB_PATH = ".ai-memory/memory.db";
+
+/** memory:// links are authored text in content; the doctor validates each target. */
+const MEMORY_LINK_RE = /memory:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
+
+const DOCTOR_CHECK_COUNT = 9;
 
 const SQLITE_BUSY = 5;
 const BUSY_RETRIES = 50;
@@ -599,6 +608,260 @@ export class Store {
     sql += ` GROUP BY tag ORDER BY count DESC, tag ASC`;
     const rows = this.db.prepare(sql).all() as { tag: string; count: number }[];
     return rows;
+  }
+
+  /**
+   * Validate the store's own integrity and report findings with one-line
+   * remediation hints. Diagnoses only: content repairs stay supersede/merge
+   * decisions; the single mechanical exception is opts.fix, which rebuilds
+   * the FTS5 index before checking. The report is ordered by check (see
+   * .scratch/memory-doctor/issues/01 for the per-check contract).
+   */
+  doctor(opts: DoctorOptions = {}): DoctorReport {
+    const findings: DoctorFinding[] = [];
+    if (opts.fix) {
+      this.run(() => {
+        this.db.exec("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')");
+      });
+    }
+
+    const mems = this.db
+      .prepare("SELECT id, content, metadata, created_at, status, weight, access_count FROM memories")
+      .all() as unknown as MemoryRow[];
+    const edges = this.db
+      .prepare("SELECT from_id, to_id, kind, metadata, created_at FROM edges")
+      .all() as unknown as RelationRow[];
+    const byId = new Map(mems.map((m) => [m.id, m]));
+
+    // Parse metadata once; broken_links/orphan checks need ids, kind/weight
+    // checks need parsed metadata, invalid-JSON needs the parse failure itself.
+    const parsedMeta = new Map<string, Record<string, unknown> | null>();
+    for (const m of mems) {
+      if (m.metadata === null) {
+        parsedMeta.set(m.id, null);
+        continue;
+      }
+      try {
+        parsedMeta.set(m.id, JSON.parse(m.metadata) as Record<string, unknown>);
+      } catch {
+        parsedMeta.set(m.id, undefined as unknown as Record<string, unknown>);
+      }
+    }
+
+    for (const m of mems) {
+      for (const match of m.content.matchAll(MEMORY_LINK_RE)) {
+        if (!byId.has(match[1])) {
+          findings.push({
+            check: "broken_links",
+            id: m.id,
+            detail: `content references memory://${match[1]} which is not in the store`,
+            hint: "supersede with corrected content, or deprecate the source memory",
+          });
+        }
+      }
+    }
+
+    for (const e of edges) {
+      if (!byId.has(e.from_id) || !byId.has(e.to_id)) {
+        findings.push({
+          check: "orphan_edges",
+          detail: `edge ${e.from_id} -> ${e.to_id} (${e.kind}) references a missing memory`,
+          hint: "the store was edited outside the CLI; restore the missing memory or remove the edge with direct SQL",
+        });
+      }
+    }
+
+    for (const m of mems) {
+      if (m.status !== "active") continue;
+      const parsed = parsedMeta.get(m.id);
+      // Invalid JSON is already reported by invalid_metadata_json — one
+      // finding per root cause, not two for the same corruption.
+      if (parsed === undefined) continue;
+      const kind =
+        parsed !== null && typeof parsed["kind"] === "string" ? (parsed["kind"] as string) : undefined;
+      if (m.metadata === null || !kind) {
+        findings.push({
+          check: "active_without_kind",
+          id: m.id,
+          detail:
+            m.metadata === null
+              ? "active memory has null metadata"
+              : "active memory metadata carries no kind",
+          hint: 'memory update --metadata \'{"kind":"note"}\' restores ritual visibility',
+        });
+      }
+    }
+
+    for (const m of mems) {
+      if (m.status !== "active") continue;
+      const parsed = parsedMeta.get(m.id);
+      const kind =
+        parsed && typeof parsed["kind"] === "string" ? (parsed["kind"] as string) : undefined;
+      if (m.weight < 0 || m.weight > 1) {
+        findings.push({
+          check: "weight_bounds",
+          id: m.id,
+          detail: `weight ${m.weight} outside [0, 1]`,
+          hint: "memory update --weight <0-1>",
+        });
+      } else if ((kind === "directive" || kind === "summary") && m.weight < 0.8) {
+        findings.push({
+          check: "weight_bounds",
+          id: m.id,
+          detail: `${kind} with weight ${m.weight} below the 0.8 floor`,
+          hint: "memory update --weight 0.8",
+        });
+      }
+    }
+
+    for (const m of mems) {
+      if (m.metadata !== null && parsedMeta.get(m.id) === undefined) {
+        findings.push({
+          check: "invalid_metadata_json",
+          id: m.id,
+          detail: "metadata column is not valid JSON",
+          hint: "memory update --metadata '{...}' replaces it",
+        });
+      }
+    }
+
+    for (const m of mems) {
+      if (m.status !== "superseded" && m.status !== "merged") continue;
+      const bridged = edges.some(
+        (e) =>
+          e.from_id === m.id && (e.kind === "supersedes" || e.kind === "merges"),
+      );
+      if (!bridged) {
+        findings.push({
+          check: "status_without_bridge",
+          id: m.id,
+          detail: `status '${m.status}' but no supersedes/merges edge outgoing`,
+          hint: "hand-edited status: restore to active via SQL, or create the bridge edge to the successor memory",
+        });
+      }
+    }
+
+    for (const m of mems) {
+      if (m.status !== "active") continue;
+      const linked = edges.some((e) => e.from_id === m.id || e.to_id === m.id);
+      if (!linked) {
+        findings.push({
+          check: "isolated_active",
+          id: m.id,
+          detail: "active memory with no edges in either direction",
+          hint: "link it to related memories (dream relink step)",
+        });
+      }
+    }
+
+    const titleGroups = new Map<string, string[]>();
+    for (const m of mems) {
+      if (m.status !== "active") continue;
+      const firstLine = m.content.split("\n")[0].trim();
+      // Only memories whose FIRST line is a markdown heading carry a title;
+      // heading-less memories never group (the audit's <no-heading> false positive).
+      if (!firstLine.startsWith("#")) continue;
+      const group = titleGroups.get(firstLine) ?? [];
+      group.push(m.id);
+      titleGroups.set(firstLine, group);
+    }
+    for (const [title, ids] of titleGroups) {
+      if (ids.length > 1) {
+        findings.push({
+          check: "duplicate_titles",
+          detail: `${ids.length} active memories share the title "${title}": ${ids.join(", ")}`,
+          hint: "merge the group, or supersede with a distinct title",
+        });
+      }
+    }
+
+    findings.push(...this.checkFts());
+
+    const edges_by_kind: Record<string, number> = {};
+    for (const e of edges) {
+      edges_by_kind[e.kind] = (edges_by_kind[e.kind] ?? 0) + 1;
+    }
+    // Informational, never a finding: active->superseded edges are normal
+    // history, resolved at read time by relations({ resolve: true }).
+    const active_to_superseded = edges.filter(
+      (e) =>
+        byId.get(e.from_id)?.status === "active" &&
+        byId.get(e.to_id)?.status === "superseded",
+    ).length;
+
+    return {
+      healthy: findings.length === 0,
+      findings,
+      summary: {
+        checks: DOCTOR_CHECK_COUNT,
+        issues: findings.length,
+        memories: mems.length,
+        edges: edges.length,
+        edges_by_kind,
+        active_to_superseded,
+        fts_rebuilt: opts.fix === true,
+      },
+    };
+  }
+
+  /**
+   * Verify the FTS5 index against the memories table on a VACUUM INTO
+   * snapshot — the doctor must never take a write lock on a store agents
+   * write to concurrently. The snapshot is deleted before returning.
+   *
+   * The rowid diff runs through an fts5vocab 'instance' table: FTS5 serves
+   * plain scans (and count(*)) of an external-content table FROM THE CONTENT
+   * TABLE, so ghost rowids are invisible to them; only the vocabulary side
+   * reads the index. integrity-check adds internal-structure verification.
+   */
+  private checkFts(): DoctorFinding[] {
+    const out: DoctorFinding[] = [];
+    const snapDir = mkdtempSync(join(tmpdir(), "ai-memory-doctor-"));
+    try {
+      const snapPath = join(snapDir, "snapshot.db").replace(/'/g, "''");
+      this.run(() => this.db.exec(`VACUUM INTO '${snapPath}'`));
+      const snap = new DatabaseSync(snapPath);
+      try {
+        snap.exec(
+          "CREATE VIRTUAL TABLE fts_vocab" +
+            " USING fts5vocab('memories_fts', 'instance')",
+        );
+        const indexRowids = new Set(
+          (snap.prepare("SELECT DISTINCT doc FROM fts_vocab").all() as { doc: number }[]).map(
+            (r) => r.doc,
+          ),
+        );
+        const memRowids = (
+          snap.prepare("SELECT rowid FROM memories").all() as { rowid: number }[]
+        ).map((r) => r.rowid);
+        // Ghosts show up as an index rowid the content lacks; holes as the
+        // reverse. Equal sizes plus full content membership ⇒ identical sets.
+        const drifted =
+          indexRowids.size !== memRowids.length ||
+          memRowids.some((r) => !indexRowids.has(r));
+        if (drifted) {
+          out.push({
+            check: "fts_integrity",
+            detail: `FTS index holds ${indexRowids.size} rowids for ${memRowids.length} memories`,
+            hint: "memory doctor --fix rebuilds the FTS index (mechanical, no content rewrite)",
+          });
+        }
+        try {
+          snap.exec("INSERT INTO memories_fts(memories_fts) VALUES('integrity-check')");
+        } catch (err) {
+          out.push({
+            check: "fts_integrity",
+            detail: `integrity-check failed: ${err instanceof Error ? err.message : String(err)}`,
+            hint: "memory doctor --fix rebuilds the FTS index (mechanical, no content rewrite)",
+          });
+        }
+      } finally {
+        snap.close();
+      }
+    } finally {
+      rmSync(snapDir, { recursive: true, force: true });
+    }
+    return out;
   }
 
   /**

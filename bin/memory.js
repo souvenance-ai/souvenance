@@ -24,6 +24,8 @@ Commands:
   stats                                       Print store statistics as JSON
   tags [--where <sql>] [--all]               List all distinct tags with counts, as JSON
   export [--output <dir>]                     Export the entire store as a flat directory of markdown files
+  doctor [--fix]                              Validate store integrity (links, edges, kinds, weights,
+      titles, FTS index); prints a JSON report, exit 1 when findings
 
 Flags:
   --db <path>      Override the DB path (default: .ai-memory/memory.db)
@@ -46,9 +48,13 @@ Notes:
     memory(ies); explicit --metadata is used verbatim
   export writes one .md file per memory (all statuses) with YAML frontmatter;
     memory:// links are rewritten to relative file links; idempotent
+  doctor diagnoses, it never edits content. --fix rebuilds the FTS index
+    (the one mechanical repair); every other finding is repaired by hand
+    (supersede, merge, update, link). Exit code is 1 when findings exist
+    (a successful diagnosis, not an error — stderr stays empty)
 `;
 
-const BOOLEAN_FLAGS = new Set(["--all", "--force", "--resolved"]);
+const BOOLEAN_FLAGS = new Set(["--all", "--force", "--resolved", "--fix"]);
 
 function parseArgs(argv) {
   const args = [];
@@ -110,6 +116,9 @@ function main() {
 
   const command = args[0];
   const rest = args.slice(1);
+  // Commands that end healthy-but-with-findings mark this; exit(1) fires
+  // AFTER the finally block so the store closes normally.
+  let exitCode = 0;
 
   const dbPath = flags["--db"];
   let store;
@@ -284,6 +293,14 @@ function main() {
         process.stdout.write(`exported ${count} memories to ${outputDir}\n`);
         break;
       }
+      case "doctor": {
+        const report = store.doctor({
+          ...(flags["--fix"] ? { fix: true } : {}),
+        });
+        print(report);
+        if (!report.healthy) exitCode = 1;
+        break;
+      }
       default:
         fail(`unknown command: ${command}\n\n${HELP}`);
     }
@@ -292,6 +309,7 @@ function main() {
   } finally {
     store.close();
   }
+  if (exitCode !== 0) process.exit(exitCode);
 }
 
 main();

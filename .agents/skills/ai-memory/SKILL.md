@@ -48,9 +48,10 @@ memory list --min-weight 0.7
 memory relations <id> --direction both [--resolved]
 memory stats
 memory tags
+memory doctor [--fix]
 ```
 
-Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`/`delete`/`link`/`deprecate` print a one-word confirmation.
+Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`/`delete`/`link`/`deprecate` print a one-word confirmation. `doctor` prints a `DoctorReport` ({healthy, findings: [{check, id?, detail, hint}], summary}) and exits 1 when findings exist — a successful diagnosis, not an error.
 
 `--db <path>` overrides the store location (default: `.ai-memory/memory.db`).
 
@@ -121,6 +122,8 @@ Dreaming is **threshold-triggered**, not self-selected. Check these thresholds a
 1. **Edge ratio**: run `memory stats`. If `edges / active_memories < 1.5`, the graph is under-linked — dream.
 2. **Volume**: if `+10` or more new memories were stored since the last dream, dream.
 3. **Session end**: after any non-trivial session, dream before sending your final message.
+
+Before dreaming, run `memory doctor` — findings get repaired first (a dream consolidates what exists; it should never consolidate corruption).
 
 If none of the thresholds are met, skip dreaming. Do not dream on every session — it is costly and should happen when the store has accumulated enough to benefit from it.
 

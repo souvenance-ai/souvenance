@@ -85,3 +85,45 @@ export interface TagsOptions {
   where?: string;
   includeLegacy?: boolean;
 }
+
+/** The doctor's finding-producing checks. See .scratch/memory-doctor/. */
+export type DoctorCheck =
+  | "broken_links"
+  | "orphan_edges"
+  | "active_without_kind"
+  | "weight_bounds"
+  | "invalid_metadata_json"
+  | "status_without_bridge"
+  | "isolated_active"
+  | "duplicate_titles"
+  | "fts_integrity";
+
+export interface DoctorFinding {
+  check: DoctorCheck;
+  /** Implicated memory id (edge findings name both endpoints in detail). */
+  id?: UUID;
+  detail: string;
+  /** One-line remediation, ready to act on. */
+  hint: string;
+}
+
+export interface DoctorOptions {
+  /** Rebuild the FTS5 index on the live store before checking — the one
+   *  mechanical repair (no content rewrite). Default off. */
+  fix?: boolean;
+}
+
+export interface DoctorReport {
+  healthy: boolean;
+  findings: DoctorFinding[];
+  summary: {
+    checks: number;
+    issues: number;
+    memories: number;
+    edges: number;
+    edges_by_kind: Record<string, number>;
+    /** Informational, never a finding: normal history, resolved at read time. */
+    active_to_superseded: number;
+    fts_rebuilt: boolean;
+  };
+}

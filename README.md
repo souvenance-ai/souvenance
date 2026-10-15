@@ -41,6 +41,8 @@ The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
 | `relations <id> [--direction out\|in\|both]` | List edges to/from a memory |
 | `stats` | Print store statistics as JSON |
 | `tags [--where <sql>] [--all]` | List all distinct metadata tags with counts |
+| `doctor [--fix]` | Validate store integrity (links, edges, kinds, weights, titles, FTS); exit 1 when findings |
+| `export [--output <dir>]` | Export the entire store as a flat directory of markdown files |
 
 Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure.
 
