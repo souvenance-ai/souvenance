@@ -176,6 +176,55 @@ test("supersede: stores metadata on the new memory", () => {
   }
 });
 
+test("supersede: inherits kind and tags from the old memory when metadata omitted", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store("hello world", {
+      metadata: { kind: "note", tags: ["a", "b"], session: 2 },
+    });
+    const newId = store.supersede(oldId, "hello universe");
+
+    const newMem = store.get(newId);
+    assert.ok(newMem);
+    // kind and tags are structural and carry; contextual keys do not.
+    assert.deepEqual(newMem!.metadata, { kind: "note", tags: ["a", "b"] });
+  } finally {
+    cleanup();
+  }
+});
+
+test("supersede: explicit metadata is used verbatim, no inherit", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store("hello world", {
+      metadata: { kind: "note", tags: ["a"] },
+    });
+    const newId = store.supersede(oldId, "hello universe", {
+      metadata: { kind: "decision" },
+    });
+
+    const newMem = store.get(newId);
+    assert.ok(newMem);
+    assert.deepEqual(newMem!.metadata, { kind: "decision" });
+  } finally {
+    cleanup();
+  }
+});
+
+test("supersede: kindless old memory yields kindless successor", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store("hello world");
+    const newId = store.supersede(oldId, "hello universe");
+
+    const newMem = store.get(newId);
+    assert.ok(newMem);
+    assert.equal(newMem!.metadata, null);
+  } finally {
+    cleanup();
+  }
+});
+
 test("supersede: throws on unknown old id", () => {
   const { store, cleanup } = tempStore();
   try {
@@ -296,6 +345,44 @@ test("merge: stores metadata on the merged memory", () => {
 
     const merged = store.get(mergedId);
     assert.deepEqual(merged!.metadata, { tags: ["merged"] });
+  } finally {
+    cleanup();
+  }
+});
+
+test("merge: inherits kind when every source agrees, unions tags", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("alpha", {
+      metadata: { kind: "note", tags: ["x"] },
+    });
+    const b = store.store("beta", {
+      metadata: { kind: "note", tags: ["y", "x"] },
+    });
+    const id = store.merge([a, b], "alpha beta combined");
+
+    const mem = store.get(id);
+    assert.ok(mem);
+    assert.deepEqual(mem!.metadata, { kind: "note", tags: ["x", "y"] });
+  } finally {
+    cleanup();
+  }
+});
+
+test("merge: divergent kinds are not inherited; tags still union", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("alpha", {
+      metadata: { kind: "note", tags: ["x"] },
+    });
+    const b = store.store("beta", {
+      metadata: { kind: "decision", tags: ["y"] },
+    });
+    const id = store.merge([a, b], "alpha beta combined");
+
+    const mem = store.get(id);
+    assert.ok(mem);
+    assert.deepEqual(mem!.metadata, { tags: ["x", "y"] });
   } finally {
     cleanup();
   }

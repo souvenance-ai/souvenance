@@ -154,13 +154,16 @@ export class Store {
   ): string {
     if (!content) throw new Error("content must be non-empty");
     const newId = randomUUID();
-    const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
     const weight = opts.weight ?? 0.5;
     const created_at = new Date().toISOString();
     this.run(() => {
       this.db.exec("BEGIN");
       try {
         this.assertActive(oldId, "supersede");
+        const metadata = JSON.stringify(
+          opts.metadata ??
+            this.structuralInherit([this.readMeta(oldId)]),
+        );
         this.db
           .prepare(
             "INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)",
@@ -198,15 +201,19 @@ export class Store {
       seen.add(id);
     }
     const newId = randomUUID();
-    const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
     const weight = opts.weight ?? 0.5;
     const created_at = new Date().toISOString();
     this.run(() => {
       this.db.exec("BEGIN");
       try {
+        const metas: Array<Record<string, unknown> | null> = [];
         for (const id of ids) {
           this.assertActive(id, "merge");
+          metas.push(this.readMeta(id));
         }
+        const metadata = JSON.stringify(
+          opts.metadata ?? this.structuralInherit(metas),
+        );
         this.db
           .prepare(
             "INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)",
@@ -490,6 +497,55 @@ export class Store {
       current = bridge?.to_id;
     }
     return undefined;
+  }
+
+  /**
+   * Raw metadata of one memory, parsed; null when the row is absent or the
+   * column is null. Internal helper for successor construction — never bumps
+   * access_count.
+   */
+  private readMeta(id: string): Record<string, unknown> | null {
+    const row = this.db
+      .prepare("SELECT metadata FROM memories WHERE id = ?")
+      .get(id) as { metadata: string | null } | undefined;
+    if (row === undefined || row.metadata === null) return null;
+    try {
+      return JSON.parse(row.metadata);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Structural metadata for a supersede/merge successor built from source
+   * metadata: kind carries only when every source agrees, tags union across
+   * sources. Explicit opts.metadata wins verbatim — inherit happens only when
+   * the caller passed no metadata at all. Rationale: kind is what the CLI's
+   * read filters select on (directives, decisions, summaries); a kind-less
+   * successor silently drops out of those rituals (observed defect October
+   * 2026, caught by the cold-reader re-test). Contextual metadata is never
+   * copied — the successor's content describes new state.
+   */
+  private structuralInherit(
+    metas: Array<Record<string, unknown> | null>,
+  ): Record<string, unknown> | null {
+    const kinds = new Set<unknown>();
+    const tags: unknown[] = [];
+    for (const meta of metas) {
+      if (!meta) continue;
+      if ("kind" in meta && meta["kind"] !== undefined) kinds.add(meta["kind"]);
+      if (Array.isArray(meta["tags"])) {
+        for (const t of meta["tags"] as unknown[]) {
+          if (!tags.some((x) => JSON.stringify(x) === JSON.stringify(t))) {
+            tags.push(t);
+          }
+        }
+      }
+    }
+    const out: Record<string, unknown> = {};
+    if (kinds.size === 1) out["kind"] = [...kinds][0];
+    if (tags.length > 0) out["tags"] = tags;
+    return Object.keys(out).length > 0 ? out : null;
   }
 
   stats(): Stats {

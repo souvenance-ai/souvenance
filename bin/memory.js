@@ -42,6 +42,8 @@ Notes:
   --all includes superseded/deprecated/merged memories in search/list/tags results
   --resolved on relations annotates superseded/merged targets with resolved_to
     (the terminal successor via the supersedes/merges bridges); raw rows unchanged
+  supersede/merge without --metadata inherit kind and tags from the source
+    memory(ies); explicit --metadata is used verbatim
   export writes one .md file per memory (all statuses) with YAML frontmatter;
     memory:// links are rewritten to relative file links; idempotent
 `;

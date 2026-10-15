@@ -84,7 +84,7 @@ A memory link is distinct from a **relation**: a link is authored text in conten
 
 Content is immutable — never overwrite a memory. Instead of updating or deleting, use these operations:
 
-- **Revise a decision**: `memory supersede <old-id> --content "new content" [--metadata <json>]` — stores a new version (status `active`), links the old one to it via a `supersedes` relation, and marks the old as `superseded`.
+- **Revise a decision**: `memory supersede <old-id> --content "new content"` — stores a new version (status `active`), links the old one to it via a `supersedes` relation, and marks the old as `superseded`. Pass `--metadata <json>` to override; without it the successor inherits `kind` and `tags` from the source memory.
 - **Soft-delete**: `memory deprecate <id>` — marks the memory as `deprecated`, hiding it from default `search` and `list` results without removing it.
 - **Combine duplicates**: `memory merge <id1> <id2> [<id3> ...] --content "merged content" [--metadata <json>]` — stores a merged memory (status `active`), marks each original as `merged`, and links each original to the merged result via a `merges` relation.
 
@@ -132,7 +132,7 @@ Run them in order. Each uses existing CLI commands — dreaming is a workflow, n
 
 2. **Merge** — find active memories that cover the same concept, decision, or event. Search by keyword for each topic; if two memories say substantially the same thing, `memory merge <id1> <id2> --content "merged content" --metadata '{...}'`. Preserve the history — the originals are marked `merged`, the new one is `active`.
 
-3. **Supersede** — find active decisions or summaries that are factually outdated. If a memory states something that a later memory contradicts or replaces, `memory supersede <old-id> --content "current truth" --metadata '{...}'`. The old memory stays as `superseded`, preserving the history.
+3. **Supersede** — find active decisions or summaries that are factually outdated. If a memory states something that a later memory contradicts or replaces, `memory supersede <old-id> --content "current truth"` (kind and tags inherit from the source unless overridden with `--metadata`). The old memory stays as `superseded`, preserving the history.
 
 4. **Rebalance** — adjust `weight` values based on graph structure. The author sets weight at creation; the dream corrects it based on reality:
    - Memory referenced by many incoming edges → boost (importance is structural and emergent).
