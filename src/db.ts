@@ -336,7 +336,7 @@ export class Store {
       ` (bm25(memories_fts) * m.weight * (1.0 / (1.0 + (julianday('now') - julianday(m.created_at)))) * (1.0 + ln(m.access_count + 1) * 0.1)) AS rank` +
       ` FROM memories_fts f` +
       ` JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ?`;
-    const params: (string | number)[] = [query];
+    const params: (string | number)[] = [];
     if (!opts.includeLegacy) {
       sql += ` AND m.status = 'active'`;
     }
@@ -345,18 +345,35 @@ export class Store {
     }
     sql += ` ORDER BY rank LIMIT ?`;
     params.push(limit);
-    const rows = this.db.prepare(sql).all(...params) as unknown as SearchRow[];
-    const results = rows.map(parseSearchRow);
-    if (results.length > 0) {
-      const fraction = 1.0 / results.length;
-      this.run(() => {
-        const stmt = this.db.prepare("UPDATE memories SET access_count = access_count + ? WHERE id = ?");
-        for (const r of results) {
-          stmt.run(fraction, r.id);
-        }
-      });
+    const runQuery = (match: string): SearchResult[] => {
+      const rows = this.db.prepare(sql).all(match, ...params) as unknown as SearchRow[];
+      const results = rows.map(parseSearchRow);
+      if (results.length > 0) {
+        const fraction = 1.0 / results.length;
+        this.run(() => {
+          const stmt = this.db.prepare("UPDATE memories SET access_count = access_count + ? WHERE id = ?");
+          for (const r of results) {
+            stmt.run(fraction, r.id);
+          }
+        });
+      }
+      return results;
+    };
+    try {
+      return runQuery(query);
+    } catch (err) {
+      // FTS5 rejects punctuation in bare tokens (dotted numerics like "0.9",
+      // hyphenated or colonated identifiers). Dotted numerics raise
+      // "fts5: syntax error"; hyphenated/colonated compounds make FTS5 treat
+      // the tail as a column filter and raise "no such column: <tail>".
+      // A "no such column" whose name is not part of the query is a plain
+      // SQL problem (e.g. a bad --where) and must keep surfacing.
+      if (ftsErrorFromQuery(err, query)) {
+        const sanitized = sanitizeFtsQuery(query);
+        if (sanitized) return runQuery(sanitized);
+      }
+      throw err;
     }
-    return results;
   }
 
   get(id: string): Memory | null {
@@ -506,4 +523,54 @@ export class Store {
     }
     throw lastErr;
   }
+}
+
+/**
+ * Decides whether a search failure came from malformed FTS5 query glue
+ * (punctuation inside bare tokens) rather than from a plain SQL problem.
+ * FTS5 signals it in two ways: a "fts5: syntax error" from characters it
+ * cannot parse, or "no such column: X" when a hyphenated/colonated
+ * compound makes it read X as a column filter — only trusted when X
+ * appears in the query itself.
+ */
+export function ftsErrorFromQuery(err: unknown, query: string): boolean {
+  if (!(err instanceof Error)) return false;
+  if (/fts5:\s*syntax error/i.test(err.message)) return true;
+  const match = err.message.match(/no such column:\s*"([^"]+)"|no such column:\s*([A-Za-z0-9_]+)/i);
+  if (!match) return false;
+  const name = (match[1] ?? match[2]).toLowerCase();
+  return query.toLowerCase().includes(name);
+}
+
+/**
+ * Fallback query builder for FTS5 syntax failures. Keeps operators and
+ * quoted phrases, strips every other punctuation character so dotted
+ * numerics and hyphenated/colonated identifiers become plain tokens
+ * ("better-sqlite3" -> "better sqlite3"). Returns null when nothing
+ * searchable remains; the caller then rethrows the original error.
+ */
+export function sanitizeFtsQuery(query: string): string | null {
+  const parts = query.match(/"[^"]*"|[^\s"]+/g);
+  if (!parts) return null;
+  const cleaned: string[] = [];
+  for (const part of parts) {
+    if (part.startsWith('"')) {
+      const inner = part
+        .slice(1, -1)
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (inner) cleaned.push(`"${inner}"`);
+      continue;
+    }
+    if (/^(OR|AND|NOT)$/i.test(part)) {
+      cleaned.push(part.toUpperCase());
+      continue;
+    }
+    const pieces = part.replace(/[^\p{L}\p{N}]/gu, " ").split(/\s+/);
+    for (const piece of pieces) {
+      if (piece) cleaned.push(piece);
+    }
+  }
+  return cleaned.length > 0 ? cleaned.join(" ") : null;
 }
