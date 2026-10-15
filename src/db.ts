@@ -95,9 +95,12 @@ export interface OpenOptions {
 }
 
 function execPragma(db: DatabaseSync): void {
+  // busy_timeout MUST come first: PRAGMA journal_mode = WAL grabs an exclusive
+  // file-header lock when the store is fresh (or unwal'd). With the busy handler
+  // unset, any racing open loses that grab immediately with SQLITE_BUSY.
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
-  db.exec("PRAGMA busy_timeout = 5000");
 }
 
 export class Store {
@@ -231,9 +234,11 @@ export class Store {
   }
 
   update(id: string, opts: UpdateOptions = {}): void {
-    const existing = this.db
-      .prepare("SELECT 1 FROM memories WHERE id = ?")
-      .get(id);
+    // Pre-check reads are wrapped: under concurrent writers they can transiently
+    // hit SQLITE_BUSY, and unwrapped they would abort with 'database is locked'.
+    const existing = this.run(() =>
+      this.db.prepare("SELECT 1 FROM memories WHERE id = ?").get(id),
+    );
     if (!existing) throw new Error(`memory not found: ${id}`);
     const sets: string[] = [];
     const params: (string | number)[] = [];
@@ -255,9 +260,9 @@ export class Store {
   }
 
   delete(id: string): void {
-    const existing = this.db
-      .prepare("SELECT 1 FROM memories WHERE id = ?")
-      .get(id);
+    const existing = this.run(() =>
+      this.db.prepare("SELECT 1 FROM memories WHERE id = ?").get(id),
+    );
     if (!existing) throw new Error(`memory not found: ${id}`);
     this.run(() => {
       this.db.prepare("DELETE FROM memories WHERE id = ?").run(id);
@@ -265,7 +270,7 @@ export class Store {
   }
 
   deprecate(id: string): void {
-    this.assertActive(id, "deprecate");
+    this.run(() => this.assertActive(id, "deprecate"));
     this.run(() => {
       this.db
         .prepare("UPDATE memories SET status = 'deprecated' WHERE id = ?")
@@ -280,13 +285,13 @@ export class Store {
     opts: StoreOptions = {},
   ): void {
     if (!kind) throw new Error("kind must be non-empty");
-    const fromExists = this.db
-      .prepare("SELECT 1 FROM memories WHERE id = ?")
-      .get(fromId);
+    const fromExists = this.run(() =>
+      this.db.prepare("SELECT 1 FROM memories WHERE id = ?").get(fromId),
+    );
     if (!fromExists) throw new Error(`memory not found: ${fromId}`);
-    const toExists = this.db
-      .prepare("SELECT 1 FROM memories WHERE id = ?")
-      .get(toId);
+    const toExists = this.run(() =>
+      this.db.prepare("SELECT 1 FROM memories WHERE id = ?").get(toId),
+    );
     if (!toExists) throw new Error(`memory not found: ${toId}`);
 
     const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
