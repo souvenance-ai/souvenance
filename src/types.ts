@@ -18,6 +18,9 @@ export interface Relation {
   kind: string;
   metadata: Record<string, unknown> | null;
   created_at: string;
+  /** Present only when resolve was requested and the target is superseded/merged:
+   *  the terminal successor reached by following the supersedes/merges bridges. */
+  resolved_to?: UUID;
 }
 
 export interface StoreOptions {
@@ -48,6 +51,9 @@ export type Direction = "in" | "out" | "both";
 
 export interface RelationsOptions {
   direction?: Direction;
+  /** Annotate relations whose target is superseded/merged with resolved_to
+   *  (the terminal successor via the supersedes/merges bridges). Default off. */
+  resolve?: boolean;
 }
 
 export interface Stats {

@@ -45,7 +45,7 @@ memory search "tabs spaces" --where "metadata->>'$.kind' = 'note'" --limit 5
 memory get <id>
 memory list --where "metadata->>'$.kind' = 'decision'" --limit 20
 memory list --min-weight 0.7
-memory relations <id> --direction both
+memory relations <id> --direction both [--resolved]
 memory stats
 memory tags
 ```
@@ -88,7 +88,7 @@ Content is immutable — never overwrite a memory. Instead of updating or deleti
 - **Soft-delete**: `memory deprecate <id>` — marks the memory as `deprecated`, hiding it from default `search` and `list` results without removing it.
 - **Combine duplicates**: `memory merge <id1> <id2> [<id3> ...] --content "merged content" [--metadata <json>]` — stores a merged memory (status `active`), marks each original as `merged`, and links each original to the merged result via a `merges` relation.
 
-`search` and `list` default to `active` memories only; pass `--all` to include superseded, deprecated, and merged memories in results. `get` always returns the memory as-is, including its status — follow `supersedes` or `merges` relations to find the current version.
+`search` and `list` default to `active` memories only; pass `--all` to include superseded, deprecated, and merged memories in results. `get` always returns the memory as-is, including its status — follow `supersedes` or `merges` relations to find the current version. On relations, pass `--resolved` to have each superseded/merged target annotated with `resolved_to`, the current version reached via the bridges (raw fields are never rewritten; deprecated targets and broken chains stay bare).
 
 ## Writing good memories
 
@@ -105,7 +105,7 @@ When the store is too large to load into context, explore it with the **frontier
 
 1. **Search** by keyword (`memory search "..." --limit 5`). Get a small, ranked set.
 2. **Read** the matches (`memory get <id>`). Pick the relevant ones.
-3. **Traverse** relations to related memories (`memory relations <id>`). Follow edges that look promising.
+3. **Traverse** relations to related memories (`memory relations <id>`). Follow edges that look promising; when an edge lands on a superseded/merged memory, `--resolved` names the current version.
 4. **Repeat** from step 1 with new keywords drawn from what you've read.
 
 `LIMIT` at every step. The point is to follow a thread through the graph, not to dump the database.

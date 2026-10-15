@@ -448,7 +448,48 @@ export class Store {
       rows.push(...inRows);
     }
 
-    return rows.map(parseRelationRow);
+    const relations = rows.map(parseRelationRow);
+    if (opts.resolve) {
+      for (const rel of relations) {
+        const terminal = this.resolveChain(rel.to_id);
+        // Annotate only when the raw target is not already the current
+        // version: active targets and unresolvable chains stay bare.
+        if (terminal && terminal !== rel.to_id) rel.resolved_to = terminal;
+      }
+    }
+    return relations;
+  }
+
+  /**
+   * Follow the unique supersedes/merges bridge out of a superseded/merged
+   * memory until the chain reaches an active memory. Returns undefined when
+   * there is no successor: dangling id, deprecated target (a termination,
+   * not a replacement), or a bridged chain cut off. Chains are linear by
+   * construction — supersede and merge both demand an active source and
+   * create exactly one bridge old→new — so this loop always terminates; the
+   * seen set only defends against a store whose rows were edited by hand.
+   */
+  private resolveChain(startId: string): string | undefined {
+    const statusStmt = this.db.prepare(
+      "SELECT status FROM memories WHERE id = ?",
+    );
+    const bridgeStmt = this.db.prepare(
+      "SELECT to_id FROM edges" +
+        " WHERE from_id = ? AND kind IN ('supersedes', 'merges')" +
+        " ORDER BY created_at DESC LIMIT 1",
+    );
+    const seen = new Set<string>();
+    let current: string | undefined = startId;
+    while (current !== undefined && !seen.has(current)) {
+      seen.add(current);
+      const row = statusStmt.get(current) as { status: string } | undefined;
+      if (!row) return undefined;
+      if (row.status === "active") return current;
+      if (row.status !== "superseded" && row.status !== "merged") return undefined;
+      const bridge = bridgeStmt.get(current) as { to_id: string } | undefined;
+      current = bridge?.to_id;
+    }
+    return undefined;
   }
 
   stats(): Stats {

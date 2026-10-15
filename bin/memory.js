@@ -18,7 +18,9 @@ Commands:
   search <query> [--where <sql>] [--limit N] [--all]  FTS5 search, ranked by bm25 × weight × recency × access_boost
   get <id>                                    Print a memory as JSON (or "not found"); increments access_count
   list [--where <sql>] [--limit N] [--offset N] [--all] [--min-weight <0-1>]  List memories by metadata filter
-  relations <id> [--direction out|in|both]    List edges to/from a memory
+  relations <id> [--direction out|in|both] [--resolved]
+      List edges to/from a memory (--resolved annotates superseded/merged
+      targets with resolved_to, their current version)
   stats                                       Print store statistics as JSON
   tags [--where <sql>] [--all]               List all distinct tags with counts, as JSON
   export [--output <dir>]                     Export the entire store as a flat directory of markdown files
@@ -38,11 +40,13 @@ Notes:
   --where accepts a raw SQL fragment on the metadata JSON column using SQLite
     JSON operators, e.g.: metadata->>'$.kind' = 'note'
   --all includes superseded/deprecated/merged memories in search/list/tags results
+  --resolved on relations annotates superseded/merged targets with resolved_to
+    (the terminal successor via the supersedes/merges bridges); raw rows unchanged
   export writes one .md file per memory (all statuses) with YAML frontmatter;
     memory:// links are rewritten to relative file links; idempotent
 `;
 
-const BOOLEAN_FLAGS = new Set(["--all", "--force"]);
+const BOOLEAN_FLAGS = new Set(["--all", "--force", "--resolved"]);
 
 function parseArgs(argv) {
   const args = [];
@@ -232,6 +236,7 @@ function main() {
         const direction = flags["--direction"];
         const results = store.relations(rest[0], {
           ...(direction ? { direction } : {}),
+          ...(flags["--resolved"] ? { resolve: true } : {}),
         });
         print(results);
         break;

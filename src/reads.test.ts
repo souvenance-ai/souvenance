@@ -334,6 +334,138 @@ test("relations: returns empty array when no edges", () => {
   }
 });
 
+test("relations: active target stays raw even with resolve", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    store.link(a, b, "references");
+    const rels = store.relations(a, { resolve: true });
+    assert.equal(rels.length, 1);
+    assert.equal("resolved_to" in rels[0]!, false);
+  } finally {
+    cleanup();
+  }
+});
+
+test("relations: without resolve nothing is annotated", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("v1");
+    store.supersede(a, "v2");
+    const c = store.store("watcher");
+    store.link(c, a, "references");
+    const rels = store.relations(c);
+    assert.equal(rels.length, 1);
+    assert.equal("resolved_to" in rels[0]!, false);
+    assert.equal(rels[0]!.to_id, a);
+  } finally {
+    cleanup();
+  }
+});
+
+test("relations: resolve annotates superseded target with the current version", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("v1");
+    const b = store.supersede(a, "v2");
+    const c = store.store("watcher");
+    store.link(c, a, "references");
+    const rels = store.relations(c, { resolve: true });
+    assert.equal(rels.length, 1);
+    assert.equal(rels[0]!.to_id, a, "raw fields untouched");
+    assert.equal(rels[0]!.resolved_to, b);
+  } finally {
+    cleanup();
+  }
+});
+
+test("relations: resolve follows a depth-2 supersede chain to the terminal", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("v1");
+    const b = store.supersede(a, "v2");
+    const c = store.supersede(b, "v3");
+    const d = store.store("watcher");
+    store.link(d, a, "references");
+    const rels = store.relations(d, { resolve: true });
+    assert.equal(rels.length, 1);
+    assert.equal(rels[0]!.resolved_to, c);
+  } finally {
+    cleanup();
+  }
+});
+
+test("relations: resolve walks the merges bridge to the merged memory", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("duplicate a");
+    const b = store.store("duplicate b");
+    const c = store.store("watcher");
+    store.link(c, a, "references");
+    const merged = store.merge([a, b], "combined");
+    const rels = store.relations(c, { resolve: true });
+    assert.equal(rels.length, 1);
+    assert.equal(rels[0]!.resolved_to, merged);
+  } finally {
+    cleanup();
+  }
+});
+
+test("relations: deprecated target does not resolve", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("withdrawn memory");
+    store.deprecate(a);
+    const c = store.store("watcher");
+    store.link(c, a, "references");
+    const rels = store.relations(c, { resolve: true });
+    assert.equal(rels.length, 1);
+    assert.equal("resolved_to" in rels[0]!, false);
+  } finally {
+    cleanup();
+  }
+});
+
+test("relations: orphaned superseded memory stays raw, no throw", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory with no successor");
+    // bridge-less supersede: status changed without a supersedes relation,
+    // as if the store was edited by hand
+    store.db
+      .prepare("UPDATE memories SET status = 'superseded' WHERE id = ?")
+      .run(a);
+    const c = store.store("watcher");
+    store.link(c, a, "references");
+    const rels = store.relations(c, { resolve: true });
+    assert.equal(rels.length, 1);
+    assert.equal("resolved_to" in rels[0]!, false);
+  } finally {
+    cleanup();
+  }
+});
+
+test("relations: the from-side is never resolved", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("stale author");
+    const b = store.store("live target");
+    // supersede a so its status is stale, without touching the relation
+    const a2 = store.supersede(a, "stale author v2");
+    assert.notEqual(a2, a);
+    // a -> b is a live relation whose FROM side is superseded
+    store.link(a, b, "references");
+    const relsFromA = store.relations(a, { resolve: true });
+    const outRels = relsFromA.filter((r) => r.from_id === a && r.to_id === b);
+    assert.equal(outRels.length, 1);
+    assert.equal(outRels[0]!.from_id, a, "from_id not rewritten");
+    assert.equal("resolved_to" in outRels[0]!, false, "active target stays bare");
+  } finally {
+    cleanup();
+  }
+});
+
 test("stats: returns total counts and edges_by_kind breakdown", () => {
   const { store, cleanup } = tempStore();
   try {
