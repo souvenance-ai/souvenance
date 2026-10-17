@@ -26,6 +26,8 @@ Commands:
   export [--output <dir>]                     Export the entire store as a flat directory of markdown files
   doctor [--fix]                              Validate store integrity (links, edges, kinds, weights,
       titles, FTS index); prints a JSON report, exit 1 when findings
+  mcp                                         Serve the store as an MCP stdio server (JSON-RPC 2.0 on
+      stdin/stdout; tools mirror the CLI verbs 1:1)
   serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...
       [--token <agent>=<secret>[@<store>][:rw][:where]]...
       [--token-file <path>]...
@@ -56,6 +58,15 @@ Notes:
     memory(ies); explicit --metadata is used verbatim
   export writes one .md file per memory (all statuses) with YAML frontmatter;
     memory:// links are rewritten to relative file links; idempotent
+  mcp serves the store as an MCP stdio server: JSON-RPC 2.0 on stdin/stdout
+    (initialize — protocolVersion echoed when known, else 2025-06-18 —,
+    tools/list, tools/call, ping; notifications ignored). Tools mirror the
+    CLI verbs 1:1 and return the same JSON shapes as CLI stdout; server
+    instructions carry the recovery ritual. No tokens: stdio is the agent's
+    own process (the loopback trust zone) — cross-machine consumption stays
+    with 'serve'. Mount in OpenCode: 'opencode mcp add memory -- node
+    <path>/bin/memory.js mcp' (project or --global); the store opened is the
+    one at --db (default .ai-memory/memory.db)
   doctor diagnoses, it never edits content. --fix rebuilds the FTS index
     (the one mechanical repair); every other finding is repaired by hand
     (supersede, merge, update, link). Exit code is 1 when findings exist
@@ -371,6 +382,13 @@ async function main() {
         });
         print(report);
         if (!report.healthy) exitCode = 1;
+        break;
+      }
+      case "mcp": {
+        // Long-running like serve: the store was opened above and is closed
+        // by the finally block after stdin ends (the client disconnecting).
+        const { runMcpServer } = await import("../src/mcp.ts");
+        await runMcpServer(store);
         break;
       }
       case "serve": {

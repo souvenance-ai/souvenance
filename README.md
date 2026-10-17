@@ -222,6 +222,50 @@ Request caps (every mode):
   brute-forceable, auth is per-request rather than per-connection, and
   per-IP state would add a DoS surface to a stateless server.
 
+### MCP — the typed-tool surface
+
+`memory mcp` speaks **MCP over stdio** (JSON-RPC 2.0, newline-delimited):
+the same library behind a typed-tool surface any MCP client can mount —
+an agent gets the memory as first-class tools, no markdown skill needed.
+
+```sh
+# OpenCode — project or --global
+opencode mcp add memory -- node /path/to/ai-memory/bin/memory.js mcp
+```
+
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "memory": {
+        "type": "local",
+        "command": ["node", "/path/to/ai-memory/bin/memory.js", "mcp"],
+      },
+    },
+  },
+}
+```
+
+- Tools mirror the CLI verbs 1:1 and return the same JSON shapes as CLI
+  stdout: `recover` (the ritual — directives + summaries + stats, run it
+  FIRST), `store`, `supersede`, `merge`, `update`, `link`, `deprecate`,
+  `delete` (requires `force: true`), `get`, `search`, `list`, `relations`,
+  `tags`, `stats`, `doctor`.
+- Server instructions carry the recovery ritual (recover first, content
+  immutable, weight = importance 0–1) — they enter the client's system
+  prompt at initialize, so an agent is oriented without loading the skill.
+- The tool layer validates what the lib trusts: weight 0–1, integer
+  limits refused below 0, metadata as a JSON object; tool failures come
+  back as `isError` results, never as protocol errors.
+- Protocol: `initialize` echoes the client's requested revision when it is
+  one the server speaks (`2024-11-05` → `2025-11-25`), otherwise answers
+  `2025-06-18`.
+- Trust zone: stdio is the agent's own process — the loopback equivalent,
+  no bearer tokens, raw `where` fragments stay available. The server
+  opened is the one at `--db` (default `.ai-memory/memory.db`); mounting
+  ANOTHER store is a `--db` flag away, cross-machine consumption stays
+  with `serve`.
+
 ## Development
 
 ```bash
