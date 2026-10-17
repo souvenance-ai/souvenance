@@ -80,7 +80,7 @@ export interface MultiStoreOptions {
 }
 
 /** Root route names a store must not shadow. */
-const RESERVED_STORE_NAMES = new Set(["search", "memories", "merge", "stats", "tags", "doctor"]);
+const RESERVED_STORE_NAMES = new Set(["search", "memories", "merge", "stats", "tags", "doctor", "recover"]);
 
 /**
  * Parses a `--store <name>=<path>[:rw]` spec. The name becomes a URL segment
@@ -184,6 +184,7 @@ function storeOptions(body: Record<string, unknown>): StoreOptions {
 }
 
 const ENDPOINTS: Array<{ method: string; path: string; note: string }> = [
+  { method: "GET", path: "/recover", note: "recovery ritual: {directives, summaries, stats}, ?directives&summaries limits" },
   { method: "POST", path: "/memories", note: "store {content, metadata?, weight?} -> 201 {id}" },
   { method: "GET", path: "/memories", note: "list ?where&limit&offset&min-weight&all" },
   { method: "GET", path: "/memories/:id", note: "get (bumps access_count)" },
@@ -230,6 +231,28 @@ function registerStoreRoutes(app: Hono, prefix: string, resolve: StoreResolver, 
   if (roName !== undefined) {
     app.use(`${prefix}/*`, readOnlyGuard(roName));
   }
+
+  // GET /recover — the recovery ritual as one resource (decision b79c09d4):
+  // directives + latest summaries + store stats, composed of the SAME list()
+  // calls the CLI ritual runs (active memories, the ritual JSON1 kinds,
+  // created_at DESC), so HTTP and CLI recovery hands return the same set.
+  // GET-only: served by read-only stores too — the ritual for agents whose
+  // only access to a store is the HTTP surface. The stats block sizes the
+  // store at orientation time (the clear/continue judgment needs it).
+  app.get(`${prefix}/recover`, (c) => {
+    const store = resolve();
+    return c.json({
+      directives: store.list({
+        where: "metadata->>'$.kind' = 'directive'",
+        limit: numQuery(c.req.query("directives"), "directives") ?? 20,
+      }),
+      summaries: store.list({
+        where: "metadata->>'$.kind' = 'summary'",
+        limit: numQuery(c.req.query("summaries"), "summaries") ?? 3,
+      }),
+      stats: store.stats(),
+    });
+  });
 
   app.post(`${prefix}/memories`, async (c) => {
     const body = await readJson(c);

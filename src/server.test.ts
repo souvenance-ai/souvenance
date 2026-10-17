@@ -508,6 +508,101 @@ test("server: parseStoreSpec validates names, reserved words and the :rw suffix"
   assert.throws(() => parseStoreSpec("search=/tmp/x.db"), /reserved/);
 });
 
+test("server: GET /recover — the recovery ritual as one resource", async () => {
+  const { app, cleanup } = tempApp();
+  try {
+    const root = await call(app, "GET", "/");
+    assert.ok(root.json.endpoints.some((e: { path: string }) => e.path === "/recover"));
+
+    // 2 directives, 2 summaries, 1 note, 1 superseded summary — recover must
+    // mirror the CLI ritual exactly: active only, the two kind filters,
+    // created_at DESC, its default limits.
+    const d1 = store_standalone(await call(app, "POST", "/memories", {
+      content: "directive one", metadata: { kind: "directive" },
+    }));
+    const d2 = store_standalone(await call(app, "POST", "/memories", {
+      content: "directive two", metadata: { kind: "directive" },
+    }));
+    const s1 = store_standalone(await call(app, "POST", "/memories", {
+      content: "summary one", metadata: { kind: "summary" },
+    }));
+    const s2 = store_standalone(await call(app, "POST", "/memories", {
+      content: "summary two", metadata: { kind: "summary" },
+    }));
+    await call(app, "POST", "/memories", { content: "a routine note", metadata: { kind: "note" } });
+    const suppressed = store_standalone(await call(app, "POST", "/memories", {
+      content: "summary old", metadata: { kind: "summary" },
+    }));
+    const supOf = await call(app, "POST", `/memories/${suppressed}/supersede`, {
+      content: "superseded away", metadata: { kind: "note" },
+    });
+    assert.equal(supOf.status, 201);
+
+    const rec = await call(app, "GET", "/recover");
+    assert.equal(rec.status, 200);
+    assert.deepEqual(
+      rec.json.directives.map((m: { content: string }) => m.content).sort(),
+      ["directive one", "directive two"],
+    );
+    assert.ok(rec.json.directives.some((m: { id: string }) => m.id === d1));
+    // summaries: latest first, active only, kind filter exact — the superseded
+    // memory is excluded from the ritual hands, like the CLI would.
+    assert.deepEqual(rec.json.summaries.map((m: { id: string }) => m.id), [s2, s1]);
+    assert.ok(!JSON.stringify(rec.json).includes("summary old"));
+
+    // params override the ritual limits
+    const oneSummary = await call(app, "GET", "/recover?summaries=1");
+    assert.deepEqual(oneSummary.json.summaries.map((m: { id: string }) => m.id), [s2]);
+    const oneDirective = await call(app, "GET", "/recover?directives=1");
+    assert.deepEqual(oneDirective.json.directives.map((m: { id: string }) => m.id), [d2]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("server: GET /recover marks the empty store plain", async () => {
+  const { app, cleanup } = tempApp();
+  try {
+    const rec = await call(app, "GET", "/recover");
+    assert.equal(rec.status, 200);
+    assert.deepEqual(rec.json.directives, []);
+    assert.deepEqual(rec.json.summaries, []);
+    assert.equal(rec.json.stats.active_memories, 0);
+    assert.equal(rec.json.stats.edges, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("server: GET /recover works over a read-only auxiliary store", async () => {
+  const { app, opened, cleanup } = tempMultiApp((dir) => [
+    { name: "aux", dbPath: seedAux(dir, "aux", "ro mirror"), mode: "ro" },
+  ]);
+  try {
+    await call(app, "GET", "/aux/memories"); // open it lazily first
+    // seed identity kinds into the (closed set) aux store via the lib handle
+    const aux = opened.find((o) => o.dbPath.endsWith("aux.db"))!.store;
+    aux.store("aux directive", { metadata: { kind: "directive" }, weight: 0.9 });
+    aux.store("aux summary", { metadata: { kind: "summary" } });
+
+    // GET runs the ritual on the ro mount — the case where the CLI is
+    // unreachable and /recover is the only way an agent can reorient.
+    const rec = await call(app, "GET", "/aux/recover");
+    assert.equal(rec.status, 200);
+    assert.deepEqual(rec.json.directives.map((m: { content: string }) => m.content), ["aux directive"]);
+    assert.deepEqual(rec.json.summaries.map((m: { content: string }) => m.content), ["aux summary"]);
+    // the write guard is untouched: still 409 on the same surface
+    const blocked = await call(app, "POST", "/aux/memories", { content: "no" });
+    assert.equal(blocked.status, 409);
+  } finally {
+    cleanup();
+  }
+});
+
+test("server: recover joins the reserved store names", () => {
+  assert.throws(() => parseStoreSpec("recover=/tmp/x.db"), /reserved/);
+});
+
 test("server: createApp rejects duplicate store names", () => {
   const dir = mkdtempSync(join(tmpdir(), "ai-memory-server-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });

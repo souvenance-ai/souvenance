@@ -65,6 +65,7 @@ Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
 | Endpoint | Description |
 |---|---|
 | `GET /` | List every route |
+| `GET /recover` | Recovery ritual in one call: `{directives, summaries, stats}` — active `kind: directive` (20) + latest `kind: summary` (3), `?directives&summaries` limits |
 | `POST /memories` | Store — body `{content, metadata?, weight?}` → `201 {id}` |
 | `GET /memories` | List — `?where&limit&offset&min-weight&all` |
 | `GET /memories/:id` | Get (bumps `access_count`) |
@@ -99,14 +100,17 @@ node bin/memory.js serve \
 - `GET /alice/search?q=...`, `GET /alice/stats`, `GET /alice/doctor` — read
   through; every write returns `409` (`POST /alice/doctor {fix:true}` counts
   as a write — the FTS rebuild mutates the index).
+- `GET /alice/recover` runs the identity ritual on an auxiliary store — the
+  one verb a read-only-mounted agent needs: with no CLI access to that store,
+  /recover is how a fresh agent reorients through HTTP alone.
 - Read-only by default is the **personality-isolation guarantee**: an agent
   cannot write into another store through its server. `:rw` is the explicit
   evaluator exception.
 - Auxiliary stores open lazily on first request and their paths must already
   exist (the main `--db` is created on open; declared stores are not).
 - `GET /` lists the declared stores with their modes. Names: lowercase
-  letters, digits, hyphens; a name cannot shadow a root route (`search`,
-  `memories`, `merge`, `stats`, `tags`, `doctor`).
+  letters, digits, hyphens; a name cannot shadow a root route (`recover`,
+  `search`, `memories`, `merge`, `stats`, `tags`, `doctor`).
 
 ## Development
 

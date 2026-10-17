@@ -63,8 +63,11 @@ Notes:
     in (the evaluator exception). Declared paths must already exist
     (the main --db is created on open, declared stores are not).
     Store names: lowercase letters, digits, hyphens, starting with a
-    letter; reserved by root routes: search, memories, merge, stats,
-    tags, doctor. Auxiliary stores open lazily on first request.
+    letter; reserved by root routes: recover, search, memories, merge,
+    stats, tags, doctor. Auxiliary stores open lazily on first request.
+    GET /recover returns the recovery ritual in one call — directives
+    (kind: directive, latest 20) + summaries (latest 3) + stats; the
+    ritual output for agents whose only store access is the HTTP surface.
     DELETE /memories/:id is destructive and requires ?force=1 — prefer
     POST /memories/:id/deprecate. Errors map to 404 (not found), 409
     (wrong lifecycle state / guarded delete / read-only store), 400
