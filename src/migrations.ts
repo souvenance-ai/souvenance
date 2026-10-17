@@ -81,6 +81,23 @@ function ensureVersionTable(db: DatabaseSync): number {
   return row?.version ?? 0;
 }
 
+/**
+ * The store's applied schema version, read WITHOUT creating anything.
+ * `ensureVersionTable` writes (CREATE TABLE IF NOT EXISTS), so read-only
+ * opens must not use it; this is the pure read. Returns 0 when the table
+ * is absent (a pre-versioning store) or unreadable — the ro open refuses.
+ */
+export function schemaVersion(db: DatabaseSync): number {
+  try {
+    const row = db
+      .prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
+      .get() as { version: number } | undefined;
+    return row?.version ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function migrate(db: DatabaseSync): void {
   const current = ensureVersionTable(db);
   for (let v = current + 1; v <= SCHEMA_VERSION; v++) {

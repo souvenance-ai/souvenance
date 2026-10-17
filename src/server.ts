@@ -79,6 +79,8 @@ export class HttpError extends Error {
  * message (the lib is the source of truth; the server never re-wraps):
  * - "memory not found: <id>"          -> 404
  * - "cannot <verb> a memory with ..." -> 409 (wrong lifecycle state)
+ * - "store is read-only ..."          -> 409 (the lib-level floor behind a
+ *   ro mount; same serving-mode conflict family)
  * - FTS5 syntax / bad --where column  -> 400 (after the lib's own sanitize
  *   fallback has had its chance)
  * - "database is locked" (BUSY retries exhausted) -> 503 (retry later)
@@ -90,6 +92,9 @@ export function statusFor(err: unknown): 400 | 401 | 403 | 404 | 409 | 413 | 500
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.startsWith("memory not found:")) return 404;
   if (/^cannot .* a memory with status '/.test(msg)) return 409;
+  // The store itself refuses (read-only open) — the lib-level floor behind
+  // the ro mount middleware; 409 like every serving-mode conflict.
+  if (/^store is read-only/.test(msg)) return 409;
   if (/database is locked/i.test(msg)) return 503;
   // Remaining library errors are input-validation ("content must be
   // non-empty", "merge requires at least 2 memories", "duplicate id in
@@ -120,8 +125,11 @@ export interface MultiStoreOptions {
   /**
    * Opens an auxiliary store on first request (default: Store.open).
    * Injected so the caller owns the lifecycle of lazily opened stores.
+   * The second argument is the caller's readonly decision: true for a
+   * ro-declared mount in local mode — in token mode mounts open writable
+   * and the per-token auth layer governs writes (increment 4).
    */
-  openStore?: (dbPath: string) => Store;
+  openStore?: (dbPath: string, readOnly: boolean) => Store;
   /**
    * Bearer-token grants (increment 4, decision 8769eee8). Declaring any
    * token switches the server to token mode: EVERY request must present a
@@ -873,13 +881,16 @@ export function createApp(store: Store, opts: MultiStoreOptions = {}): MemoryApp
   // token mode the mount-level ro guard is NOT mounted — write access is
   // governed per token by the auth middleware (a store-level :rw declaration
   // is even rejected); in local mode the ro guard keeps enforcing isolation.
-  const openStore = opts.openStore ?? ((dbPath: string) => Store.open({ dbPath }));
+  // In local mode a ro-declared mount ALSO opens the store itself read-only
+  // at the lib level (decision 675f18a8): the middleware is the HTTP face
+  // with the hint, the lib guard is the floor.
+  const openStore = opts.openStore ?? ((dbPath: string, readOnly: boolean) => Store.open({ dbPath, readOnly }));
   const opened = new Map<string, Store>();
   for (const d of declared) {
     const resolve = (): Store => {
       let s = opened.get(d.name);
       if (!s) {
-        s = openStore(d.dbPath);
+        s = openStore(d.dbPath, !tokenMode && d.mode === "ro");
         opened.set(d.name, s);
       }
       return s;

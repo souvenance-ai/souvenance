@@ -1,9 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { migrate } from "./migrations.ts";
+import { migrate, SCHEMA_VERSION, schemaVersion } from "./migrations.ts";
 import type {
   StoreOptions,
   UpdateOptions,
@@ -101,6 +101,12 @@ function parseRelationRow(row: RelationRow): Relation {
 export interface OpenOptions {
   /** Override the default `.ai-memory/memory.db` path. */
   dbPath?: string;
+  /**
+   * Open for reading only: a missing file is refused (nothing is created),
+   * migration is skipped (an out-of-date store is refused — open it
+   * read-write once to migrate), and every write verb throws.
+   */
+  readOnly?: boolean;
 }
 
 function execPragma(db: DatabaseSync): void {
@@ -115,19 +121,56 @@ function execPragma(db: DatabaseSync): void {
 export class Store {
   readonly db: DatabaseSync;
   readonly dbPath: string;
+  /** True when opened with readOnly — write verbs refuse, migration is
+   *  skipped, and the read-signal (access_count) does not bump. */
+  readonly readOnly: boolean;
 
-  private constructor(db: DatabaseSync, dbPath: string) {
+  private constructor(db: DatabaseSync, dbPath: string, readOnly: boolean) {
     this.db = db;
     this.dbPath = dbPath;
+    this.readOnly = readOnly;
   }
 
   static open(opts: OpenOptions = {}): Store {
     const dbPath = resolve(opts.dbPath ?? DEFAULT_DB_PATH);
+    if (opts.readOnly === true) {
+      // A read-only open creates nothing and migrates nothing: the store is
+      // served exactly as its owner left it, and refused if it is missing
+      // or speaks an older schema than this library.
+      if (!existsSync(dbPath)) {
+        throw new Error(`no store at ${dbPath}`);
+      }
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      db.exec("PRAGMA busy_timeout = 5000");
+      db.exec("PRAGMA foreign_keys = ON");
+      const version = schemaVersion(db);
+      if (version < SCHEMA_VERSION) {
+        throw new Error(
+          `store at ${dbPath} is at schema version ${version}` +
+            ` (the library expects ${SCHEMA_VERSION});` +
+            ` open it read-write once to migrate`,
+        );
+      }
+      return new Store(db, dbPath, true);
+    }
     mkdirSync(dirname(dbPath), { recursive: true });
     const db = new DatabaseSync(dbPath);
     execPragma(db);
     migrate(db);
-    return new Store(db, dbPath);
+    return new Store(db, dbPath, false);
+  }
+
+  /**
+   * Write verbs refuse on a read-only store. NOT enforced inside run():
+   * run() also carries legitimate non-write uses — the read-signal
+   * access_count bumps and the doctor's VACUUM INTO snapshot.
+   */
+  private assertWritable(): void {
+    if (this.readOnly) {
+      throw new Error(
+        "store is read-only (opened with readOnly: true); writes are refused",
+      );
+    }
   }
 
   private assertActive(id: string, verb: string): void {
@@ -141,6 +184,7 @@ export class Store {
   }
 
   store(content: string, opts: StoreOptions = {}): string {
+    this.assertWritable();
     if (!content) throw new Error("content must be non-empty");
     const id = randomUUID();
     const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
@@ -161,6 +205,7 @@ export class Store {
     content: string,
     opts: StoreOptions = {},
   ): string {
+    this.assertWritable();
     if (!content) throw new Error("content must be non-empty");
     const newId = randomUUID();
     const weight = opts.weight ?? 0.5;
@@ -202,6 +247,7 @@ export class Store {
     content: string,
     opts: StoreOptions = {},
   ): string {
+    this.assertWritable();
     if (ids.length < 2) throw new Error("merge requires at least 2 memories");
     if (!content) throw new Error("content must be non-empty");
     const seen = new Set<string>();
@@ -250,6 +296,7 @@ export class Store {
   }
 
   update(id: string, opts: UpdateOptions = {}): void {
+    this.assertWritable();
     // Pre-check reads are wrapped: under concurrent writers they can transiently
     // hit SQLITE_BUSY, and unwrapped they would abort with 'database is locked'.
     const existing = this.run(() =>
@@ -276,6 +323,7 @@ export class Store {
   }
 
   delete(id: string): void {
+    this.assertWritable();
     const existing = this.run(() =>
       this.db.prepare("SELECT 1 FROM memories WHERE id = ?").get(id),
     );
@@ -286,6 +334,7 @@ export class Store {
   }
 
   deprecate(id: string): void {
+    this.assertWritable();
     this.run(() => this.assertActive(id, "deprecate"));
     this.run(() => {
       this.db
@@ -300,6 +349,7 @@ export class Store {
     kind: string,
     opts: StoreOptions = {},
   ): void {
+    this.assertWritable();
     if (!kind) throw new Error("kind must be non-empty");
     const fromExists = this.run(() =>
       this.db.prepare("SELECT 1 FROM memories WHERE id = ?").get(fromId),
@@ -369,7 +419,9 @@ export class Store {
     const runQuery = (match: string): SearchResult[] => {
       const rows = this.db.prepare(sql).all(match, ...params) as unknown as SearchRow[];
       const results = rows.map(parseSearchRow);
-      if (results.length > 0) {
+      // The read-signal is a write (access_count bump); on a read-only
+      // store a read stays a read — the signal is skipped, not lost data.
+      if (results.length > 0 && !this.readOnly) {
         const fraction = 1.0 / results.length;
         this.run(() => {
           const stmt = this.db.prepare("UPDATE memories SET access_count = access_count + ? WHERE id = ?");
@@ -402,11 +454,13 @@ export class Store {
       .prepare("SELECT id, content, metadata, created_at, status, weight, access_count FROM memories WHERE id = ?")
       .get(id) as unknown as MemoryRow | undefined;
     if (!row) return null;
-    this.run(() => {
-      this.db
-        .prepare("UPDATE memories SET access_count = access_count + 1 WHERE id = ?")
-        .run(id);
-    });
+    if (!this.readOnly) {
+      this.run(() => {
+        this.db
+          .prepare("UPDATE memories SET access_count = access_count + 1 WHERE id = ?")
+          .run(id);
+      });
+    }
     return parseMemoryRow(row);
   }
 
@@ -620,6 +674,7 @@ export class Store {
   doctor(opts: DoctorOptions = {}): DoctorReport {
     const findings: DoctorFinding[] = [];
     if (opts.fix) {
+      this.assertWritable();
       this.run(() => {
         this.db.exec("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')");
       });

@@ -114,8 +114,12 @@ node bin/memory.js serve \
   one verb a read-only-mounted agent needs: with no CLI access to that store,
   /recover is how a fresh agent reorients through HTTP alone.
 - Read-only by default is the **personality-isolation guarantee**: an agent
-  cannot write into another store through its server. `:rw` is the explicit
-  evaluator exception.
+  cannot write into another store through its server. In local mode the
+  isolation is two-layered — the `409` middleware is the HTTP face with the
+  hint, and the auxiliary store itself opens **read-only at the library
+  level** (nothing can write it, route layer included). In token mode mounts
+  open writable and per-token grants govern. `:rw` is the explicit evaluator
+  exception.
 - Auxiliary stores open lazily on first request and their paths must already
   exist (the main `--db` is created on open; declared stores are not).
 - `GET /` lists the declared stores with their modes. Names: lowercase
@@ -277,6 +281,10 @@ yarn test         # node --experimental-strip-types --test src/**/*.test.ts
 ## How it works
 
 - **Store**: SQLite with WAL mode for concurrent access; writes retry on busy.
+- **Read-only stores**: `Store.open({readOnly: true})` opens an existing store
+  for reading only — a missing file is refused (nothing is created), an
+  out-of-date schema is refused (open it read-write once to migrate), every
+  write verb throws, and reads leave `access_count` untouched.
 - **Search**: FTS5 full-text search with bm25 ranking, combinable with metadata filters via SQLite JSON1.
 - **Graph**: Typed directed edges between memories (`from → to` with a `kind`); FK cascades delete edges when a memory is removed.
 - **Schema**: Migrates on open — no manual migration step.
