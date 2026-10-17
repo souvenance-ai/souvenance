@@ -1,0 +1,6 @@
+[0m
+> build · glm-5.3-flash
+[0m⚙ [0mexecute {"code":"const out = {};\ntry { out.memoryKeys = Object.keys(tools[\"memory\"] || {}); } catch (e) { out.memoryKeys = \"introspection failed: \" + String(e); }\ntry { out.recover = await tools[\"memory\"][\"recover\"](); } catch (e) { out.recoverErr = String(e); }\ntry { out.resources = await tools.opencode.list_mcp_resources({}); } catch (e) { out.resErr = String(e); }\nreturn out;"} 
+> build · glm-5.3-flash
+[0m⚙ [0mexecute {"code":"const out = {};\ntry { out.recover = await tools[\"memory\"][\"recover\"]({}); } catch (e) { out.recoverErr = String(e); }\ntry { out.stats = await tools[\"memory\"][\"stats\"](); } catch (e) { out.statsErr = String(e); }\ntry { out.list = await tools[\"memory\"][\"list\"]({ all: true, limit: 100 }); } catch (e) { out.listErr = String(e); }\nreturn out;"} 
+> build · glm-5.3-flash
