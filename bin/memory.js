@@ -27,9 +27,12 @@ Commands:
   doctor [--fix]                              Validate store integrity (links, edges, kinds, weights,
       titles, FTS index); prints a JSON report, exit 1 when findings
   serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...
+      [--token <agent>=<secret>[@<store>][:rw][:where]]...
       Serve the store over HTTP as JSON (default 127.0.0.1:3141);
       root routes serve the process store (--db); each --store mounts
-      an auxiliary store at /<name>/ (read-only unless :rw)
+      an auxiliary store at /<name>/ (read-only unless :rw). Declaring
+      --token grants switches to token mode: every request must present
+      its bearer token, scoped to its granted store
 
 Flags:
   --db <path>      Override the DB path (default: .ai-memory/memory.db)
@@ -64,14 +67,31 @@ Notes:
     (the main --db is created on open, declared stores are not).
     Store names: lowercase letters, digits, hyphens, starting with a
     letter; reserved by root routes: recover, search, memories, merge,
-    stats, tags, doctor. Auxiliary stores open lazily on first request.
+    stats, tags, doctor (and 'root', which names the process store in
+    token grants). Auxiliary stores open lazily on first request.
+    Trust boundary (the identity follows the agent, safely): binding a
+    non-loopback host (anything but 127.0.0.1, ::1, localhost) without
+    --token grants refuses to start. Token mode (--token declared):
+    every request needs Authorization: Bearer <secret> (401 otherwise);
+    one token binds ONE store — 'root' for the process store, else an
+    auxiliary name (403 elsewhere); reads are always allowed, writes
+    need the token's :rw opt-in (409); raw --where fragments are
+    local-only — remote requests use the structured kind/tag params or
+    opt in per token with :where (400). Token specs:
+    <agent>=<secret>[@<store>][:rw][:where], secrets 16+ chars of
+    [A-Za-z0-9_-] (generate: openssl rand -hex 32), compared timing-safe.
+    Structured filters (all modes): GET /memories, /search and /tags
+    accept ?kind=<k> and ?tag=<t> (repeatable, AND-composed) compiled
+    server-side into the same JSON1 the --where fragment would express;
+    pass either 'where' or kind/tag, not both.
     GET /recover returns the recovery ritual in one call — directives
     (kind: directive, latest 20) + summaries (latest 3) + stats; the
     ritual output for agents whose only store access is the HTTP surface.
     DELETE /memories/:id is destructive and requires ?force=1 — prefer
-    POST /memories/:id/deprecate. Errors map to 404 (not found), 409
-    (wrong lifecycle state / guarded delete / read-only store), 400
-    (validation, bad query), 503 (database locked after retries)
+    POST /memories/:id/deprecate. Errors map to 401 (unknown token),
+    403 (store not granted), 404 (not found), 409 (wrong lifecycle
+    state / guarded delete / read-only), 400 (validation, bad query,
+    raw where without opt-in), 503 (database locked after retries)
 `;
 
 const BOOLEAN_FLAGS = new Set(["--all", "--force", "--resolved", "--fix"]);
@@ -94,7 +114,7 @@ function parseArgs(argv) {
       const val = a.includes("=") ? a.slice(a.indexOf("=") + 1) : argv[i + 1];
       if (!a.includes("=")) i++;
       // --store is repeatable: one flag per auxiliary store
-      if (key === "--store") {
+      if (key === "--store" || key === "--token") {
         if (!Array.isArray(flags[key])) flags[key] = [];
         flags[key].push(val);
       } else {
@@ -333,7 +353,7 @@ async function main() {
       case "serve": {
         // Long-running: the store was opened above and is closed by the
         // finally block only after the server shuts down (SIGINT/SIGTERM).
-        const { createApp, parseStoreSpec, DEFAULT_HOST, DEFAULT_PORT } = await import("../src/server.ts");
+        const { createApp, parseStoreSpec, parseTokenSpec, DEFAULT_HOST, DEFAULT_PORT } = await import("../src/server.ts");
         const { serve } = await import("@hono/node-server");
         const port = num(flags["--port"]) ?? DEFAULT_PORT;
         const host = flags["--host"] ?? DEFAULT_HOST;
@@ -346,18 +366,26 @@ async function main() {
             fail(`store '${d.name}' not found: ${d.dbPath} (declared stores must already exist; the main --db is created on open)`);
           }
         }
+        // Bearer-token grants (increment 4): one token = one agent bound to
+        // one store, read-only by default; declaring any token switches the
+        // server to token mode and createApp enforces the trust boundary.
+        const tokens = (flags["--token"] ?? []).map(parseTokenSpec);
         const openStore = (dbPath) => {
           const s = Store.open({ dbPath });
           auxiliaries.push(s);
           return s;
         };
-        const server = serve({ fetch: createApp(store, { stores: declared, openStore }).fetch, port, hostname: host });
+        const server = serve({ fetch: createApp(store, { stores: declared, openStore, tokens, host }).fetch, port, hostname: host });
         const storesNote =
           declared.length > 0
             ? `; stores: ${declared.map((d) => `${d.name}=${d.dbPath} (${d.mode})`).join(", ")}`
             : "";
+        const tokensNote =
+          tokens.length > 0
+            ? `; tokens: ${tokens.map((t) => `${t.agent}@${t.store} (${t.mode}${t.where ? ", where" : ""})`).join(", ")}`
+            : "";
         process.stdout.write(
-          `memory server listening on http://${host}:${port} (db: ${store.dbPath})${storesNote}\n`,
+          `memory server listening on http://${host}:${port} (db: ${store.dbPath})${storesNote}${tokensNote}\n`,
         );
         await new Promise((resolve) => {
           const stop = () => {

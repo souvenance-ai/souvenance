@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { Hono, type Context, type Next } from "hono";
 import { Store } from "./db.ts";
 import type { Direction, StoreOptions, UpdateOptions } from "./types.ts";
@@ -16,10 +17,15 @@ import type { Direction, StoreOptions, UpdateOptions } from "./types.ts";
  * exception). They open lazily on first request through an injected
  * `openStore` factory so the caller owns their lifecycle.
  *
+ * Increment 4 (8769eee8) adds the trust boundary: bearer-token grants
+ * (`--token <agent>=<secret>[@<store>][:rw][:where]`), one token = one agent
+ * bound to one store, read-only by default; non-loopback binds refuse to
+ * start without tokens; raw `where` fragments stay local-only (per-token
+ * :where opt-in), with server-compiled kind/tag structured filters as the
+ * remote-safe alternative (95556ca0 step 2).
+ *
  * Routes mirror the CLI verbs 1:1 and return the same JSON shapes, so an
  * HTTP client gets the exact contract documented in SKILL.md / bin HELP.
- * `--where` fragments pass through unvalidated, same trust level as the CLI
- * (local, single-user, no untrusted input path).
  */
 
 /** Default listen address for `memory serve`. */
@@ -28,9 +34,9 @@ export const DEFAULT_HOST = "127.0.0.1";
 
 /** An error with a decided HTTP status (raised by handler-level validation). */
 export class HttpError extends Error {
-  status: 400 | 404 | 409 | 503;
+  status: 400 | 401 | 403 | 404 | 409 | 503;
 
-  constructor(status: 400 | 404 | 409 | 503, message: string) {
+  constructor(status: 400 | 401 | 403 | 404 | 409 | 503, message: string) {
     super(message);
     this.status = status;
   }
@@ -44,8 +50,10 @@ export class HttpError extends Error {
  * - FTS5 syntax / bad --where column  -> 400 (after the lib's own sanitize
  *   fallback has had its chance)
  * - "database is locked" (BUSY retries exhausted) -> 503 (retry later)
+ * 401/403 never come from the lib — the auth layer raises them as HttpError
+ * before any store resolution (decision 8769eee8, increment 4).
  */
-export function statusFor(err: unknown): 400 | 404 | 409 | 500 | 503 {
+export function statusFor(err: unknown): 400 | 401 | 403 | 404 | 409 | 500 | 503 {
   if (err instanceof HttpError) return err.status;
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.startsWith("memory not found:")) return 404;
@@ -62,6 +70,11 @@ export function statusFor(err: unknown): 400 | 404 | 409 | 500 | 503 {
 /** Serving mode of a declared auxiliary store: read-only unless opted in. */
 export type StoreMode = "ro" | "rw";
 
+/** The app's context carries the authenticated grant in token mode. */
+type MemoryEnv = { Variables: { tokenGrant: TokenGrant } };
+type MemoryApp = Hono<MemoryEnv>;
+type MemoryContext = Context<MemoryEnv>;
+
 /** An auxiliary store declared on the command line. */
 export interface DeclaredStore {
   name: string;
@@ -77,6 +90,21 @@ export interface MultiStoreOptions {
    * Injected so the caller owns the lifecycle of lazily opened stores.
    */
   openStore?: (dbPath: string) => Store;
+  /**
+   * Bearer-token grants (increment 4, decision 8769eee8). Declaring any
+   * token switches the server to token mode: EVERY request must present a
+   * valid token, each scoped to its granted store (403 elsewhere), writes
+   * require the token's rw opt-in (409) and raw `where` fragments require
+   * the :where opt-in (400).
+   */
+  tokens?: TokenGrant[];
+  /**
+   * The address the server binds. Non-loopback hosts (anything but
+   * 127.0.0.1, ::1, localhost) REQUIRE tokens — the trust boundary made
+   * mechanical: an exposed server without a trust decision refuses to
+   * start instead of serving an open identity.
+   */
+  host?: string;
 }
 
 /** Root route names a store must not shadow. */
@@ -112,6 +140,119 @@ export function parseStoreSpec(spec: string): DeclaredStore {
     throw new Error(`store name '${name}' is reserved by root routes; pick another name`);
   }
   return { name, dbPath, mode };
+}
+
+/**
+ * A bearer-token grant: the trust-boundary unit of increment 4 (decision
+ * 8769eee8, step 2 of the gradual internet-facing path 95556ca0). A token
+ * IS an agent; one token binds ONE store ('root' names the process store);
+ * it is read-only by default — the same rule as auxiliary mounts (5e3bb21f)
+ * applied across machines — and raw `where` fragments are local-only unless
+ * the token opts in.
+ */
+export interface TokenGrant {
+  /** Display/audit identity of the agent holding the token. */
+  agent: string;
+  /** The bearer secret. Compared timing-safe (sha256, crypto.timingSafeEqual). */
+  token: string;
+  /** The granted store: "root" or a declared auxiliary store name. */
+  store: string;
+  /** "ro" by default; "rw" is the per-token write opt-in. */
+  mode: StoreMode;
+  /** Whether the token may pass raw `where` fragments (default: no). */
+  where: boolean;
+}
+
+/**
+ * Parses a `--token <agent>=<secret>[@<store>][:rw][:where]` spec. Omitting
+ * `@<store>` grants the process store ("root"). Modifiers may appear in any
+ * order and are stripped iteratively; secrets cannot contain ':' or '@' so
+ * the split is unambiguous. Secrets must be at least 16 chars (openssl
+ * rand -hex 32 generates 64) — a weak secret would undermine the boundary.
+ */
+export function parseTokenSpec(spec: string): TokenGrant {
+  const eq = spec.indexOf("=");
+  if (eq < 1) {
+    throw new Error(`--token expects <agent>=<secret>[@<store>][:rw][:where], got: ${spec}`);
+  }
+  const agent = spec.slice(0, eq);
+  if (!/^[a-z][a-z0-9-]{0,31}$/.test(agent)) {
+    throw new Error(
+      `invalid agent name '${agent}': lowercase letters, digits and hyphens, starting with a letter`,
+    );
+  }
+  let rest = spec.slice(eq + 1);
+  let mode: StoreMode = "ro";
+  let where = false;
+  for (;;) {
+    if (rest.endsWith(":rw")) {
+      mode = "rw";
+      rest = rest.slice(0, -3);
+    } else if (rest.endsWith(":where")) {
+      where = true;
+      rest = rest.slice(0, -6);
+    } else {
+      break;
+    }
+  }
+  let store = "root";
+  const at = rest.indexOf("@");
+  if (at >= 0) {
+    store = rest.slice(at + 1);
+    rest = rest.slice(0, at);
+    if (store.length === 0) {
+      throw new Error(`--token '${agent}': '@' requires a store name ('root' for the process store)`);
+    }
+  }
+  if (store !== "root" && !/^[a-z][a-z0-9-]{0,31}$/.test(store)) {
+    throw new Error(
+      `invalid grant store '${store}': 'root' or a store name (lowercase letters, digits and hyphens, starting with a letter)`,
+    );
+  }
+  if (!/^[A-Za-z0-9_-]{16,}$/.test(rest)) {
+    throw new Error(
+      `--token '${agent}': the secret needs at least 16 chars of [A-Za-z0-9_-] (no '@' or ':' — they are delimiters); generate one with: openssl rand -hex 32`,
+    );
+  }
+  return { agent, token: rest, store, mode, where };
+}
+
+/** Hosts that bind the loopback interface only — the local trust zone. */
+export function isLoopbackHost(host: string): boolean {
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
+/** Escapes a value into a single-quoted SQLite string literal. */
+function sqlString(v: string): string {
+  return `'${v.replace(/'/g, "''")}'`;
+}
+
+/**
+ * Reads the `where` query param plus the structured `kind`/`tag` filters and
+ * compiles ONE where fragment. kind/tag are the remote-safe alternative to
+ * raw fragments (95556ca0 step 2): the server compiles them itself, nothing
+ * user-authored reaches the SQL except the escaped literal. Passing both a
+ * raw `where` and structured filters is rejected in every mode — one query,
+ * one style.
+ */
+export function whereFragment(c: Context): string | undefined {
+  const where = c.req.query("where");
+  const kinds = c.req.queries("kind") ?? [];
+  const tags = c.req.queries("tag") ?? [];
+  if (where !== undefined && (kinds.length > 0 || tags.length > 0)) {
+    throw new HttpError(400, "pass either 'where' or the structured 'kind'/'tag' params, not both");
+  }
+  const parts: string[] = [];
+  if (where !== undefined) parts.push(where);
+  for (const k of kinds) {
+    parts.push(`metadata->>'$.kind' = ${sqlString(k)}`);
+  }
+  for (const t of tags) {
+    parts.push(
+      `EXISTS (SELECT 1 FROM json_each(metadata->'$.tags') je WHERE json_type(metadata->'$.tags') = 'array' AND je.value = ${sqlString(t)})`,
+    );
+  }
+  return parts.length > 0 ? parts.join(" AND ") : undefined;
 }
 
 /** Parses the JSON body; an empty body is `{}` (e.g. POST /doctor). */
@@ -186,7 +327,7 @@ function storeOptions(body: Record<string, unknown>): StoreOptions {
 const ENDPOINTS: Array<{ method: string; path: string; note: string }> = [
   { method: "GET", path: "/recover", note: "recovery ritual: {directives, summaries, stats}, ?directives&summaries limits" },
   { method: "POST", path: "/memories", note: "store {content, metadata?, weight?} -> 201 {id}" },
-  { method: "GET", path: "/memories", note: "list ?where&limit&offset&min-weight&all" },
+  { method: "GET", path: "/memories", note: "list ?where|kind&tag&limit&offset&min-weight&all" },
   { method: "GET", path: "/memories/:id", note: "get (bumps access_count)" },
   { method: "PATCH", path: "/memories/:id", note: "update {metadata?, weight?}" },
   { method: "DELETE", path: "/memories/:id", note: "hard delete, requires ?force=1 (prefer deprecate)" },
@@ -195,9 +336,9 @@ const ENDPOINTS: Array<{ method: string; path: string; note: string }> = [
   { method: "POST", path: "/memories/:id/link", note: "link {to, kind, metadata?} -> 201" },
   { method: "GET", path: "/memories/:id/relations", note: "relations ?direction=in|out|both&resolve=1" },
   { method: "POST", path: "/merge", note: "merge {ids, content, metadata?, weight?} -> 201 {id}" },
-  { method: "GET", path: "/search", note: "search ?q&where&limit&all" },
+  { method: "GET", path: "/search", note: "search ?q&where|kind&tag&limit&all" },
   { method: "GET", path: "/stats", note: "store statistics" },
-  { method: "GET", path: "/tags", note: "tags ?where&all" },
+  { method: "GET", path: "/tags", note: "tags ?where|kind&tag&all" },
   { method: "GET", path: "/doctor", note: "integrity report" },
   { method: "POST", path: "/doctor", note: "integrity report, {fix:true} rebuilds the FTS index" },
 ];
@@ -209,7 +350,7 @@ type StoreResolver = () => Store;
  * {fix:true} rebuilds the FTS index — a write — so it is blocked too.
  */
 function readOnlyGuard(name: string) {
-  return async (c: Context, next: Next) => {
+  return async (c: MemoryContext, next: Next) => {
     if (c.req.method !== "GET") {
       throw new HttpError(
         409,
@@ -227,7 +368,7 @@ function readOnlyGuard(name: string) {
  * auxiliary store registers its own prefixed copy with its own (lazy)
  * accessor, and read-only stores get the write guard.
  */
-function registerStoreRoutes(app: Hono, prefix: string, resolve: StoreResolver, roName?: string): void {
+function registerStoreRoutes(app: MemoryApp, prefix: string, resolve: StoreResolver, roName?: string): void {
   if (roName !== undefined) {
     app.use(`${prefix}/*`, readOnlyGuard(roName));
   }
@@ -266,7 +407,7 @@ function registerStoreRoutes(app: Hono, prefix: string, resolve: StoreResolver, 
     const minWeight = numQuery(c.req.query("min-weight"), "min-weight");
     return c.json(
       resolve().list({
-        where: c.req.query("where"),
+        where: whereFragment(c),
         ...(limit !== undefined ? { limit } : {}),
         ...(offset !== undefined ? { offset } : {}),
         ...(minWeight !== undefined ? { minWeight } : {}),
@@ -368,7 +509,7 @@ function registerStoreRoutes(app: Hono, prefix: string, resolve: StoreResolver, 
     const limit = numQuery(c.req.query("limit"), "limit");
     return c.json(
       resolve().search(q, {
-        where: c.req.query("where"),
+        where: whereFragment(c),
         ...(limit !== undefined ? { limit } : {}),
         includeLegacy: boolQuery(c.req.query("all")),
       }),
@@ -380,7 +521,7 @@ function registerStoreRoutes(app: Hono, prefix: string, resolve: StoreResolver, 
   app.get(`${prefix}/tags`, (c) =>
     c.json(
       resolve().tags({
-        where: c.req.query("where"),
+        where: whereFragment(c),
         includeLegacy: boolQuery(c.req.query("all")),
       }),
     ),
@@ -395,23 +536,118 @@ function registerStoreRoutes(app: Hono, prefix: string, resolve: StoreResolver, 
 }
 
 /**
- * Builds the app: root routes over the process's own store (always
- * read-write — it IS the agent's identity), plus each declared auxiliary
- * store mounted at /<name>/... Auxiliary stores open lazily via `openStore`
- * and duplicate names fail fast at construction.
+ * Builds the app: root routes over the process's own store, plus each
+ * declared auxiliary store mounted at /<name>/... Auxiliary stores open
+ * lazily via `openStore` and duplicate names fail fast at construction.
+ *
+ * Trust model (increment 4, decision 8769eee8):
+ * - No tokens declared (local mode): today's behavior — root routes are
+ *   read-write (the store IS the agent's identity), auxiliary mounts are
+ *   read-only unless declared :rw. Binding a non-loopback host in this mode
+ *   refuses to start: an exposed server must have made a trust decision.
+ * - Tokens declared (token mode): every request presents `Authorization:
+ *   Bearer <secret>` (401 otherwise). The token's grant scopes it to ONE
+ *   store (403 elsewhere, 'root' = the process store); writes need the
+ *   token's :rw opt-in (409); raw `where` fragments need :where (400) — the
+ *   structured kind/tag params stay open to every token, they are the
+ *   remote-safe path. Store-level :rw mounts are rejected in token mode:
+ *   write access is decided per token, not per mount.
  */
-export function createApp(store: Store, opts: MultiStoreOptions = {}): Hono {
+export function createApp(store: Store, opts: MultiStoreOptions = {}): MemoryApp {
   const declared = opts.stores ?? [];
   const seen = new Set<string>();
   for (const d of declared) {
     if (seen.has(d.name)) throw new Error(`duplicate store name: ${d.name}`);
+    if (d.name === "root") {
+      throw new Error("store name 'root' is reserved: token grants use 'root' to name the process store");
+    }
     seen.add(d.name);
   }
 
-  const app = new Hono();
+  const tokens = opts.tokens ?? [];
+  const tokenMode = tokens.length > 0;
+  const host = opts.host ?? DEFAULT_HOST;
+  const grants = new Map<string, TokenGrant>();
+  for (const g of tokens) {
+    if (grants.has(g.token)) {
+      throw new Error(`duplicate token secret (agent '${g.agent}' collides with '${grants.get(g.token)!.agent}')`);
+    }
+    if (g.store !== "root" && !seen.has(g.store)) {
+      throw new Error(`token '${g.agent}' grants unknown store '${g.store}' (declared: ${[...seen].join(", ") || "none"})`);
+    }
+    grants.set(g.token, g);
+  }
+  if (!isLoopbackHost(host) && !tokenMode) {
+    throw new Error(
+      `host '${host}' is not loopback: declare --token grants or bind 127.0.0.1/::1/localhost — an exposed server without a trust decision is an open identity`,
+    );
+  }
+  if (tokenMode) {
+    for (const d of declared) {
+      if (d.mode === "rw") {
+        throw new Error(
+          `store '${d.name}' declared :rw is not honored in token mode: grant write access per token with --token <agent>=<secret>@${d.name}:rw`,
+        );
+      }
+    }
+  }
 
-  app.get("/", (c) =>
-    c.json({
+  // Timing-safe bearer authentication (sha256 then constant-time compare —
+  // the hash equalizes lengths so timingSafeEqual never throws).
+  const sha256 = (v: string) => createHash("sha256").update(v).digest();
+  function authenticate(header: string | undefined): TokenGrant {
+    const m = header !== undefined ? /^Bearer\s+(\S+)$/i.exec(header) : null;
+    if (m === null) {
+      throw new HttpError(401, "authentication required: an Authorization: Bearer <token> header");
+    }
+    const presented = sha256(m[1]);
+    for (const [secret, g] of grants) {
+      if (timingSafeEqual(presented, sha256(secret))) return g;
+    }
+    throw new HttpError(401, "unknown token: check the Authorization header against the declared --token grants");
+  }
+
+  const app = new Hono<MemoryEnv>();
+
+  if (tokenMode) {
+    app.use("*", async (c, next) => {
+      const grant = authenticate(c.req.header("authorization"));
+      c.set("tokenGrant", grant);
+      if (c.req.path !== "/") {
+        const seg = c.req.path.split("/")[1] ?? "";
+        const target = seen.has(seg) ? seg : "root";
+        if (grant.store !== target) {
+          throw new HttpError(
+            403,
+            `token '${grant.agent}' is granted store '${grant.store}', not '${target}'`,
+          );
+        }
+        if (c.req.method !== "GET" && grant.mode !== "rw") {
+          throw new HttpError(
+            409,
+            `token '${grant.agent}' is read-only on store '${target}'; opt in with :rw at token declaration`,
+          );
+        }
+      }
+      if (!grant.where && c.req.query("where") !== undefined) {
+        throw new HttpError(
+          400,
+          "raw 'where' fragments are local-only: use the structured kind/tag params, or opt in with :where at token declaration",
+        );
+      }
+      await next();
+    });
+  }  app.get("/", (c) => {
+    const grant = tokenMode ? c.get("tokenGrant") : undefined;
+    if (grant !== undefined) {
+      return c.json({
+        name: "ai-memory",
+        endpoints: ENDPOINTS,
+        stores: [{ name: grant.store, mode: grant.mode }],
+        note: `token '${grant.agent}' grants store '${grant.store}' in mode '${grant.mode}'${grant.where ? " with raw where" : ""}; routes mirror the CLI verbs`,
+      });
+    }
+    return c.json({
       name: "ai-memory",
       endpoints: ENDPOINTS,
       ...(declared.length > 0
@@ -420,14 +656,17 @@ export function createApp(store: Store, opts: MultiStoreOptions = {}): Hono {
             note: "auxiliary stores mount at /<name>/...; they are read-only unless declared with mode 'rw'",
           }
         : {}),
-    }),
-  );
+    });
+  });
 
   // Root: the process's own store (one agent = one store, decision a4950b47).
   registerStoreRoutes(app, "", () => store);
 
   // Auxiliary stores: opened lazily on first request; the openStore seam lets
-  // the caller (bin) own their lifecycle and close them after shutdown.
+  // the caller (bin) own their lifecycle and close them after shutdown. In
+  // token mode the mount-level ro guard is NOT mounted — write access is
+  // governed per token by the auth middleware (a store-level :rw declaration
+  // is even rejected); in local mode the ro guard keeps enforcing isolation.
   const openStore = opts.openStore ?? ((dbPath: string) => Store.open({ dbPath }));
   const opened = new Map<string, Store>();
   for (const d of declared) {
@@ -439,7 +678,7 @@ export function createApp(store: Store, opts: MultiStoreOptions = {}): Hono {
       }
       return s;
     };
-    registerStoreRoutes(app, `/${d.name}`, resolve, d.mode === "ro" ? d.name : undefined);
+    registerStoreRoutes(app, `/${d.name}`, resolve, !tokenMode && d.mode === "ro" ? d.name : undefined);
   }
 
   app.notFound((c) => c.json({ error: "not found" }, 404));

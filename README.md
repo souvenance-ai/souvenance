@@ -67,7 +67,7 @@ Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
 | `GET /` | List every route |
 | `GET /recover` | Recovery ritual in one call: `{directives, summaries, stats}` — active `kind: directive` (20) + latest `kind: summary` (3), `?directives&summaries` limits |
 | `POST /memories` | Store — body `{content, metadata?, weight?}` → `201 {id}` |
-| `GET /memories` | List — `?where&limit&offset&min-weight&all` |
+| `GET /memories` | List — `?where` (local) or `?kind&tag` (structured), `&limit&offset&min-weight&all` |
 | `GET /memories/:id` | Get (bumps `access_count`) |
 | `PATCH /memories/:id` | Update metadata/weight (content is immutable) |
 | `DELETE /memories/:id?force=1` | Hard delete — guarded, prefer `deprecate` |
@@ -76,14 +76,23 @@ Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
 | `POST /memories/:id/link` | `{to, kind, metadata?}` — typed edge |
 | `GET /memories/:id/relations` | `?direction=in\|out\|both&resolve=1` |
 | `POST /merge` | `{ids, content, ...}` — combine memories |
-| `GET /search?q=...` | FTS5 search, ranked results |
-| `GET /stats` · `GET /tags` | Store statistics, tag counts |
+| `GET /search?q=...` | FTS5 search, ranked results — `&where` (local) or `&kind&tag` (structured), `&limit&all` |
+| `GET /stats` · `GET /tags` | Store statistics, tag counts (`/tags` also takes `?where|kind&tag&all`) |
 | `GET /doctor` · `POST /doctor {fix:true}` | Integrity report, optional FTS rebuild |
 
 Errors map to `404` (not found), `409` (wrong lifecycle state, guarded
 delete, read-only store), `400` (validation, bad query/where), `503`
 (database locked after retries). `--where` fragments pass through
 unvalidated — same trust model as the CLI (local, single-user).
+
+Errors map to `401` (unknown/missing token), `403` (store not granted to
+the token), `404` (not found), `409` (wrong lifecycle state, guarded
+delete, read-only store or token), `400` (validation, bad query/where,
+raw `where` without the per-token opt-in), `503` (database locked after
+retries). `--where` fragments pass through unvalidated — the CLI trust
+model is local, single-user; over HTTP the fragment is **local-only**
+(remote requests use the structured filters or an explicit opt-in, see
+Tokens below).
 
 ### Multi-store
 
@@ -110,7 +119,36 @@ node bin/memory.js serve \
   exist (the main `--db` is created on open; declared stores are not).
 - `GET /` lists the declared stores with their modes. Names: lowercase
   letters, digits, hyphens; a name cannot shadow a root route (`recover`,
-  `search`, `memories`, `merge`, `stats`, `tags`, `doctor`).
+  `search`, `memories`, `merge`, `stats`, `tags`, `doctor`) and cannot be
+  `root` (that name belongs to token grants — see below).
+
+### Tokens — the trust boundary
+
+The memory is intimate (directives, decisions, conversations). Exposing it
+beyond loopback is a trust decision the server enforces mechanically:
+binding a **non-loopback** host (anything but `127.0.0.1`, `::1`,
+`localhost`) **without token grants refuses to start**.
+
+```bash
+node bin/memory.js serve \
+  --token valentin=$(openssl rand -hex 32) \
+  --token ci=$(openssl rand -hex 32)@notes \
+  --token writer=$(openssl rand -hex 32)@root:rw:where
+```
+
+- Token mode (`--token` declared): every request needs
+  `Authorization: Bearer <secret>` — `401` otherwise. One token binds ONE
+  store: `root` names the process store, otherwise an auxiliary store name
+  (`403` elsewhere). Reads are always allowed; writes need the token's
+  `:rw` opt-in (`409`).
+- Spec: `<agent>=<secret>[@<store>][:rw][:where]` — secrets are 16+ chars
+  of `[A-Za-z0-9_-]` (64 with `openssl rand -hex 32`), compared
+  timing-safe. `:where` opts the token into raw `where` fragments;
+  without it the structured `?kind=&tag=` filters (compiled server-side
+  into the same JSON1) are the remote-safe query path.
+- In token mode, store-level `:rw` mounts are rejected at startup — write
+  access is decided per token, not per mount. `GET /` lists only the
+  presenting token's grant, without db paths.
 
 ## Development
 
