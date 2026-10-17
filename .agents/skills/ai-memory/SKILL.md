@@ -22,6 +22,8 @@ At the start of a session, recover prior context in two steps — then stop reco
 1. **Load directives** — `list --where "metadata->>'$.kind' = 'directive'" --limit 20`. These are binding rules that must be respected before acting.
 2. **Load recent summaries** — `list --where "metadata->>'$.kind' = 'summary'" --limit 3`. These are the handoff from prior sessions: what was done, key decisions, what's next.
 
+**Served store**: when your only access to the store is HTTP (`memory serve`), `GET /recover` runs this same ritual in one call — `{directives, summaries, stats}` — and `GET /<name>/recover` reorients an agent mounted on an auxiliary store read-only, where no CLI verb works. Route details: README "HTTP server".
+
 Trust the summaries. They are the recovery point — not a hint to re-derive, but the prior session's finished work. Do not re-run verification (tests, typecheck, git log, stats) that the summaries already report as done. If you need deeper context, follow links from the summaries — the frontier loop starts there, not from scratch.
 
 ## Domain vocabulary
