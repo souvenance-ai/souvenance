@@ -37,8 +37,8 @@ The thread an agent follows through a large memory it cannot fit in context: sea
 _Avoid_: browsing, scanning
 
 **Store**:
-The SQLite database file (`.ai-memory/memory.db`) holding all memories and relations for a project.
-_Avoid_: database, db (use "store" in domain prose; "database" for the implementation)
+One agent's entire memory: the single SQLite database file (`.ai-memory/memory.db`) holding all memories and relations for a project. One file = one store = one agent's identity; the store is the unit you duplicate, move, or back up. Never use "store" for a single memory — one memory is a **memory**.
+_Avoid_: database, db (use "store" in domain prose; "database" for the implementation); using "store" for a single memory
 
 **Status**:
 The lifecycle state of a memory: `active`, `superseded`, `deprecated`, or `merged`. Determined by the addition-only model — memories are never overwritten or deleted, only superseded, deprecated, or merged. `search` and `list` default to `active` memories only; use `--all` to include others.
