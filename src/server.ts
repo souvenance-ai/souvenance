@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { Hono, type Context, type Next } from "hono";
 import { Store } from "./db.ts";
 import type { Direction, StoreOptions, UpdateOptions } from "./types.ts";
@@ -24,6 +25,13 @@ import type { Direction, StoreOptions, UpdateOptions } from "./types.ts";
  * :where opt-in), with server-compiled kind/tag structured filters as the
  * remote-safe alternative (95556ca0 step 2).
  *
+ * Increment 5 (95556ca0 step 3, transport/exposure): request caps and
+ * timeouts (1 MiB body cap -> 413, ?limit cap 1000 and integer validation
+ * -> 400, explicit server timeouts wired in bin), the exposure printout
+ * (exposedAddresses resolves a non-loopback bind to its reachable
+ * addresses), and the TLS decision: reverse proxy, never built-in — the
+ * server stays plain HTTP, the bearer boundary travels end-to-end.
+ *
  * Routes mirror the CLI verbs 1:1 and return the same JSON shapes, so an
  * HTTP client gets the exact contract documented in SKILL.md / bin HELP.
  */
@@ -32,11 +40,30 @@ import type { Direction, StoreOptions, UpdateOptions } from "./types.ts";
 export const DEFAULT_PORT = 3141;
 export const DEFAULT_HOST = "127.0.0.1";
 
+/**
+ * Request body cap — the largest legal store/supersede/merge payload
+ * (1 MiB of markdown is far beyond any real memory; an uncapped read
+ * would let one request pin the process). Oversized bodies -> 413.
+ */
+export const MAX_BODY_BYTES = 1024 * 1024;
+/**
+ * Cap on every `?limit=` over HTTP (list, search, recover). 1000 dwarfs
+ * any real page; bulk reads are the CLI's export verb, not an unbounded
+ * remote list. Negative limits would DISABLE the SQL LIMIT (SQLite:
+ * LIMIT -1 = no limit) — rejected with the non-integer forms.
+ */
+export const MAX_LIMIT = 1000;
+
+/** The long-lived listener's explicit timeouts (wired in bin/memory.js). */
+export const REQUEST_TIMEOUT_MS = 30_000;
+export const HEADERS_TIMEOUT_MS = 10_000;
+export const KEEPALIVE_TIMEOUT_MS = 5_000;
+
 /** An error with a decided HTTP status (raised by handler-level validation). */
 export class HttpError extends Error {
-  status: 400 | 401 | 403 | 404 | 409 | 503;
+  status: 400 | 401 | 403 | 404 | 409 | 413 | 503;
 
-  constructor(status: 400 | 401 | 403 | 404 | 409 | 503, message: string) {
+  constructor(status: 400 | 401 | 403 | 404 | 409 | 413 | 503, message: string) {
     super(message);
     this.status = status;
   }
@@ -53,7 +80,7 @@ export class HttpError extends Error {
  * 401/403 never come from the lib — the auth layer raises them as HttpError
  * before any store resolution (decision 8769eee8, increment 4).
  */
-export function statusFor(err: unknown): 400 | 401 | 403 | 404 | 409 | 500 | 503 {
+export function statusFor(err: unknown): 400 | 401 | 403 | 404 | 409 | 413 | 500 | 503 {
   if (err instanceof HttpError) return err.status;
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.startsWith("memory not found:")) return 404;
@@ -222,6 +249,34 @@ export function isLoopbackHost(host: string): boolean {
   return host === "127.0.0.1" || host === "::1" || host === "localhost";
 }
 
+/**
+ * The addresses a non-loopback bind actually exposes, for the startup
+ * printout (step 3 ergonomics: the operator hands the exact URL to a
+ * remote agent and sees the exposure surface before any client connects).
+ * A loopback bind exposes nothing ([]); a specific address is itself;
+ * 0.0.0.0 resolves to every non-internal IPv4, :: to every non-internal
+ * IPv4+IPv6 (link-local fe80 addresses with a scope id are on-link noise,
+ * not real exposure). `interfaces` is injectable for tests.
+ */
+export function exposedAddresses(
+  host: string,
+  interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
+): string[] {
+  if (isLoopbackHost(host)) return [];
+  if (host !== "0.0.0.0" && host !== "::") return [host];
+  const all = host === "::";
+  const out = new Set<string>();
+  for (const infos of Object.values(interfaces)) {
+    for (const info of infos ?? []) {
+      if (info.internal) continue;
+      if (!all && info.family !== "IPv4") continue;
+      if ((info.scopeid ?? 0) > 0) continue; // link-local: not a real exposure
+      out.add(info.address);
+    }
+  }
+  return [...out];
+}
+
 /** Escapes a value into a single-quoted SQLite string literal. */
 function sqlString(v: string): string {
   return `'${v.replace(/'/g, "''")}'`;
@@ -255,9 +310,47 @@ export function whereFragment(c: Context): string | undefined {
   return parts.length > 0 ? parts.join(" AND ") : undefined;
 }
 
+/**
+ * Reads the JSON body under the byte cap (step 3, 95556ca0). Two checks:
+ * the declared Content-Length is rejected up front (cheap, no read), and
+ * the streamed read enforces the same budget — a lying or chunked body
+ * without content-length cannot slide past the cap. Oversized -> 413.
+ */
+async function readCappedText(c: Context): Promise<string> {
+  const declared = c.req.header("content-length");
+  if (declared !== undefined) {
+    const n = Number(declared);
+    if (Number.isFinite(n) && n > MAX_BODY_BYTES) {
+      throw new HttpError(413, `request body exceeds the ${MAX_BODY_BYTES}-byte cap (content-length: ${declared})`);
+    }
+  }
+  const body = c.req.raw.body;
+  if (body === null) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel().catch(() => {});
+      throw new HttpError(413, `request body exceeds the ${MAX_BODY_BYTES}-byte cap`);
+    }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let off = 0;
+  for (const chunk of chunks) {
+    buf.set(chunk, off);
+    off += chunk.byteLength;
+  }
+  return new TextDecoder().decode(buf);
+}
+
 /** Parses the JSON body; an empty body is `{}` (e.g. POST /doctor). */
 async function readJson(c: Context): Promise<Record<string, unknown>> {
-  const raw = await c.req.text();
+  const raw = await readCappedText(c);
   if (raw.trim() === "") return {};
   let body: unknown;
   try {
@@ -299,6 +392,30 @@ function numQuery(q: string | undefined, name: string): number | undefined {
   const n = Number(q);
   if (!Number.isFinite(n)) {
     throw new HttpError(400, `${name} must be a number, got: ${q}`);
+  }
+  return n;
+}
+
+/** Parses a non-negative integer query param — floats and negatives are 400.
+ *  The lib binds limit/offset straight into SQL, and SQLite reads LIMIT -1
+ *  as UNLIMITED: the server must refuse them or ?limit=-1 dumps the store. */
+function intQuery(q: string | undefined, name: string): number | undefined {
+  if (q === undefined) return undefined;
+  if (!/^\d+$/.test(q)) {
+    throw new HttpError(400, `${name} must be a non-negative integer, got: ${q}`);
+  }
+  return Number(q);
+}
+
+/** `?limit=` with the MAX_LIMIT cap (step 3): bulk reads over HTTP are not a
+ *  thing — pagination walks limit+offset, bulk export stays a CLI verb. */
+function cappedLimitQuery(q: string | undefined, name: string): number | undefined {
+  const n = intQuery(q, name);
+  if (n !== undefined && n > MAX_LIMIT) {
+    throw new HttpError(
+      400,
+      `${name} exceeds the ${MAX_LIMIT} cap — paginate with offset, or export the store with the CLI's export verb`,
+    );
   }
   return n;
 }
@@ -385,11 +502,11 @@ function registerStoreRoutes(app: MemoryApp, prefix: string, resolve: StoreResol
     return c.json({
       directives: store.list({
         where: "metadata->>'$.kind' = 'directive'",
-        limit: numQuery(c.req.query("directives"), "directives") ?? 20,
+        limit: cappedLimitQuery(c.req.query("directives"), "directives") ?? 20,
       }),
       summaries: store.list({
         where: "metadata->>'$.kind' = 'summary'",
-        limit: numQuery(c.req.query("summaries"), "summaries") ?? 3,
+        limit: cappedLimitQuery(c.req.query("summaries"), "summaries") ?? 3,
       }),
       stats: store.stats(),
     });
@@ -402,8 +519,8 @@ function registerStoreRoutes(app: MemoryApp, prefix: string, resolve: StoreResol
   });
 
   app.get(`${prefix}/memories`, (c) => {
-    const limit = numQuery(c.req.query("limit"), "limit");
-    const offset = numQuery(c.req.query("offset"), "offset");
+    const limit = cappedLimitQuery(c.req.query("limit"), "limit");
+    const offset = intQuery(c.req.query("offset"), "offset");
     const minWeight = numQuery(c.req.query("min-weight"), "min-weight");
     return c.json(
       resolve().list({
@@ -506,7 +623,7 @@ function registerStoreRoutes(app: MemoryApp, prefix: string, resolve: StoreResol
   app.get(`${prefix}/search`, (c) => {
     const q = c.req.query("q");
     if (!q) throw new HttpError(400, "q must be non-empty");
-    const limit = numQuery(c.req.query("limit"), "limit");
+    const limit = cappedLimitQuery(c.req.query("limit"), "limit");
     return c.json(
       resolve().search(q, {
         where: whereFragment(c),

@@ -91,7 +91,19 @@ Notes:
     POST /memories/:id/deprecate. Errors map to 401 (unknown token),
     403 (store not granted), 404 (not found), 409 (wrong lifecycle
     state / guarded delete / read-only), 400 (validation, bad query,
-    raw where without opt-in), 503 (database locked after retries)
+    raw where without opt-in), 413 (body over the 1 MiB cap),
+    503 (database locked after retries)
+    Transport (step 3): the server is plain HTTP by design — TLS
+    terminates at a reverse proxy (Caddy/nginx) or rides a private
+    overlay (Tailscale/WireGuard); the bearer boundary travels
+    end-to-end (the secret lives only in the Authorization header).
+    A non-loopback bind prints the reachable addresses at startup.
+    Request caps: bodies over 1 MiB get 413; ?limit over 1000 gets 400
+    (paginate with offset; bulk export stays a CLI verb); limit/offset
+    must be non-negative integers (a negative LIMIT disables the SQL
+    limit). Timeouts: request 30s, headers 10s, keep-alive 5s. No rate
+    limits: 64-hex bearer secrets are not brute-forceable and auth is
+    per-request, not per-connection.
 `;
 
 const BOOLEAN_FLAGS = new Set(["--all", "--force", "--resolved", "--fix"]);
@@ -353,7 +365,11 @@ async function main() {
       case "serve": {
         // Long-running: the store was opened above and is closed by the
         // finally block only after the server shuts down (SIGINT/SIGTERM).
-        const { createApp, parseStoreSpec, parseTokenSpec, DEFAULT_HOST, DEFAULT_PORT } = await import("../src/server.ts");
+        const {
+          createApp, parseStoreSpec, parseTokenSpec, DEFAULT_HOST, DEFAULT_PORT,
+          exposedAddresses, isLoopbackHost,
+          REQUEST_TIMEOUT_MS, HEADERS_TIMEOUT_MS, KEEPALIVE_TIMEOUT_MS,
+        } = await import("../src/server.ts");
         const { serve } = await import("@hono/node-server");
         const port = num(flags["--port"]) ?? DEFAULT_PORT;
         const host = flags["--host"] ?? DEFAULT_HOST;
@@ -375,7 +391,19 @@ async function main() {
           auxiliaries.push(s);
           return s;
         };
-        const server = serve({ fetch: createApp(store, { stores: declared, openStore, tokens, host }).fetch, port, hostname: host });
+        const server = serve({
+          fetch: createApp(store, { stores: declared, openStore, tokens, host }).fetch,
+          port,
+          hostname: host,
+          // Step-3 caps (95556ca0): explicit bounds on the long-lived
+          // listener — a request is received fully within 30s, headers
+          // within 10s, idle keep-alive sockets released after 5s.
+          serverOptions: {
+            requestTimeout: REQUEST_TIMEOUT_MS,
+            headersTimeout: HEADERS_TIMEOUT_MS,
+            keepAliveTimeout: KEEPALIVE_TIMEOUT_MS,
+          },
+        });
         const storesNote =
           declared.length > 0
             ? `; stores: ${declared.map((d) => `${d.name}=${d.dbPath} (${d.mode})`).join(", ")}`
@@ -384,8 +412,19 @@ async function main() {
           tokens.length > 0
             ? `; tokens: ${tokens.map((t) => `${t.agent}@${t.store} (${t.mode}${t.where ? ", where" : ""})`).join(", ")}`
             : "";
+        // Exposure printout (step 3 ergonomics): on a non-loopback bind the
+        // operator sees the reachable addresses — the exact URLs to hand a
+        // remote agent — and the transport reminder (TLS is the proxy's job).
+        let exposureNote = "";
+        if (!isLoopbackHost(host)) {
+          const addresses = exposedAddresses(host);
+          exposureNote = addresses.length > 0
+            ? `\n  exposed: ${addresses.map((a) => `http://${a}:${port}`).join(", ")}` +
+              `\n  note: plaintext HTTP — terminate TLS at a reverse proxy (Caddy/nginx) or use a private overlay (Tailscale/WireGuard); the bearer boundary travels end-to-end`
+            : `\n  exposed: (no reachable interface found for ${host})`;
+        }
         process.stdout.write(
-          `memory server listening on http://${host}:${port} (db: ${store.dbPath})${storesNote}${tokensNote}\n`,
+          `memory server listening on http://${host}:${port} (db: ${store.dbPath})${storesNote}${tokensNote}${exposureNote}\n`,
         );
         await new Promise((resolve) => {
           const stop = () => {

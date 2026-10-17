@@ -81,18 +81,19 @@ Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
 | `GET /doctor` · `POST /doctor {fix:true}` | Integrity report, optional FTS rebuild |
 
 Errors map to `404` (not found), `409` (wrong lifecycle state, guarded
-delete, read-only store), `400` (validation, bad query/where), `503`
-(database locked after retries). `--where` fragments pass through
-unvalidated — same trust model as the CLI (local, single-user).
+delete, read-only store), `400` (validation, bad query/where), `413`
+(body over the 1 MiB cap), `503` (database locked after retries).
+`--where` fragments pass through unvalidated — same trust model as the
+CLI (local, single-user).
 
 Errors map to `401` (unknown/missing token), `403` (store not granted to
 the token), `404` (not found), `409` (wrong lifecycle state, guarded
 delete, read-only store or token), `400` (validation, bad query/where,
-raw `where` without the per-token opt-in), `503` (database locked after
-retries). `--where` fragments pass through unvalidated — the CLI trust
-model is local, single-user; over HTTP the fragment is **local-only**
-(remote requests use the structured filters or an explicit opt-in, see
-Tokens below).
+raw `where` without the per-token opt-in), `413` (body over the 1 MiB
+cap), `503` (database locked after retries). `--where` fragments pass
+through unvalidated — the CLI trust model is local, single-user; over
+HTTP the fragment is **local-only** (remote requests use the structured
+filters or an explicit opt-in, see Tokens below).
 
 ### Multi-store
 
@@ -149,6 +150,53 @@ node bin/memory.js serve \
 - In token mode, store-level `:rw` mounts are rejected at startup — write
   access is decided per token, not per mount. `GET /` lists only the
   presenting token's grant, without db paths.
+
+### Exposure — TLS and request caps
+
+The server is **plain HTTP by design** — the TLS decision of step 3 of the
+internet-facing path: TLS is terminated at a reverse proxy or inherited
+from a private overlay, never built in.
+
+- **Reverse proxy** (public endpoint): put Caddy or nginx in front; the
+  proxy owns certificates, renewal and SANs, the server keeps one
+  plain-HTTP socket. The bearer boundary travels end-to-end — the secret
+  lives only in the `Authorization` header, which the proxy forwards
+  untouched:
+
+  ```bash
+  caddy reverse-proxy --from memory.example.com --to 127.0.0.1:3141
+  ```
+
+- **Private overlay** (Tailscale, WireGuard): transport security is
+  inherited from the tunnel; point `--host` at the overlay address and
+  the token grant stays the only gate.
+- Built-in TLS is deliberately absent: certificate lifecycle is exactly
+  what proxies automate, and a half-configured TLS server (stale cert,
+  missing SAN) is worse than an honest plain-HTTP server behind a proxy.
+
+Ergonomics: a non-loopback `--host` prints the reachable addresses at
+startup — the exact URLs to hand a remote agent — plus the
+plaintext-HTTP reminder:
+
+```
+memory server listening on http://0.0.0.0:3141 ...
+  exposed: http://192.168.1.42:3141
+  note: plaintext HTTP — terminate TLS at a reverse proxy (Caddy/nginx) or use a private overlay (Tailscale/WireGuard); the bearer boundary travels end-to-end
+```
+
+Request caps (every mode):
+
+- Request bodies over **1 MiB** → `413`, enforced twice: on the declared
+  `Content-Length` up front, and again on the streamed body — a lying or
+  chunked request without content-length cannot slide past.
+- `?limit=` over **1000** → `400` (list, search, recover). `limit` and
+  `offset` must be non-negative integers — a negative `LIMIT` *disables*
+  the SQL limit in SQLite, so it is refused, not clamped. Pagination
+  walks `limit`+`offset`; bulk export stays a CLI verb.
+- Listener timeouts: request 30s, headers 10s, keep-alive 5s.
+- No rate limits, deliberately: 64-hex bearer secrets are not
+  brute-forceable, auth is per-request rather than per-connection, and
+  per-IP state would add a DoS surface to a stateless server.
 
 ## Development
 
