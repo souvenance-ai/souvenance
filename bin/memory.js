@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Store } from "../src/db.ts";
 import { slugify, filenameFor, renderMemory } from "../src/export.ts";
@@ -26,8 +26,10 @@ Commands:
   export [--output <dir>]                     Export the entire store as a flat directory of markdown files
   doctor [--fix]                              Validate store integrity (links, edges, kinds, weights,
       titles, FTS index); prints a JSON report, exit 1 when findings
-  serve [--port N] [--host <addr>]            Serve the store over HTTP as JSON (default 127.0.0.1:3141);
-      one store per process (--db), routes mirror the CLI verbs
+  serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...
+      Serve the store over HTTP as JSON (default 127.0.0.1:3141);
+      root routes serve the process store (--db); each --store mounts
+      an auxiliary store at /<name>/ (read-only unless :rw)
 
 Flags:
   --db <path>      Override the DB path (default: .ai-memory/memory.db)
@@ -54,12 +56,19 @@ Notes:
     (the one mechanical repair); every other finding is repaired by hand
     (supersede, merge, update, link). Exit code is 1 when findings exist
     (a successful diagnosis, not an error — stderr stays empty)
-  serve runs one store per process: pick the store with --db. Every route
-    mirrors a CLI verb and returns the same JSON; GET / lists all routes.
+  serve keeps the root routes on the process store (--db): one agent =
+    one store. Each --store <name>=<path> mounts another store at
+    /<name>/... — read-only by default (personality isolation: an agent
+    cannot write into another store through its server); add :rw to opt
+    in (the evaluator exception). Declared paths must already exist
+    (the main --db is created on open, declared stores are not).
+    Store names: lowercase letters, digits, hyphens, starting with a
+    letter; reserved by root routes: search, memories, merge, stats,
+    tags, doctor. Auxiliary stores open lazily on first request.
     DELETE /memories/:id is destructive and requires ?force=1 — prefer
     POST /memories/:id/deprecate. Errors map to 404 (not found), 409
-    (wrong lifecycle state / guarded delete), 400 (validation, bad query),
-    503 (database locked after retries)
+    (wrong lifecycle state / guarded delete / read-only store), 400
+    (validation, bad query), 503 (database locked after retries)
 `;
 
 const BOOLEAN_FLAGS = new Set(["--all", "--force", "--resolved", "--fix"]);
@@ -81,7 +90,13 @@ function parseArgs(argv) {
       }
       const val = a.includes("=") ? a.slice(a.indexOf("=") + 1) : argv[i + 1];
       if (!a.includes("=")) i++;
-      flags[key] = val;
+      // --store is repeatable: one flag per auxiliary store
+      if (key === "--store") {
+        if (!Array.isArray(flags[key])) flags[key] = [];
+        flags[key].push(val);
+      } else {
+        flags[key] = val;
+      }
       continue;
     }
     args.push(a);
@@ -135,6 +150,9 @@ async function main() {
   } catch (err) {
     fail(`could not open store: ${err instanceof Error ? err.message : err}`);
   }
+  // Auxiliary stores declared for 'serve', opened lazily on first request;
+  // closed after shutdown alongside the main store.
+  const auxiliaries = [];
 
   try {
     switch (command) {
@@ -312,13 +330,31 @@ async function main() {
       case "serve": {
         // Long-running: the store was opened above and is closed by the
         // finally block only after the server shuts down (SIGINT/SIGTERM).
-        const { createApp, DEFAULT_HOST, DEFAULT_PORT } = await import("../src/server.ts");
+        const { createApp, parseStoreSpec, DEFAULT_HOST, DEFAULT_PORT } = await import("../src/server.ts");
         const { serve } = await import("@hono/node-server");
         const port = num(flags["--port"]) ?? DEFAULT_PORT;
         const host = flags["--host"] ?? DEFAULT_HOST;
-        const server = serve({ fetch: createApp(store).fetch, port, hostname: host });
+        // Declared auxiliary stores: mounted at /<name>/, read-only unless :rw.
+        // Paths must already exist — Store.open would silently create an
+        // empty store on a typo'd path at first request.
+        const declared = (flags["--store"] ?? []).map(parseStoreSpec);
+        for (const d of declared) {
+          if (!existsSync(d.dbPath)) {
+            fail(`store '${d.name}' not found: ${d.dbPath} (declared stores must already exist; the main --db is created on open)`);
+          }
+        }
+        const openStore = (dbPath) => {
+          const s = Store.open({ dbPath });
+          auxiliaries.push(s);
+          return s;
+        };
+        const server = serve({ fetch: createApp(store, { stores: declared, openStore }).fetch, port, hostname: host });
+        const storesNote =
+          declared.length > 0
+            ? `; stores: ${declared.map((d) => `${d.name}=${d.dbPath} (${d.mode})`).join(", ")}`
+            : "";
         process.stdout.write(
-          `memory server listening on http://${host}:${port} (db: ${store.dbPath})\n`,
+          `memory server listening on http://${host}:${port} (db: ${store.dbPath})${storesNote}\n`,
         );
         await new Promise((resolve) => {
           const stop = () => {
@@ -336,6 +372,7 @@ async function main() {
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err));
   } finally {
+    for (const aux of auxiliaries) aux.close();
     store.close();
   }
   if (exitCode !== 0) process.exit(exitCode);

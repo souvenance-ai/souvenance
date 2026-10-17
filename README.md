@@ -43,7 +43,7 @@ The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
 | `tags [--where <sql>] [--all]` | List all distinct metadata tags with counts |
 | `doctor [--fix]` | Validate store integrity (links, edges, kinds, weights, titles, FTS); exit 1 when findings |
 | `export [--output <dir>]` | Export the entire store as a flat directory of markdown files |
-| `serve [--port N] [--host <addr>]` | Serve the store over HTTP as JSON (default `127.0.0.1:3141`) |
+| `serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...` | Serve the store over HTTP as JSON (default `127.0.0.1:3141`); auxiliary stores mount at `/<name>/` |
 
 Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure.
 
@@ -53,7 +53,8 @@ Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failu
 
 `memory serve` runs a long-lived process that consumes the **library** directly
 (`~1.3ms` per operation) instead of paying the CLI's process-spawn cost
-(~40–100ms per call). One store per process — pick it with `--db`:
+(~40–100ms per call). The root routes serve the process's own store — pick it
+with `--db`:
 
 ```bash
 node bin/memory.js --db .ai-memory/memory.db serve --port 3141
@@ -79,9 +80,33 @@ Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
 | `GET /doctor` · `POST /doctor {fix:true}` | Integrity report, optional FTS rebuild |
 
 Errors map to `404` (not found), `409` (wrong lifecycle state, guarded
-delete), `400` (validation, bad query/where), `503` (database locked after
-retries). `--where` fragments pass through unvalidated — same trust model as
-the CLI (local, single-user).
+delete, read-only store), `400` (validation, bad query/where), `503`
+(database locked after retries). `--where` fragments pass through
+unvalidated — same trust model as the CLI (local, single-user).
+
+### Multi-store
+
+One agent = one store: the root routes belong to the server's own store.
+To *read* other stores (mirroring, evaluation), declare them at startup —
+they mount the same verb routes under a name:
+
+```bash
+node bin/memory.js serve \
+  --store alice=/path/to/alice/.ai-memory/memory.db \
+  --store bench=/tmp/bench.db:rw   # :rw opts into writes (read-only by default)
+```
+
+- `GET /alice/search?q=...`, `GET /alice/stats`, `GET /alice/doctor` — read
+  through; every write returns `409` (`POST /alice/doctor {fix:true}` counts
+  as a write — the FTS rebuild mutates the index).
+- Read-only by default is the **personality-isolation guarantee**: an agent
+  cannot write into another store through its server. `:rw` is the explicit
+  evaluator exception.
+- Auxiliary stores open lazily on first request and their paths must already
+  exist (the main `--db` is created on open; declared stores are not).
+- `GET /` lists the declared stores with their modes. Names: lowercase
+  letters, digits, hyphens; a name cannot shadow a root route (`search`,
+  `memories`, `merge`, `stats`, `tags`, `doctor`).
 
 ## Development
 

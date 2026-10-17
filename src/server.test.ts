@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Store } from "./db.ts";
-import { createApp } from "./server.ts";
+import { createApp, parseStoreSpec, type DeclaredStore } from "./server.ts";
 
 function tempApp(): { app: ReturnType<typeof createApp>; store: Store; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "ai-memory-server-test-"));
@@ -351,6 +351,180 @@ test("server: unknown route -> JSON 404", async () => {
     assert.deepEqual(json, { error: "not found" });
   } finally {
     cleanup();
+  }
+});
+
+test("server: unknown store prefix -> plain 404", async () => {
+  const { app, cleanup } = tempApp();
+  try {
+    const { status, json } = await call(app, "GET", "/nope/memories");
+    assert.equal(status, 404);
+    assert.deepEqual(json, { error: "not found" });
+  } finally {
+    cleanup();
+  }
+});
+
+/** Fixture like tempApp, plus declared auxiliary stores and an openStore spy. */
+function tempMultiApp(
+  declare: (dir: string) => DeclaredStore[],
+): {
+  app: ReturnType<typeof createApp>;
+  store: Store;
+  dir: string;
+  opened: Array<{ dbPath: string; store: Store }>;
+  cleanup: () => void;
+} {
+  const dir = mkdtempSync(join(tmpdir(), "ai-memory-server-test-"));
+  const store = Store.open({ dbPath: join(dir, "memory.db") });
+  const opened: Array<{ dbPath: string; store: Store }> = [];
+  const app = createApp(store, {
+    stores: declare(dir),
+    openStore: (dbPath) => {
+      const s = Store.open({ dbPath });
+      opened.push({ dbPath, store: s });
+      return s;
+    },
+  });
+  return {
+    app,
+    store,
+    dir,
+    opened,
+    cleanup: () => {
+      for (const o of opened) o.store.close();
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+/** Pre-creates an auxiliary db holding one memory; returns its path. */
+function seedAux(dir: string, name: string, content: string): string {
+  const dbPath = join(dir, `${name}.db`);
+  const aux = Store.open({ dbPath });
+  aux.store(content, {});
+  aux.close();
+  return dbPath;
+}
+
+test("server: multi-store — auxiliary stores mount at /<name> and stay isolated", async () => {
+  const { app, store, opened, cleanup } = tempMultiApp((dir) => [
+    { name: "aux", dbPath: seedAux(dir, "aux", "the aux memory lives here"), mode: "ro" },
+    { name: "work", dbPath: seedAux(dir, "work", "the writable mirror"), mode: "rw" },
+  ]);
+  try {
+    store.store("the main memory", {});
+
+    const root = await call(app, "GET", "/");
+    assert.equal(root.status, 200);
+    assert.match(JSON.stringify(root.json.stores), /"name":"aux".*"mode":"ro"/);
+    assert.match(JSON.stringify(root.json.stores), /"name":"work".*"mode":"rw"/);
+
+    // isolation: each surface searches its own content only
+    const main = await call(app, "GET", '/search?q="main memory"');
+    assert.equal(main.json.length, 1);
+    const aux = await call(app, "GET", '/aux/search?q="aux memory"');
+    assert.equal(aux.json.length, 1);
+    assert.equal(aux.json[0].content, "the aux memory lives here");
+    const cross = await call(app, "GET", '/aux/search?q="main memory"');
+    assert.equal(cross.json.length, 0);
+
+    const stats = await call(app, "GET", "/aux/stats");
+    assert.equal(stats.json.active_memories, 1);
+
+    const work = await call(app, "GET", "/work/stats");
+    assert.equal(work.status, 200);
+
+    assert.equal(opened.length, 2); // only the stores actually touched
+  } finally {
+    cleanup();
+  }
+});
+
+test("server: auxiliary stores are read-only by default; :rw opts in", async () => {
+  const { app, opened, cleanup } = tempMultiApp((dir) => [
+    { name: "aux", dbPath: seedAux(dir, "aux", "a read-only mirror"), mode: "ro" },
+    { name: "work", dbPath: join(dir, "work.db"), mode: "rw" },
+  ]);
+  try {
+    // the first GET opens the aux store; seed one memory via the lib directly
+    // (the read-only rule is server-layer, not store-layer)
+    await call(app, "GET", "/aux/memories");
+    const auxId = opened.find((o) => o.dbPath.endsWith("aux.db"))!.store.store("to be patched", {});
+
+    const blocked = await call(app, "POST", "/aux/memories", { content: "should fail" });
+    assert.equal(blocked.status, 409);
+    assert.match(blocked.json.error, /read-only/);
+
+    const patched = await call(app, "PATCH", `/aux/memories/${auxId}`, { weight: 0.9 });
+    assert.equal(patched.status, 409);
+
+    const removed = await call(app, "DELETE", `/aux/memories/${auxId}?force=1`);
+    assert.equal(removed.status, 409);
+
+    const fixed = await call(app, "POST", "/aux/doctor", { fix: true });
+    assert.equal(fixed.status, 409); // FTS rebuild is a write
+
+    const listed = await call(app, "GET", "/aux/memories");
+    assert.equal(listed.status, 200); // reads stay open
+
+    const created = await call(app, "POST", "/work/memories", { content: "allowed here" });
+    assert.equal(created.status, 201);
+    const got = await call(app, "GET", `/work/memories/${created.json.id}`);
+    assert.equal(got.json.content, "allowed here");
+  } finally {
+    cleanup();
+  }
+});
+
+test("server: auxiliary stores open lazily through the openStore seam", async () => {
+  const { app, opened, cleanup } = tempMultiApp((dir) => [
+    { name: "lazy", dbPath: join(dir, "lazy.db"), mode: "rw" },
+  ]);
+  try {
+    assert.equal(opened.length, 0); // nothing opened at construction
+
+    const stats = await call(app, "GET", "/lazy/stats");
+    assert.equal(stats.status, 200);
+    assert.equal(opened.length, 1);
+
+    await call(app, "GET", "/lazy/stats");
+    assert.equal(opened.length, 1); // cached after the first request
+  } finally {
+    cleanup();
+  }
+});
+
+test("server: parseStoreSpec validates names, reserved words and the :rw suffix", () => {
+  assert.deepEqual(parseStoreSpec("aux=/tmp/aux.db"), { name: "aux", dbPath: "/tmp/aux.db", mode: "ro" });
+  assert.deepEqual(parseStoreSpec("eval=/tmp/eval.db:rw"), { name: "eval", dbPath: "/tmp/eval.db", mode: "rw" });
+  assert.deepEqual(parseStoreSpec("a=/tmp/with=equals:rw"), { name: "a", dbPath: "/tmp/with=equals", mode: "rw" });
+
+  assert.throws(() => parseStoreSpec("/tmp/no-name.db"), /expects <name>=<path>/);
+  assert.throws(() => parseStoreSpec("name="), /requires a db path/);
+  assert.throws(() => parseStoreSpec("1bad=/tmp/x.db"), /invalid store name/);
+  assert.throws(() => parseStoreSpec("UPPER=/tmp/x.db"), /invalid store name/);
+  assert.throws(() => parseStoreSpec("search=/tmp/x.db"), /reserved/);
+});
+
+test("server: createApp rejects duplicate store names", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ai-memory-server-test-"));
+  const store = Store.open({ dbPath: join(dir, "memory.db") });
+  try {
+    assert.throws(
+      () =>
+        createApp(store, {
+          stores: [
+            { name: "dup", dbPath: join(dir, "a.db"), mode: "ro" },
+            { name: "dup", dbPath: join(dir, "b.db"), mode: "ro" },
+          ],
+        }),
+      /duplicate store name: dup/,
+    );
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

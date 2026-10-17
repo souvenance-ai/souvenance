@@ -1,13 +1,20 @@
-import { Hono, type Context } from "hono";
-import type { Store } from "./db.ts";
+import { Hono, type Context, type Next } from "hono";
+import { Store } from "./db.ts";
 import type { Direction, StoreOptions, UpdateOptions } from "./types.ts";
 
 /**
  * HTTP surface over a Store — the server consumes the LIB, not the CLI
  * (the big-store bench: ~1.3ms lib get vs ~40-100ms CLI process spawn).
- * Increment 1 serves exactly one store per process (the normal case:
- * one agent = one store, decision a4950b47); the multi-store path->Store
- * lazy map and the session->store binding API are later increments.
+ *
+ * Increment 1 (232b645) served exactly one store per process. Increment 2
+ * adds multi-store: the ROOT routes keep serving the process's own store
+ * (--db, one agent = one store, decision a4950b47) and each auxiliary store
+ * declared with `--store <name>=<path>[:rw]` mounts the same verb routes at
+ * /<name>/.... Auxiliary stores are READ-ONLY by default — the mechanical
+ * enforcement of personality isolation: an agent cannot write into another
+ * store through its server; `:rw` is the explicit opt-in (the evaluator
+ * exception). They open lazily on first request through an injected
+ * `openStore` factory so the caller owns their lifecycle.
  *
  * Routes mirror the CLI verbs 1:1 and return the same JSON shapes, so an
  * HTTP client gets the exact contract documented in SKILL.md / bin HELP.
@@ -50,6 +57,61 @@ export function statusFor(err: unknown): 400 | 404 | 409 | 500 | 503 {
   if (/\b(must be|requires|duplicate id)\b/.test(msg)) return 400;
   if (/fts5:\s*syntax error/i.test(msg) || /no such column/i.test(msg)) return 400;
   return 500;
+}
+
+/** Serving mode of a declared auxiliary store: read-only unless opted in. */
+export type StoreMode = "ro" | "rw";
+
+/** An auxiliary store declared on the command line. */
+export interface DeclaredStore {
+  name: string;
+  dbPath: string;
+  mode: StoreMode;
+}
+
+export interface MultiStoreOptions {
+  /** Auxiliary stores mounted at /<name>/..., read-only by default. */
+  stores?: DeclaredStore[];
+  /**
+   * Opens an auxiliary store on first request (default: Store.open).
+   * Injected so the caller owns the lifecycle of lazily opened stores.
+   */
+  openStore?: (dbPath: string) => Store;
+}
+
+/** Root route names a store must not shadow. */
+const RESERVED_STORE_NAMES = new Set(["search", "memories", "merge", "stats", "tags", "doctor"]);
+
+/**
+ * Parses a `--store <name>=<path>[:rw]` spec. The name becomes a URL segment
+ * (lowercase letters, digits, hyphens; must start with a letter) and is
+ * checked against the reserved root routes. The path may contain "=" and
+ * ":"; the mode suffix is the exact terminal ":rw".
+ */
+export function parseStoreSpec(spec: string): DeclaredStore {
+  const eq = spec.indexOf("=");
+  if (eq < 1) {
+    throw new Error(`--store expects <name>=<path>[:rw], got: ${spec}`);
+  }
+  const name = spec.slice(0, eq);
+  let dbPath = spec.slice(eq + 1);
+  let mode: StoreMode = "ro";
+  if (dbPath.endsWith(":rw")) {
+    mode = "rw";
+    dbPath = dbPath.slice(0, -3);
+  }
+  if (dbPath.length === 0) {
+    throw new Error(`--store '${name}' requires a db path`);
+  }
+  if (!/^[a-z][a-z0-9-]{0,31}$/.test(name)) {
+    throw new Error(
+      `invalid store name '${name}': lowercase letters, digits and hyphens, starting with a letter`,
+    );
+  }
+  if (RESERVED_STORE_NAMES.has(name)) {
+    throw new Error(`store name '${name}' is reserved by root routes; pick another name`);
+  }
+  return { name, dbPath, mode };
 }
 
 /** Parses the JSON body; an empty body is `{}` (e.g. POST /doctor). */
@@ -139,28 +201,48 @@ const ENDPOINTS: Array<{ method: string; path: string; note: string }> = [
   { method: "POST", path: "/doctor", note: "integrity report, {fix:true} rebuilds the FTS index" },
 ];
 
-export function createApp(store: Store): Hono {
-  const app = new Hono();
+type StoreResolver = () => Store;
 
-  app.get("/", (c) =>
-    c.json({
-      name: "ai-memory",
-      endpoints: ENDPOINTS,
-    }),
-  );
+/**
+ * Middleware rejecting every write on a read-only store. POST /doctor
+ * {fix:true} rebuilds the FTS index — a write — so it is blocked too.
+ */
+function readOnlyGuard(name: string) {
+  return async (c: Context, next: Next) => {
+    if (c.req.method !== "GET") {
+      throw new HttpError(
+        409,
+        `store '${name}' is served read-only; to allow writes, serve it with mode 'rw'`,
+      );
+    }
+    await next();
+  };
+}
 
-  app.post("/memories", async (c) => {
+/**
+ * Registers the verb routes (the CLI contract) on `app` under `prefix`,
+ * resolving the target store per request through `resolve`. The root
+ * registration passes prefix "" over the process's own store; each declared
+ * auxiliary store registers its own prefixed copy with its own (lazy)
+ * accessor, and read-only stores get the write guard.
+ */
+function registerStoreRoutes(app: Hono, prefix: string, resolve: StoreResolver, roName?: string): void {
+  if (roName !== undefined) {
+    app.use(`${prefix}/*`, readOnlyGuard(roName));
+  }
+
+  app.post(`${prefix}/memories`, async (c) => {
     const body = await readJson(c);
-    const id = store.store(requireContent(body["content"]), storeOptions(body));
+    const id = resolve().store(requireContent(body["content"]), storeOptions(body));
     return c.json({ id }, 201);
   });
 
-  app.get("/memories", (c) => {
+  app.get(`${prefix}/memories`, (c) => {
     const limit = numQuery(c.req.query("limit"), "limit");
     const offset = numQuery(c.req.query("offset"), "offset");
     const minWeight = numQuery(c.req.query("min-weight"), "min-weight");
     return c.json(
-      store.list({
+      resolve().list({
         where: c.req.query("where"),
         ...(limit !== undefined ? { limit } : {}),
         ...(offset !== undefined ? { offset } : {}),
@@ -170,14 +252,14 @@ export function createApp(store: Store): Hono {
     );
   });
 
-  app.get("/memories/:id", (c) => {
+  app.get(`${prefix}/memories/:id`, (c) => {
     const id = c.req.param("id");
-    const memory = store.get(id);
+    const memory = resolve().get(id);
     if (!memory) throw new HttpError(404, `memory not found: ${id}`);
     return c.json(memory);
   });
 
-  app.patch("/memories/:id", async (c) => {
+  app.patch(`${prefix}/memories/:id`, async (c) => {
     const body = await readJson(c);
     const opts: UpdateOptions = {};
     const metadata = checkMetadata(body["metadata"]);
@@ -187,11 +269,11 @@ export function createApp(store: Store): Hono {
     if (metadata === undefined && weight === undefined) {
       throw new HttpError(400, "update requires metadata and/or weight");
     }
-    store.update(c.req.param("id"), opts);
+    resolve().update(c.req.param("id"), opts);
     return c.body(null, 204);
   });
 
-  app.delete("/memories/:id", (c) => {
+  app.delete(`${prefix}/memories/:id`, (c) => {
     const id = c.req.param("id");
     if (!boolQuery(c.req.query("force"))) {
       throw new HttpError(
@@ -199,13 +281,13 @@ export function createApp(store: Store): Hono {
         "delete is destructive: repeat with ?force=1, or prefer POST /memories/:id/deprecate",
       );
     }
-    store.delete(id);
+    resolve().delete(id);
     return c.body(null, 204);
   });
 
-  app.post("/memories/:id/supersede", async (c) => {
+  app.post(`${prefix}/memories/:id/supersede`, async (c) => {
     const body = await readJson(c);
-    const id = store.supersede(
+    const id = resolve().supersede(
       c.req.param("id"),
       requireContent(body["content"]),
       storeOptions(body),
@@ -213,13 +295,13 @@ export function createApp(store: Store): Hono {
     return c.json({ id }, 201);
   });
 
-  app.post("/memories/:id/deprecate", (c) => {
+  app.post(`${prefix}/memories/:id/deprecate`, (c) => {
     const id = c.req.param("id");
-    store.deprecate(id);
+    resolve().deprecate(id);
     return c.json({ id, status: "deprecated" });
   });
 
-  app.post("/memories/:id/link", async (c) => {
+  app.post(`${prefix}/memories/:id/link`, async (c) => {
     const from = c.req.param("id");
     const body = await readJson(c);
     if (typeof body["to"] !== "string" || body["to"].length === 0) {
@@ -230,20 +312,20 @@ export function createApp(store: Store): Hono {
     }
     const to = body["to"];
     const kind = body["kind"];
-    store.link(from, to, kind, { metadata: checkMetadata(body["metadata"]) ?? {} });
+    resolve().link(from, to, kind, { metadata: checkMetadata(body["metadata"]) ?? {} });
     return c.json({ from_id: from, to_id: to, kind }, 201);
   });
 
-  app.get("/memories/:id/relations", (c) => {
+  app.get(`${prefix}/memories/:id/relations`, (c) => {
     return c.json(
-      store.relations(c.req.param("id"), {
+      resolve().relations(c.req.param("id"), {
         direction: directionQuery(c.req.query("direction")),
         resolve: boolQuery(c.req.query("resolve")),
       }),
     );
   });
 
-  app.post("/merge", async (c) => {
+  app.post(`${prefix}/merge`, async (c) => {
     const body = await readJson(c);
     if (!Array.isArray(body["ids"]) || body["ids"].length === 0) {
       throw new HttpError(400, "ids must be a non-empty array of memory ids");
@@ -253,16 +335,16 @@ export function createApp(store: Store): Hono {
         throw new HttpError(400, "ids must be memory id strings");
       }
     }
-    const id = store.merge(body["ids"] as string[], requireContent(body["content"]), storeOptions(body));
+    const id = resolve().merge(body["ids"] as string[], requireContent(body["content"]), storeOptions(body));
     return c.json({ id }, 201);
   });
 
-  app.get("/search", (c) => {
+  app.get(`${prefix}/search`, (c) => {
     const q = c.req.query("q");
     if (!q) throw new HttpError(400, "q must be non-empty");
     const limit = numQuery(c.req.query("limit"), "limit");
     return c.json(
-      store.search(q, {
+      resolve().search(q, {
         where: c.req.query("where"),
         ...(limit !== undefined ? { limit } : {}),
         includeLegacy: boolQuery(c.req.query("all")),
@@ -270,23 +352,72 @@ export function createApp(store: Store): Hono {
     );
   });
 
-  app.get("/stats", (c) => c.json(store.stats()));
+  app.get(`${prefix}/stats`, (c) => c.json(resolve().stats()));
 
-  app.get("/tags", (c) =>
+  app.get(`${prefix}/tags`, (c) =>
     c.json(
-      store.tags({
+      resolve().tags({
         where: c.req.query("where"),
         includeLegacy: boolQuery(c.req.query("all")),
       }),
     ),
   );
 
-  app.get("/doctor", (c) => c.json(store.doctor()));
+  app.get(`${prefix}/doctor`, (c) => c.json(resolve().doctor()));
 
-  app.post("/doctor", async (c) => {
+  app.post(`${prefix}/doctor`, async (c) => {
     const body = await readJson(c);
-    return c.json(store.doctor({ fix: body["fix"] === true }));
+    return c.json(resolve().doctor({ fix: body["fix"] === true }));
   });
+}
+
+/**
+ * Builds the app: root routes over the process's own store (always
+ * read-write — it IS the agent's identity), plus each declared auxiliary
+ * store mounted at /<name>/... Auxiliary stores open lazily via `openStore`
+ * and duplicate names fail fast at construction.
+ */
+export function createApp(store: Store, opts: MultiStoreOptions = {}): Hono {
+  const declared = opts.stores ?? [];
+  const seen = new Set<string>();
+  for (const d of declared) {
+    if (seen.has(d.name)) throw new Error(`duplicate store name: ${d.name}`);
+    seen.add(d.name);
+  }
+
+  const app = new Hono();
+
+  app.get("/", (c) =>
+    c.json({
+      name: "ai-memory",
+      endpoints: ENDPOINTS,
+      ...(declared.length > 0
+        ? {
+            stores: declared.map(({ name, dbPath, mode }) => ({ name, db: dbPath, mode })),
+            note: "auxiliary stores mount at /<name>/...; they are read-only unless declared with mode 'rw'",
+          }
+        : {}),
+    }),
+  );
+
+  // Root: the process's own store (one agent = one store, decision a4950b47).
+  registerStoreRoutes(app, "", () => store);
+
+  // Auxiliary stores: opened lazily on first request; the openStore seam lets
+  // the caller (bin) own their lifecycle and close them after shutdown.
+  const openStore = opts.openStore ?? ((dbPath: string) => Store.open({ dbPath }));
+  const opened = new Map<string, Store>();
+  for (const d of declared) {
+    const resolve = (): Store => {
+      let s = opened.get(d.name);
+      if (!s) {
+        s = openStore(d.dbPath);
+        opened.set(d.name, s);
+      }
+      return s;
+    };
+    registerStoreRoutes(app, `/${d.name}`, resolve, d.mode === "ro" ? d.name : undefined);
+  }
 
   app.notFound((c) => c.json({ error: "not found" }, 404));
 
