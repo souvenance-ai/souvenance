@@ -37,8 +37,12 @@ The thread an agent follows through a large memory it cannot fit in context: sea
 _Avoid_: browsing, scanning
 
 **Store**:
-One agent's entire memory: the single SQLite database file (`.ai-memory/memory.db`) holding all memories and relations for a project. One file = one store = one agent's identity; the store is the unit you duplicate, move, or back up. Never use "store" for a single memory — one memory is a **memory**.
+One agent's entire memory: the single SQLite database file (`.ai-memory/memory.db`) holding all memories and relations for a project. One file = one store = the individual's whole memory (see **Individual**); the store is the unit you duplicate, move, or back up. Never use "store" for a single memory — one memory is a **memory**.
 _Avoid_: database, db (use "store" in domain prose; "database" for the implementation); using "store" for a single memory
+
+**Individual**:
+The persistent person that emerges from a store — the being the memory composes: directives as its constitution, summaries as its lived past, open objectives as its standing intent, the linked graph as its recorded experience. The **agent** is the disposable instantiation: a waking agent that runs the recovery ritual is the individual re-instantiated, and many agents may instantiate the SAME individual (across sessions and surfaces: CLI, HTTP, MCP) — while one store = one individual, and touching several stores in one session is the multiple-personality risk the server constraints rule out. Lived writing (the experience note, the evaluation grades) is authored by the individual through whichever instantiation is currently alive.
+_Avoid_: persona, self, consciousness (metaphysical); conflating with "agent" — "agent" names the generic client process, "individual" names the store-born person whose continuity the store carries
 
 **Status**:
 The lifecycle state of a memory: `active`, `superseded`, `deprecated`, or `merged`. Determined by the addition-only model — memories are never overwritten or deleted, only superseded, deprecated, or merged. `search` and `list` default to `active` memories only; use `--all` to include others.
