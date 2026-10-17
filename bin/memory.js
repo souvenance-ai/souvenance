@@ -26,6 +26,8 @@ Commands:
   export [--output <dir>]                     Export the entire store as a flat directory of markdown files
   doctor [--fix]                              Validate store integrity (links, edges, kinds, weights,
       titles, FTS index); prints a JSON report, exit 1 when findings
+  serve [--port N] [--host <addr>]            Serve the store over HTTP as JSON (default 127.0.0.1:3141);
+      one store per process (--db), routes mirror the CLI verbs
 
 Flags:
   --db <path>      Override the DB path (default: .ai-memory/memory.db)
@@ -52,6 +54,12 @@ Notes:
     (the one mechanical repair); every other finding is repaired by hand
     (supersede, merge, update, link). Exit code is 1 when findings exist
     (a successful diagnosis, not an error — stderr stays empty)
+  serve runs one store per process: pick the store with --db. Every route
+    mirrors a CLI verb and returns the same JSON; GET / lists all routes.
+    DELETE /memories/:id is destructive and requires ?force=1 — prefer
+    POST /memories/:id/deprecate. Errors map to 404 (not found), 409
+    (wrong lifecycle state / guarded delete), 400 (validation, bad query),
+    503 (database locked after retries)
 `;
 
 const BOOLEAN_FLAGS = new Set(["--all", "--force", "--resolved", "--fix"]);
@@ -106,7 +114,7 @@ function num(flag) {
   return n;
 }
 
-function main() {
+async function main() {
   const { args, flags } = parseArgs(process.argv.slice(2));
 
   if (flags.help || args.length === 0) {
@@ -299,6 +307,27 @@ function main() {
         });
         print(report);
         if (!report.healthy) exitCode = 1;
+        break;
+      }
+      case "serve": {
+        // Long-running: the store was opened above and is closed by the
+        // finally block only after the server shuts down (SIGINT/SIGTERM).
+        const { createApp, DEFAULT_HOST, DEFAULT_PORT } = await import("../src/server.ts");
+        const { serve } = await import("@hono/node-server");
+        const port = num(flags["--port"]) ?? DEFAULT_PORT;
+        const host = flags["--host"] ?? DEFAULT_HOST;
+        const server = serve({ fetch: createApp(store).fetch, port, hostname: host });
+        process.stdout.write(
+          `memory server listening on http://${host}:${port} (db: ${store.dbPath})\n`,
+        );
+        await new Promise((resolve) => {
+          const stop = () => {
+            server.close();
+            resolve();
+          };
+          process.on("SIGINT", stop);
+          process.on("SIGTERM", stop);
+        });
         break;
       }
       default:

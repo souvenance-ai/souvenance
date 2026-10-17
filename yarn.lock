@@ -5,6 +5,15 @@ __metadata:
   version: 10
   cacheKey: 10c0
 
+"@hono/node-server@npm:^2.1.5":
+  version: 2.1.5
+  resolution: "@hono/node-server@npm:2.1.5"
+  peerDependencies:
+    hono: ^4 || ^5.0.0-0
+  checksum: 10c0/3c3d5ffcc4a229e532530729b64db623493171bcda7b40ffbac3a46489884f700c881439d8c0d0413cd18793458ca252acedf6a9c13c8c3a024037e47974cacb
+  languageName: node
+  linkType: hard
+
 "@types/node@npm:^26.2.0":
   version: 26.2.0
   resolution: "@types/node@npm:26.2.0"
@@ -18,12 +27,21 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "ai-memory@workspace:."
   dependencies:
+    "@hono/node-server": "npm:^2.1.5"
     "@types/node": "npm:^26.2.0"
+    hono: "npm:^4.13.13"
     typescript: "npm:5.8.3"
   bin:
     memory: bin/memory.js
   languageName: unknown
   linkType: soft
+
+"hono@npm:^4.13.13":
+  version: 4.13.13
+  resolution: "hono@npm:4.13.13"
+  checksum: 10c0/c8524e685a59b4f23a9bea15385eeac5622218949db251cb871b20fd9ef673b751b44ccdee6c22b3df56e5ed4c1b1cebad17b518bdc1823039da39b53ef9c1cf
+  languageName: node
+  linkType: hard
 
 "typescript@npm:5.8.3":
   version: 5.8.3
