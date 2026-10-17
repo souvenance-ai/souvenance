@@ -150,6 +150,30 @@ node bin/memory.js serve \
 - In token mode, store-level `:rw` mounts are rejected at startup — write
   access is decided per token, not per mount. `GET /` lists only the
   presenting token's grant, without db paths.
+- **Token file** — secrets in `argv` are world-readable (`ps aux`,
+  `/proc/<pid>/cmdline`): `--token-file <path>` (repeatable, composes with
+  `--token`) reads an env-style file instead:
+
+  ```bash
+  # /etc/ai-memory/tokens.env  — chmod 600
+  # one grant per line: MEMORY_TOKEN_<agent>=<secret>[@<store>][:rw][:where]
+  MEMORY_TOKEN_valentin=6c4b...            # process store, read-only
+  export MEMORY_TOKEN_ci=9f1e...@notes     # 'export' accepted, comments too
+  MEMORY_TOKEN_writer="aa07...@root:rw:where"
+  ```
+
+  The key carries the agent (hyphens written as underscores — injective,
+  agent names never contain underscores, so the file stays a valid dotenv
+  file an operator can export); the value reuses the exact `--token`
+  grammar after `<agent>=`. Blank lines and full-line `#` comments are
+  skipped, an optional `export ` prefix is accepted, one pair of
+  surrounding quotes is stripped — no interpolation, no escapes.
+  Parsing is strict (refuse, don't hide): unknown keys, duplicate agents or
+  an entry-free file refuse to start with a line-numbered error — a typo'd
+  key must never look like *no tokens granted*. On POSIX the file must be
+  owner-only (`chmod 600`): bearer secrets in a group/world-readable file
+  void the boundary, the same refusal class as an exposed unauthenticated
+  bind.
 
 ### Exposure — TLS and request caps
 

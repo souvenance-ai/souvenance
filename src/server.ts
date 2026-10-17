@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { Hono, type Context, type Next } from "hono";
 import { Store } from "./db.ts";
@@ -31,6 +32,10 @@ import type { Direction, StoreOptions, UpdateOptions } from "./types.ts";
  * (exposedAddresses resolves a non-loopback bind to its reachable
  * addresses), and the TLS decision: reverse proxy, never built-in — the
  * server stays plain HTTP, the bearer boundary travels end-to-end.
+ *
+ * Token-file provisioning (decision 4429801d): `--token-file <path>` reads an
+ * env-style file so bearer secrets never ride in argv (`ps aux` and
+ * `/proc/<pid>/cmdline` are world-readable).
  *
  * Routes mirror the CLI verbs 1:1 and return the same JSON shapes, so an
  * HTTP client gets the exact contract documented in SKILL.md / bin HELP.
@@ -242,6 +247,85 @@ export function parseTokenSpec(spec: string): TokenGrant {
     );
   }
   return { agent, token: rest, store, mode, where };
+}
+
+/**
+ * Parses a token file — an env-style (dotenv) text file handed to
+ * `--token-file <path>` (decision 4429801d). One grant per line as
+ * `MEMORY_TOKEN_<agent>=<secret>[@<store>][:rw][:where]`: the agent lives in
+ * the KEY (hyphens written as underscores — injective, agent names never
+ * contain underscores — so the file stays a valid dotenv file an operator
+ * can export), the VALUE is exactly the grammar parseTokenSpec expects after
+ * `<agent>=`. Blank lines and full-line `#` comments are skipped; an
+ * optional `export ` prefix is accepted; one pair of surrounding quotes is
+ * stripped; no interpolation, no escape sequences (hex secrets need none).
+ *
+ * Strictness is the refuse-don't-hide principle: unknown keys, duplicate
+ * agents, zero entries, a missing file — each refuses with a line-numbered
+ * error rather than silently weakening the trust boundary (a typo'd key must
+ * never look like "no tokens granted"). On POSIX the file must be
+ * owner-only (mode & 0o077 === 0) — bearer secrets in a group/world-readable
+ * file void the boundary the same way an exposed unauthenticated bind does;
+ * the check is skipped on win32, where stat mode bits are unreliable.
+ */
+export function parseTokenFile(path: string): TokenGrant[] {
+  let mode = -1;
+  try {
+    mode = statSync(path).mode;
+  } catch {
+    throw new Error(`token file not found: ${path}`);
+  }
+  if (process.platform !== "win32" && (mode & 0o077) !== 0) {
+    throw new Error(
+      `token file '${path}' is readable by group/others (mode 0${(mode & 0o777).toString(8)}): chmod 600 ${path} — bearer secrets in a shared-readable file void the boundary`,
+    );
+  }
+  let text = readFileSync(path, "utf8");
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1); // UTF-8 BOM
+  const grants: TokenGrant[] = [];
+  const agentLines = new Map<string, number>();
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.length === 0 || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 1) {
+      throw new Error(`token file '${path}' line ${i + 1}: expected KEY=VALUE, got: ${line}`);
+    }
+    let key = line.slice(0, eq).trim();
+    if (key.startsWith("export ")) key = key.slice(7).trim();
+    let value = line.slice(eq + 1).trim();
+    if (
+      value.length >= 2 &&
+      (value.startsWith('"') || value.startsWith("'")) &&
+      value.endsWith(value[0])
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (!key.startsWith("MEMORY_TOKEN_")) {
+      throw new Error(
+        `token file '${path}' line ${i + 1}: unexpected key '${key}' — only MEMORY_TOKEN_<agent> entries belong in a token file`,
+      );
+    }
+    const agent = key.slice("MEMORY_TOKEN_".length).replaceAll("_", "-");
+    if (agentLines.has(agent)) {
+      throw new Error(
+        `token file '${path}' line ${i + 1}: duplicate agent '${agent}' (already granted on line ${agentLines.get(agent)}) — one entry per agent`,
+      );
+    }
+    let grant: TokenGrant;
+    try {
+      grant = parseTokenSpec(`${agent}=${value}`);
+    } catch (err) {
+      throw new Error(`token file '${path}' line ${i + 1}: ${err instanceof Error ? err.message : err}`);
+    }
+    grants.push(grant);
+    agentLines.set(agent, i + 1);
+  }
+  if (grants.length === 0) {
+    throw new Error(`token file '${path}': no MEMORY_TOKEN_<agent> entries — the file granted nothing, refusing to start on it`);
+  }
+  return grants;
 }
 
 /** Hosts that bind the loopback interface only — the local trust zone. */

@@ -28,6 +28,7 @@ Commands:
       titles, FTS index); prints a JSON report, exit 1 when findings
   serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...
       [--token <agent>=<secret>[@<store>][:rw][:where]]...
+      [--token-file <path>]...
       Serve the store over HTTP as JSON (default 127.0.0.1:3141);
       root routes serve the process store (--db); each --store mounts
       an auxiliary store at /<name>/ (read-only unless :rw). Declaring
@@ -80,6 +81,15 @@ Notes:
     opt in per token with :where (400). Token specs:
     <agent>=<secret>[@<store>][:rw][:where], secrets 16+ chars of
     [A-Za-z0-9_-] (generate: openssl rand -hex 32), compared timing-safe.
+    Token files: --token-file <path> (repeatable, composes with --token)
+    reads an env-style file, one grant per line as
+    MEMORY_TOKEN_<agent>=<secret>[@<store>][:rw][:where] — the agent lives
+    in the key, hyphens written as underscores (dotenv-compatible; full-line
+    # comments, optional 'export ' prefix, one pair of quotes stripped).
+    Strict: unknown keys, duplicate agents or an entry-free file refuse to
+    start (a typo must never look like 'no tokens granted'); POSIX perms
+    must be owner-only (chmod 600 — shared-readable secrets void the
+    boundary).
     Structured filters (all modes): GET /memories, /search and /tags
     accept ?kind=<k> and ?tag=<t> (repeatable, AND-composed) compiled
     server-side into the same JSON1 the --where fragment would express;
@@ -125,8 +135,9 @@ function parseArgs(argv) {
       }
       const val = a.includes("=") ? a.slice(a.indexOf("=") + 1) : argv[i + 1];
       if (!a.includes("=")) i++;
-      // --store is repeatable: one flag per auxiliary store
-      if (key === "--store" || key === "--token") {
+      // --store, --token and --token-file are repeatable: one flag per
+      // auxiliary store / inline grant / token file
+      if (key === "--store" || key === "--token" || key === "--token-file") {
         if (!Array.isArray(flags[key])) flags[key] = [];
         flags[key].push(val);
       } else {
@@ -366,7 +377,7 @@ async function main() {
         // Long-running: the store was opened above and is closed by the
         // finally block only after the server shuts down (SIGINT/SIGTERM).
         const {
-          createApp, parseStoreSpec, parseTokenSpec, DEFAULT_HOST, DEFAULT_PORT,
+          createApp, parseStoreSpec, parseTokenSpec, parseTokenFile, DEFAULT_HOST, DEFAULT_PORT,
           exposedAddresses, isLoopbackHost,
           REQUEST_TIMEOUT_MS, HEADERS_TIMEOUT_MS, KEEPALIVE_TIMEOUT_MS,
         } = await import("../src/server.ts");
@@ -385,7 +396,12 @@ async function main() {
         // Bearer-token grants (increment 4): one token = one agent bound to
         // one store, read-only by default; declaring any token switches the
         // server to token mode and createApp enforces the trust boundary.
-        const tokens = (flags["--token"] ?? []).map(parseTokenSpec);
+        // Token files (decision 4429801d) feed the same list — secrets out
+        // of argv (ps aux / /proc/<pid>/cmdline are world-readable).
+        const tokens = [
+          ...(flags["--token-file"] ?? []).flatMap(parseTokenFile),
+          ...(flags["--token"] ?? []).map(parseTokenSpec),
+        ];
         const openStore = (dbPath) => {
           const s = Store.open({ dbPath });
           auxiliaries.push(s);
