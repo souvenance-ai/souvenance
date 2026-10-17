@@ -170,3 +170,6 @@ dist
 .scratch/big-store/*.db
 .scratch/big-store/*.db-wal
 .scratch/big-store/*.db-shm
+
+# pre-genesis archive — raw session transcripts kept on disk only, bookmarked at tag 'pre-genesis' (1a0881b)
+/.sessions/
