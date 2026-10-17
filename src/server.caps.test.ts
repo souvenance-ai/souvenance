@@ -128,15 +128,16 @@ test("caps: negative, float and non-integer limit/offset -> 400 (a negative LIMI
 test("caps: /recover limits are capped too", async () => {
   const { app, cleanup } = tempApp();
   try {
-    for (const param of ["directives", "summaries"]) {
+    for (const param of ["directives", "summaries", "objectives"]) {
       const { status, json } = await call(app, "GET", `/recover?${param}=1001`);
       assert.equal(status, 400, `?${param} over the cap must be 400`);
       assert.match(json.error, /1000 cap/);
     }
-    const ok = await call(app, "GET", "/recover?directives=2&summaries=1");
+    const ok = await call(app, "GET", "/recover?directives=2&summaries=1&objectives=1");
     assert.equal(ok.status, 200);
     assert.ok(Array.isArray(ok.json.directives));
     assert.ok(Array.isArray(ok.json.summaries));
+    assert.ok(Array.isArray(ok.json.objectives));
   } finally {
     cleanup();
   }

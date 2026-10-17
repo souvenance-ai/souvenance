@@ -28,7 +28,7 @@ export const DEFAULT_DB_PATH = ".ai-memory/memory.db";
 /** memory:// links are authored text in content; the doctor validates each target. */
 const MEMORY_LINK_RE = /memory:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
 
-const DOCTOR_CHECK_COUNT = 9;
+const DOCTOR_CHECK_COUNT = 10;
 
 const SQLITE_BUSY = 5;
 const BUSY_RETRIES = 50;
@@ -759,7 +759,10 @@ export class Store {
           detail: `weight ${m.weight} outside [0, 1]`,
           hint: "memory update --weight <0-1>",
         });
-      } else if ((kind === "directive" || kind === "summary") && m.weight < 0.8) {
+      } else if (
+        (kind === "directive" || kind === "summary" || kind === "objective") &&
+        m.weight < 0.8
+      ) {
         findings.push({
           check: "weight_bounds",
           id: m.id,
@@ -828,6 +831,35 @@ export class Store {
           hint: "merge the group, or supersede with a distinct title",
         });
       }
+    }
+
+    // Stale handoff (evaluation #1, 2026-10-17): a session that ended
+    // without its closing summary leaves a decision younger than the newest
+    // summary, so the next session's recovery ritual would serve a handoff
+    // one or more arcs behind the store. Legacy-free ordering: notes are
+    // excluded on purpose — the experience note is checklist step 2, BY
+    // DESIGN stored after the summary; decisions are the binding truth that
+    // must be recapped. Fires only when summaries exist: a store with none
+    // has not yet adopted the handoff convention and would flag on every
+    // mid-session call.
+    let newestSummary: string | null = null;
+    let newestDecision: string | null = null;
+    for (const m of mems) {
+      if (m.status !== "active") continue;
+      const parsed = parsedMeta.get(m.id);
+      const kind = parsed && typeof parsed["kind"] === "string" ? (parsed["kind"] as string) : undefined;
+      if (kind === "summary") {
+        if (newestSummary === null || m.created_at > newestSummary) newestSummary = m.created_at;
+      } else if (kind === "decision") {
+        if (newestDecision === null || m.created_at > newestDecision) newestDecision = m.created_at;
+      }
+    }
+    if (newestSummary !== null && newestDecision !== null && newestDecision > newestSummary) {
+      findings.push({
+        check: "stale_handoff",
+        detail: `newest active decision (${newestDecision}) is newer than the newest summary (${newestSummary}) — a session likely ended without its summary`,
+        hint: 'store a kind:"summary" recapping the arcs since the last one before ending a session',
+      });
     }
 
     findings.push(...this.checkFts());

@@ -182,15 +182,24 @@ test("mcp: lifecycle — supersede, deprecate, merge, update, delete-with-force"
   }
 });
 
-test("mcp: recover bundles directives, summaries and stats", async () => {
+test("mcp: recover bundles directives, summaries, objectives and stats", async () => {
   const r = rig();
   try {
     await call(r, "store", { content: "# Directive: rule", metadata: { kind: "directive" } }, 1);
     await call(r, "store", { content: "# Summary: done things", metadata: { kind: "summary" } }, 2);
-    const rec = await call(r, "recover", { summaries_limit: 1 }, 3);
+    const open = await call(r, "store", {
+      content: "# Objective: standing intent",
+      metadata: { kind: "objective", state: "open" },
+    }, 3);
+    await call(r, "store", {
+      content: "# Objective: parked until demand",
+      metadata: { kind: "objective", state: "parked" },
+    }, 4);
+    const rec = await call(r, "recover", { summaries_limit: 1 }, 5);
     assert.equal(rec.result.directives.length, 1);
     assert.equal(rec.result.summaries.length, 1);
-    assert.equal(rec.result.stats.active_memories, 2);
+    assert.deepEqual(rec.result.objectives.map((m: { id: string }) => m.id), [open.result.id]);
+    assert.equal(rec.result.stats.active_memories, 4);
     assert.equal(typeof rec.result.stats.edges, "number");
   } finally {
     await r.close();

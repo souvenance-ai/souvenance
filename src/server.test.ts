@@ -571,8 +571,37 @@ test("server: GET /recover marks the empty store plain", async () => {
     assert.equal(rec.status, 200);
     assert.deepEqual(rec.json.directives, []);
     assert.deepEqual(rec.json.summaries, []);
+    assert.deepEqual(rec.json.objectives, []);
     assert.equal(rec.json.stats.active_memories, 0);
     assert.equal(rec.json.stats.edges, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("server: GET /recover carries the open objectives register", async () => {
+  const { app, cleanup } = tempApp();
+  try {
+    // Only OPEN objectives ride the hand: parked waits for its wake condition,
+    // done is realized — the recovery presents commitments, not history.
+    const o1 = store_standalone(await call(app, "POST", "/memories", {
+      content: "objective open", metadata: { kind: "objective", state: "open" },
+    }));
+    await call(app, "POST", "/memories", {
+      content: "objective parked", metadata: { kind: "objective", state: "parked" },
+    });
+    await call(app, "POST", "/memories", {
+      content: "objective done", metadata: { kind: "objective", state: "done" },
+    });
+    await call(app, "POST", "/memories", { content: "a plain note", metadata: { kind: "note" } });
+
+    const rec = await call(app, "GET", "/recover");
+    assert.deepEqual(
+      rec.json.objectives.map((m: { id: string }) => m.id),
+      [o1],
+    );
+    const zero = await call(app, "GET", "/recover?objectives=0");
+    assert.deepEqual(zero.json.objectives, []);
   } finally {
     cleanup();
   }

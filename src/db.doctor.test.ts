@@ -50,7 +50,7 @@ test("doctor: a healthy pair has zero findings and coherent summary", () => {
     const report = store.doctor();
     assert.equal(report.healthy, true);
     assert.deepEqual(report.findings, []);
-    assert.equal(report.summary.checks, 9);
+    assert.equal(report.summary.checks, 10);
     assert.equal(report.summary.issues, 0);
     assert.equal(report.summary.memories, 2);
     assert.equal(report.summary.edges, 1);
@@ -276,6 +276,97 @@ test("doctor: fts_integrity detects drift and --fix rebuilds the index", () => {
     assert.equal(report.healthy, true);
     assert.deepEqual(report.findings, []);
     assert.equal(report.summary.fts_rebuilt, true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("doctor: objective memories carry the 0.8 weight floor too", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const { a } = healthyPair(store);
+    const o = store.store("# Objective alpha\n\nStanding intent.\n\nKeywords: objective.", {
+      metadata: { kind: "objective", state: "open" },
+      weight: 0.7,
+    });
+    store.link(a, o, "references");
+    let report = store.doctor();
+    assert.equal(report.findings.length, 1);
+    assert.equal(report.findings[0].check, "weight_bounds");
+    assert.equal(report.findings[0].id, o);
+    assert.match(report.findings[0].detail, /objective with weight 0.7 below the 0.8 floor/);
+
+    // Above the floor the finding disappears — 0.85 is the authored class.
+    store.update(o, { weight: 0.85 });
+    report = store.doctor();
+    assert.equal(report.findings.length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("doctor: stale_handoff flags a decision younger than the newest summary", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    healthyPair(store);
+    const s = store.store("# Summary: arc one\n\nDone.\n\nKeywords: summary.", {
+      metadata: { kind: "summary" },
+    });
+    // Freeze the summary in the past so the decision below is deterministically
+    // younger — created_at compares as ISO strings.
+    store.db
+      .prepare("UPDATE memories SET created_at = '2026-10-16T08:00:00.000Z' WHERE id = ?")
+      .run(s);
+    let report = store.doctor();
+    assert.ok(!report.findings.some((f) => f.check === "stale_handoff"));
+
+    // The incident's shape: a decision lands AFTER the latest summary.
+    const d = store.store("# Decision: later truth\n\nWhy.\n\nKeywords: decision.", {
+      metadata: { kind: "decision" },
+    });
+    store.link(s, d, "references");
+    report = store.doctor();
+    const find = report.findings.find((f) => f.check === "stale_handoff");
+    assert.ok(find);
+    assert.match(find.detail, /newer than the newest summary/);
+    assert.match(find.hint, /kind:"summary"/);
+
+    // A healing summary (newer than the decision) clears it.
+    store.store("# Summary: arc two\n\nRecapped.\n\nKeywords: summary.", {
+      metadata: { kind: "summary" },
+    });
+    report = store.doctor();
+    assert.ok(!report.findings.some((f) => f.check === "stale_handoff"));
+  } finally {
+    cleanup();
+  }
+});
+
+test("doctor: stale_handoff skips summary-less stores (and suffers the post-summary note)", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    healthyPair(store);
+    store.store("# Decision: bare truth\n\nWhy.\n\nKeywords: decision.", {
+      metadata: { kind: "decision" },
+    });
+    // No summaries yet: the store has not adopted the handoff convention.
+    let report = store.doctor();
+    assert.ok(!report.findings.some((f) => f.check === "stale_handoff"));
+
+    // Checklist shape: summary (step 1) then the experience note (step 2).
+    // The note is confronted AFTER the summary on purpose, so truth for this
+    // check is decisions only — the note must NOT re-flag it.
+    const { b } = healthyPair(store);
+    const s = store.store("# Summary: arc three\n\nDone.\n\nKeywords: summary.", {
+      metadata: { kind: "summary" },
+    });
+    const n = store.store("# Evaluation: session note\n\nNote.\n\nKeywords: evaluation.", {
+      metadata: { kind: "note", tags: ["evaluation"] },
+    });
+    store.link(b, s, "references");
+    store.link(s, n, "references");
+    report = store.doctor();
+    assert.ok(!report.findings.some((f) => f.check === "stale_handoff"));
   } finally {
     cleanup();
   }

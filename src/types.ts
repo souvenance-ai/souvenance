@@ -96,6 +96,7 @@ export type DoctorCheck =
   | "status_without_bridge"
   | "isolated_active"
   | "duplicate_titles"
+  | "stale_handoff"
   | "fts_integrity";
 
 export interface DoctorFinding {

@@ -41,7 +41,7 @@ The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
 | `relations <id> [--direction out\|in\|both]` | List edges to/from a memory |
 | `stats` | Print store statistics as JSON |
 | `tags [--where <sql>] [--all]` | List all distinct metadata tags with counts |
-| `doctor [--fix]` | Validate store integrity (links, edges, kinds, weights, titles, FTS); exit 1 when findings |
+| `doctor [--fix]` | Validate store integrity (links, edges, kinds, weights, titles, handoff, FTS); exit 1 when findings |
 | `export [--output <dir>]` | Export the entire store as a flat directory of markdown files |
 | `serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...` | Serve the store over HTTP as JSON (default `127.0.0.1:3141`); auxiliary stores mount at `/<name>/` |
 
@@ -65,7 +65,7 @@ Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
 | Endpoint | Description |
 |---|---|
 | `GET /` | List every route |
-| `GET /recover` | Recovery ritual in one call: `{directives, summaries, stats}` — active `kind: directive` (20) + latest `kind: summary` (3), `?directives&summaries` limits |
+| `GET /recover` | Recovery ritual in one call: `{directives, summaries, objectives, stats}` — active `kind: directive` (20) + latest `kind: summary` (3) + open `kind: objective` (10), `?directives&summaries&objectives` limits |
 | `POST /memories` | Store — body `{content, metadata?, weight?}` → `201 {id}` |
 | `GET /memories` | List — `?where` (local) or `?kind&tag` (structured), `&limit&offset&min-weight&all` |
 | `GET /memories/:id` | Get (bumps `access_count`) |
@@ -251,8 +251,9 @@ opencode mcp add memory -- node /path/to/ai-memory/bin/memory.js mcp
 ```
 
 - Tools mirror the CLI verbs 1:1 and return the same JSON shapes as CLI
-  stdout: `recover` (the ritual — directives + summaries + stats, run it
-  FIRST), `store`, `supersede`, `merge`, `update`, `link`, `deprecate`,
+  stdout: `recover` (the ritual — directives + summaries + objectives +
+  stats, run it FIRST), `store`, `supersede`, `merge`, `update`, `link`,
+  `deprecate`,
   `delete` (requires `force: true`), `get`, `search`, `list`, `relations`,
   `tags`, `stats`, `doctor`.
 - Server instructions carry the recovery ritual (recover first, content

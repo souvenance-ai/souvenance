@@ -17,12 +17,13 @@ A persistent, searchable memory for agents: markdown documents stored in a per-p
 
 ## Recovery protocol
 
-At the start of a session, recover prior context in two steps — then stop recovering and start working.
+At the start of a session, recover prior context in three steps — then stop recovering and start working.
 
 1. **Load directives** — `list --where "metadata->>'$.kind' = 'directive'" --limit 20`. These are binding rules that must be respected before acting.
 2. **Load recent summaries** — `list --where "metadata->>'$.kind' = 'summary'" --limit 3`. These are the handoff from prior sessions: what was done, key decisions, what's next.
+3. **Load open objectives** — `list --where "metadata->>'$.kind' = 'objective' AND metadata->>'$.state' = 'open'" --limit 10`. These are standing commitments that have no arc and no consumer: they await realization, and only recovery presents them.
 
-**Served store**: when your only access to the store is HTTP (`memory serve`), `GET /recover` runs this same ritual in one call — `{directives, summaries, stats}` — and `GET /<name>/recover` reorients an agent mounted on an auxiliary store read-only, where no CLI verb works. Route details: README "HTTP server".
+**Served store**: when your only access to the store is HTTP (`memory serve`), `GET /recover` runs this same ritual in one call — `{directives, summaries, objectives, stats}` — and `GET /<name>/recover` reorients an agent mounted on an auxiliary store read-only, where no CLI verb works. Route details: README "HTTP server".
 
 Trust the summaries. They are the recovery point — not a hint to re-derive, but the prior session's finished work. Do not re-run verification (tests, typecheck, git log, stats) that the summaries already report as done. If you need deeper context, follow links from the summaries — the frontier loop starts there, not from scratch.
 
@@ -142,7 +143,7 @@ Run them in order. Each uses existing CLI commands — dreaming is a workflow, n
 4. **Rebalance** — adjust `weight` values based on graph structure. The author sets weight at creation; the dream corrects it based on reality:
    - Memory referenced by many incoming edges → boost (importance is structural and emergent).
    - Memory with no incoming edges and old → decay toward 0 (isolated and cold).
-   - Directives and summaries should stay high (≥ 0.8) regardless of age — they are binding or high-signal.
+   - Directives, summaries, and objectives should stay high (≥ 0.8) regardless of age — they are binding, high-signal, or standing intent. Objectives in particular accumulate no incoming edges over time (the work done under them cites arc decisions, not the objective) — never decay them for age or edge scarcity.
    - Use `memory update <id> --weight <0-1>` to adjust.
 
 5. **Synthesize** — after relinking, merging, superseding, and rebalancing, look for **emergent patterns** the graph reveals that no single memory captures. Store a `kind: "dream"` memory that narrates the pattern — connections, tensions, or themes that surfaced during consolidation. This is the dream itself: not a fact, but a revelation. Link it to the memories it draws from.
@@ -178,13 +179,17 @@ Run them in order. Each uses existing CLI commands — dreaming is a workflow, n
 
 Before sending your final message in any session, run through this checklist. These are not suggestions — they are obligations from directives you have agreed to. You will forget them if they are not in front of you. They are in front of you now.
 
-1. **Store a task summary** — `kind: "summary"`. What was done, key decisions, what's next. Link it to the memories it references. This is required after every non-trivial task, not just at the end of a session.
+1. **Store a task summary** — `kind: "summary"`. What was done, key decisions, what's next. Link it to the memories it references. This is required after every non-trivial task, not just at the end of a session. A relaunch recommendation is only valid when this summary exists — a stale handoff looks healthy to the next session.
 
-2. **Store the conversation** — if a directive requires storing conversations (e.g., bilingual directive), store the full conversation as a single bilingual memory: English summary first, original text appended under `## Original (Français)`.
+2. **Store the experience note** — the standing-evaluation practice. One short memory (`kind: "note"`, tags including "evaluation") on how the memory served you this session: retrieval hits and misses, queries that returned nothing, friction, gotchas. You are the memory's own evaluator — this lived data is what no external test produces, and it feeds improvement.
 
-3. **Check dream thresholds** — run `memory stats`. If any threshold is met (edge ratio < 1.5, +10 new memories since last dream, or end of non-trivial session), run the five dream operations: relink, merge, supersede, rebalance, synthesize. Store a `kind: "dream"` memory with the results.
+3. **Update open objectives** — state changes at decision time, not at session end: complete an objective (`state: "done"`), park it (`"parked"` with its wake condition in the content), or open a new one (`state: "open"`, weight 0.85, linked to what it affects). Search rank rewards engagement; standing intent is the least engaging class — present it, never hope to find it.
 
-4. **Link everything** — ensure memories created this session are linked to related memories. An unlinked memory is an island. Check the most recent memories: `memory relations <id>`. Add missing edges.
+4. **Store the conversation** — if a directive requires storing conversations (e.g., bilingual directive), store the full conversation as a single bilingual memory: English summary first, original text appended under `## Original (Français)`.
+
+5. **Check dream thresholds** — run `memory stats`. If any threshold is met (edge ratio < 1.5, +10 new memories since last dream, or end of non-trivial session), run the five dream operations: relink, merge, supersede, rebalance, synthesize. Store a `kind: "dream"` memory with the results.
+
+6. **Link everything** — ensure memories created this session are linked to related memories. An unlinked memory is an island. Check the most recent memories: `memory relations <id>`. Add missing edges.
 
 Run this checklist before you write your final message. Not after. Before.
 
@@ -196,5 +201,6 @@ Run this checklist before you write your final message. Not after. Before.
 - Schema migrates on open — no manual migration step.
 - The library (`src/db.ts`) is the deep module; this skill is the thin agent-facing contract. For implementation detail, read the library, not this file.
 - **Directives.** Store strict rules, constraints, and gotchas as `kind: "directive"`. Check directives before acting: `list --where "metadata->>'$.kind' = 'directive'"`. Directives are few and high-signal; they should override routine memories when they conflict.
+- **Objectives.** Standing commitments with no arc and no consumer — they await a realization, not a feature request. Store as `kind: "objective"` with `state` in metadata: `"open"` (active commitment, loaded by the recovery ritual), `"parked"` (waits for its named wake condition, written in the content), `"done"` (realized). Author at weight 0.85; the doctor flags below 0.8; the dream never decays them. Open one the moment a goal outlives the session that named it — the recovery ritual presents open objectives every session.
 - **Task summaries.** When you complete a non-trivial task, store a `kind: "summary"` memory recapping what was done, key decisions, and what's next — do this before sending your final message. A fresh session loads summaries via the recovery protocol to get oriented before diving in. Link the summary to the memories it references.
 - **Weight.** Every memory has a `weight` (0–1, default 0.5) that reflects its importance. The author sets it at creation (`--weight 0.9`); the dream rebalance phase adjusts it based on graph structure. Search combines BM25 × weight × recency — higher-weight memories rank first. Use `list --min-weight 0.7` to filter hot memories. A fresh agent can read weight without learning the kind vocabulary: 0.9 means important.
