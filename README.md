@@ -45,7 +45,7 @@ The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
 | `export [--output <dir>]` | Export the entire store as a flat directory of markdown files |
 | `serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...` | Serve the store over HTTP as JSON (default `127.0.0.1:3141`); auxiliary stores mount at `/<name>/` |
 
-Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure.
+Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`, `delete`, `link`, and `deprecate` print a one-word confirmation.
 
 `--db <path>` overrides the store location (default: `.ai-memory/memory.db`).
 

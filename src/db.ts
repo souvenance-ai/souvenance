@@ -266,7 +266,7 @@ export class Store {
       sets.push("weight = ?");
       params.push(opts.weight);
     }
-    if (sets.length === 0) throw new Error("update requires at least one of --metadata or --weight");
+    if (sets.length === 0) throw new Error("update requires at least one of metadata or weight");
     params.push(id);
     this.run(() => {
       this.db

@@ -180,7 +180,7 @@ test("update: throws when neither metadata nor weight provided", () => {
     const id = store.store("content");
     assert.throws(
       () => store.update(id, {}),
-      /update requires at least one of --metadata or --weight/,
+      /update requires at least one of metadata or weight/,
     );
   } finally {
     cleanup();

@@ -138,6 +138,10 @@ test("server: GET /memories honors limit, min-weight and all", async () => {
     const legacy = await call(app, "GET", "/memories?all=1");
     assert.equal(legacy.json.length, 3);
 
+    // Bare presence mirrors the CLI's --all flag.
+    const bareAll = await call(app, "GET", "/memories?all");
+    assert.equal(bareAll.json.length, 3);
+
     const badLimit = await call(app, "GET", "/memories?limit=abc");
     assert.equal(badLimit.status, 400);
   } finally {
@@ -277,7 +281,7 @@ test("server: PATCH updates metadata and weight, requires at least one", async (
 
     const empty = await call(app, "PATCH", `/memories/${a}`, {});
     assert.equal(empty.status, 400);
-    assert.match(empty.json.error, /requires metadata and\/or weight/);
+    assert.match(empty.json.error, /update requires at least one of metadata or weight/);
 
     const missing = await call(app, "PATCH", "/memories/00000000-0000-0000-0000-000000000000", {
       weight: 0.5,

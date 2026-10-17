@@ -288,7 +288,10 @@ function sqlString(v: string): string {
  * raw fragments (95556ca0 step 2): the server compiles them itself, nothing
  * user-authored reaches the SQL except the escaped literal. Passing both a
  * raw `where` and structured filters is rejected in every mode — one query,
- * one style.
+ * one style. Semantics of repeats: `kind` is a scalar field, so repeated
+ * values OR together (ANDing them could never match); `tag` is array
+ * membership, so repeated values AND (the memory must hold every requested
+ * tag); across fields everything ANDs.
  */
 export function whereFragment(c: Context): string | undefined {
   const where = c.req.query("where");
@@ -299,8 +302,9 @@ export function whereFragment(c: Context): string | undefined {
   }
   const parts: string[] = [];
   if (where !== undefined) parts.push(where);
-  for (const k of kinds) {
-    parts.push(`metadata->>'$.kind' = ${sqlString(k)}`);
+  if (kinds.length > 0) {
+    const kindClauses = kinds.map((k) => `metadata->>'$.kind' = ${sqlString(k)}`);
+    parts.push(`(${kindClauses.join(" OR ")})`);
   }
   for (const t of tags) {
     parts.push(
@@ -420,9 +424,10 @@ function cappedLimitQuery(q: string | undefined, name: string): number | undefin
   return n;
 }
 
-/** Query-string booleans: present as "1"/"true" means on. */
+/** Query-string booleans: bare presence, "1" or "true" means on — mirrors the
+ * CLI's boolean flags (--all, --force, --resolved); anything else is off. */
 function boolQuery(q: string | undefined): boolean {
-  return q === "1" || q === "true";
+  return q === "" || q === "1" || q === "true";
 }
 
 function directionQuery(q: string | undefined): Direction {
@@ -548,7 +553,7 @@ function registerStoreRoutes(app: MemoryApp, prefix: string, resolve: StoreResol
     const weight = checkWeight(body["weight"]);
     if (weight !== undefined) opts.weight = weight;
     if (metadata === undefined && weight === undefined) {
-      throw new HttpError(400, "update requires metadata and/or weight");
+      throw new HttpError(400, "update requires at least one of metadata or weight");
     }
     resolve().update(c.req.param("id"), opts);
     return c.body(null, 204);

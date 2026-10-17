@@ -239,17 +239,24 @@ test("token mode: raw where is local-only (400) unless the token opts in", async
   }
 });
 
-test("structured filters: kind/tag compile server-side, repeatable, AND-composed", async () => {
+test("structured filters: kind repeats OR (scalar field), tag repeats AND (array membership)", async () => {
   const { app, store, cleanup } = tempApp();
   try {
     const idNoteServer = store.store("a", { metadata: { kind: "note", tags: ["server", "recover"] } });
-    store.store("b", { metadata: { kind: "directive", tags: ["server"] } });
+    const idDirectiveServer = store.store("b", { metadata: { kind: "directive", tags: ["server"] } });
     const idNotePlain = store.store("c", { metadata: { kind: "note" } });
 
     const byKind = await call(app, "GET", "/memories?kind=note");
     assert.deepEqual(
       byKind.json.map((m: any) => m.id).sort(),
       [idNoteServer, idNotePlain].sort(),
+    );
+
+    // Repeated kind values OR (kind is scalar — ANDing them could never match).
+    const byKinds = await call(app, "GET", "/memories?kind=note&kind=directive");
+    assert.deepEqual(
+      byKinds.json.map((m: any) => m.id).sort(),
+      [idNoteServer, idDirectiveServer, idNotePlain].sort(),
     );
 
     const byTag = await call(app, "GET", "/memories?tag=server");
