@@ -24,10 +24,10 @@ Commands:
   stats                                       Print store statistics as JSON
   tags [--where <sql>] [--all]               List all distinct tags with counts, as JSON
   export [--output <dir>]                     Export the entire store as a flat directory of markdown files
-  fork <path> [--force]                       Copy the store to a new store file (VACUUM INTO); the child
-      is born with a provenance memory telling its origin. No scheduling, no
-      transport — protecting the files is the installer's backup software's
-      job; this is the mitosis primitive of the fork model only
+  fork <path> [--force]                       Copy the store to a new store file (VACUUM INTO) — an exact
+      copy, nothing added. No scheduling, no transport: protecting the files
+      is the installer's backup software's job; this is the copy primitive
+      of the fork model only
   doctor [--fix]                              Validate store integrity (links, edges, kinds, weights,
       titles, FTS index); prints a JSON report, exit 1 when findings
   mcp                                         Serve the store as an MCP stdio server (JSON-RPC 2.0 on
@@ -63,14 +63,13 @@ Notes:
   export writes one .md file per memory (all statuses) with YAML frontmatter;
     memory:// links are rewritten to relative file links; idempotent
   fork copies the store to a new store file — a consistent VACUUM INTO
-    snapshot (safe under concurrent writers, compacted). The child is born
-    knowing its origin: one provenance memory (kind: "summary") opens its
-    recovery, linked to the inherited trajectory's newest summary. Forks
-    never re-sync and never cross-write; restoring a dormant fork is rebirth,
-    never resync. Refuses an existing target without --force (a fork never
-    clobbers an individual silently). Prints a JSON object:
-    {path, memories, edges, provenance} — counts are the inherited rows, the
-    provenance memory excluded
+    snapshot (safe under concurrent writers, compacted) and NOTHING is
+    added to the copy: a fork that should know its origin gets told by its
+    forker, in the forker's own words (memory --db <fork> store "...").
+    Forks never re-sync and never cross-write; restoring a dormant fork is
+    rebirth, never resync. Refuses an existing target without --force (a
+    fork never clobbers an individual silently). Prints a JSON object:
+    {path, memories, edges}
   mcp serves the store as an MCP stdio server: JSON-RPC 2.0 on stdin/stdout
     (initialize — protocolVersion echoed when known, else 2025-06-18 —,
     tools/list, tools/call, ping; notifications ignored). Tools mirror the

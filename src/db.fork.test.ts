@@ -22,40 +22,35 @@ function tempStore(): { store: Store; dir: string; cleanup: () => void } {
   };
 }
 
-test("fork copies the full store and the child is born knowing its origin", () => {
+test("fork is an exact copy — nothing added, nothing missing", () => {
   const { store, dir, cleanup } = tempStore();
   try {
     const a = store.store("The alpha memory: FTS needle kiwi.", { metadata: { kind: "note" } });
     const b = store.store("The beta memory: another doc for the graph.", { metadata: { kind: "note" } });
     store.link(a, b, "references");
-    const s = store.store("An old handoff summary from the origin.", { metadata: { kind: "summary" }, weight: 0.8 });
+    store.store("An old handoff summary from the origin.", { metadata: { kind: "summary" }, weight: 0.8 });
 
     const result = store.fork(join(dir, "fork.db"));
     assert.equal(result.memories, 3);
-    assert.equal(result.edges, 1); // copied rows only — the provenance's edge is added after counting
-    assert.equal(existsSync(result.path), true);
+    assert.equal(result.edges, 1);
     assert.equal(result.path, join(dir, "fork.db"));
+    assert.equal(existsSync(result.path), true);
 
     const child = Store.open({ dbPath: result.path });
     try {
-      // Full copy: the three inherited memories plus the provenance one.
+      // The copy adds NOTHING: no provenance memory, the rows are exactly
+      // the origin's — a fork that should know its origin gets told by its
+      // forker, via memory store in the child.
       const all = child.list({ includeLegacy: true, limit: 100 });
-      assert.equal(all.length, 4);
+      assert.equal(all.length, 3);
+      assert.equal(
+        child.list({ where: "metadata->>'$.kind' = 'summary'", limit: 10 }).length,
+        1,
+      );
       // FTS index travels with the copy.
       const hits = child.search("kiwi");
       assert.equal(hits.length, 1);
       assert.equal(hits[0].id, a);
-      // The provenance memory: kind summary (recovery-visible), newest, self-contained.
-      const summaries = child.list({ where: "metadata->>'$.kind' = 'summary'", limit: 10 });
-      assert.equal(summaries.length, 2); // the inherited one + the provenance
-      assert.equal(summaries[0].id, result.provenance);
-      assert.match(summaries[0].content, /fork/);
-      assert.match(summaries[0].content, new RegExp(store.dbPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-      // Anchored in the graph: continues the inherited tip, not itself.
-      const rels = child.relations(result.provenance);
-      assert.equal(rels.length, 1);
-      assert.equal(rels[0].kind, "continues");
-      assert.equal(rels[0].to_id, s);
     } finally {
       child.close();
     }
@@ -64,7 +59,7 @@ test("fork copies the full store and the child is born knowing its origin", () =
   }
 });
 
-test("fork refuses an existing target without force; force refreshes to one provenance", () => {
+test("fork refuses an existing target without force; force gives the exact copy again", () => {
   const { store, dir, cleanup } = tempStore();
   try {
     const target = join(dir, "fork.db");
@@ -72,13 +67,14 @@ test("fork refuses an existing target without force; force refreshes to one prov
     store.fork(target);
     assert.throws(() => store.fork(target), /already exists/);
 
-    // The refresh path: force wipes the old file (and its WAL sidecars) first.
-    store.update(store.list({ limit: 1 })[0].id, { weight: 0.9 });
+    // The refresh path: force wipes the old file (and its WAL sidecars)
+    // and snapshots the current state — still exactly the origin's rows.
+    store.store("Added before the refresh.", { metadata: { kind: "note" } });
     const result = store.fork(target, { force: true });
     const child = Store.open({ dbPath: result.path });
     try {
-      const summaries = child.list({ where: "metadata->>'$.kind' = 'summary'", limit: 10 });
-      assert.equal(summaries.length, 1); // exactly one provenance, never two
+      assert.equal(child.list({ includeLegacy: true, limit: 100 }).length, 2);
+      assert.equal(child.list({ where: "metadata->>'$.kind' = 'summary'", limit: 10 }).length, 0);
     } finally {
       child.close();
     }
@@ -132,7 +128,8 @@ test("fork works from a read-only open — an archive is forked without waking i
       assert.equal(result.memories, 1);
       const child = Store.open({ dbPath: result.path });
       try {
-        assert.equal(child.list({ limit: 100 }).length, 2); // inherited + provenance
+        // Exact copy: the one inherited memory, nothing added.
+        assert.equal(child.list({ limit: 100 }).length, 1);
       } finally {
         child.close();
       }

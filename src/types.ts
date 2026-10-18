@@ -95,12 +95,10 @@ export interface ForkOptions {
 export interface ForkResult {
   /** Absolute path of the forked store. */
   path: string;
-  /** Memories copied from the origin (the provenance memory excluded). */
+  /** Memories copied (all statuses) — an exact copy: nothing added. */
   memories: number;
-  /** Relations copied from the origin. */
+  /** Relations copied. */
   edges: number;
-  /** The provenance memory stored in the child at birth. */
-  provenance: UUID;
 }
 
 /** The doctor's finding-producing checks. See .scratch/memory-doctor/. */
