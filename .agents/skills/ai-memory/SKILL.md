@@ -44,6 +44,7 @@ memory update <id> --metadata '{"kind":"note"}'
 memory update <id> --weight 0.95
 memory delete <id> --force
 memory link <from-id> <to-id> --kind references
+memory fork <path> [--force]
 memory search "tabs spaces" --where "metadata->>'$.kind' = 'note'" --limit 5
 memory get <id>
 memory list --where "metadata->>'$.kind' = 'decision'" --limit 20

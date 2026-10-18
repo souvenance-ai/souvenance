@@ -130,7 +130,9 @@ export interface McpTool {
 }
 
 /** The CLI verb set, mirrored 1:1 (the HTTP ENDPOINTS pattern). Arg names are
- *  snake_case; `all` maps to the lib's includeLegacy like the CLI --all. */
+ *  snake_case; `all` maps to the lib's includeLegacy like the CLI --all.
+ *  File-writing operator verbs (export, fork) are excluded: an MCP agent
+ *  consumes a store; it does not manage the store's files. */
 export const TOOLS: McpTool[] = [
   {
     name: "recover",

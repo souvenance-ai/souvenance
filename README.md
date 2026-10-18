@@ -43,11 +43,18 @@ The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
 | `tags [--where <sql>] [--all]` | List all distinct metadata tags with counts |
 | `doctor [--fix]` | Validate store integrity (links, edges, kinds, weights, titles, handoff, FTS); exit 1 when findings |
 | `export [--output <dir>]` | Export the entire store as a flat directory of markdown files |
+| `fork <path> [--force]` | Copy the store to a new store file (VACUUM INTO); the child is born with a provenance memory |
 | `serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...` | Serve the store over HTTP as JSON (default `127.0.0.1:3141`); auxiliary stores mount at `/<name>/` |
 
-Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`, `delete`, `link`, and `deprecate` print a one-word confirmation.
+Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`, `delete`, `link`, and `deprecate` print a one-word confirmation; `fork` prints `{path, memories, edges, provenance}` (counts are the inherited rows, the provenance memory excluded).
 
 `--db <path>` overrides the store location (default: `.ai-memory/memory.db`).
+
+### Fork — copies, not backups
+
+`memory fork <path>` copies the store to a new store file: a consistent `VACUUM INTO` snapshot, safe under concurrent writers, compacted, FTS index included. The child is born knowing its origin — one provenance memory (kind `summary`) opens its recovery — and from birth the two stores are individuals: they never re-sync and never cross-write. Restoring an old fork is a rebirth, never a resync (see `docs/adr/0002-fork-never-sync.md`).
+
+`fork` deliberately does no scheduling and no transport: keeping copies off-disk and fresh is the installer's backup software's job. The verb is the mitosis primitive only. An existing target is refused without `--force` — a fork never clobbers an individual silently.
 
 ## HTTP server
 

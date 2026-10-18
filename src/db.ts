@@ -11,6 +11,8 @@ import type {
   ListOptions,
   TagsOptions,
   RelationsOptions,
+  ForkOptions,
+  ForkResult,
   Direction,
   Memory,
   MemoryStatus,
@@ -398,6 +400,69 @@ export class Store {
 
   close(): void {
     this.db.close();
+  }
+
+  /**
+   * Fork the store: a consistent copy at targetPath — the mitosis primitive
+   * of the fork model (a store is an individual; forks never re-sync). The
+   * copy is a VACUUM INTO snapshot: safe under concurrent WAL writers,
+   * compacted, FTS index included. The child is born knowing its origin —
+   * one provenance memory (kind: "summary") so a reborn store's recovery
+   * opens with its birth story — linked to the inherited trajectory's newest
+   * summary. The parent records nothing: forks are cheap and repeated.
+   * Fork never writes to the parent, so it is allowed on a read-only open:
+   * an archive can be forked without waking it. Restoring a dormant fork is
+   * rebirth, never resync. Backup scheduling and transport stay outside the
+   * library — this is the mitosis primitive only.
+   */
+  fork(targetPath: string, opts: ForkOptions = {}): ForkResult {
+    const target = resolve(targetPath);
+    if (existsSync(target) && !opts.force) {
+      throw new Error(
+        `fork target already exists: ${target} (pass force to overwrite)`,
+      );
+    }
+    if (opts.force) {
+      // VACUUM INTO refuses an existing target; a forced refresh removes the
+      // old file and its WAL sidecars first.
+      for (const p of [target, `${target}-wal`, `${target}-shm`]) {
+        rmSync(p, { force: true });
+      }
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    const quoted = target.replace(/'/g, "''");
+    this.run(() => this.db.exec(`VACUUM INTO '${quoted}'`));
+    const child = Store.open({ dbPath: target });
+    try {
+      const memories = (
+        child.db.prepare("SELECT count(*) AS c FROM memories").get() as { c: number }
+      ).c;
+      const edges = (
+        child.db.prepare("SELECT count(*) AS c FROM edges").get() as { c: number }
+      ).c;
+      // The graph anchor, read BEFORE the provenance lands: the birth memory
+      // continues the newest summary of the inherited trajectory (the tip of
+      // the lived past) — itself, or the recovery ritual's first hit.
+      const tip = child.list({
+        where: "metadata->>'$.kind' = 'summary'",
+        limit: 1,
+      })[0];
+      const born_at = new Date().toISOString();
+      const provenance = child.store(
+        `# Summary: this store is a fork — born from ${this.dbPath} on ${born_at}\n\n` +
+          `This store was created by \`memory fork\` from the store at ${this.dbPath} on ${born_at}. ` +
+          `It carries the origin's full state at birth: the directives, summaries, objectives and linked graph are its inherited history.\n\n` +
+          `Doctrine (the fork model): a store is an individual — forks never re-sync and never cross-write; communication is read-only. ` +
+          `Restore is REBIRTH of a dormant fork, never a resync: if you are the session recovering this store after its file was restored or moved, ` +
+          `you are the individual waking elsewhere — continue from the summaries, record the new location, never try to reconcile with the origin.\n\n` +
+          `Keywords: fork, provenance, origin, rebirth, dormant, restore, no sync, individual.`,
+        { metadata: { kind: "summary" }, weight: 0.85 },
+      );
+      if (tip) child.link(provenance, tip.id, "continues");
+      return { path: target, memories, edges, provenance };
+    } finally {
+      child.close();
+    }
   }
 
   search(query: string, opts: SearchOptions = {}): SearchResult[] {

@@ -86,6 +86,23 @@ export interface TagsOptions {
   includeLegacy?: boolean;
 }
 
+export interface ForkOptions {
+  /** Overwrite an existing target file (and its WAL sidecars). Default off —
+   *  a fork never clobbers an existing store silently. */
+  force?: boolean;
+}
+
+export interface ForkResult {
+  /** Absolute path of the forked store. */
+  path: string;
+  /** Memories copied from the origin (the provenance memory excluded). */
+  memories: number;
+  /** Relations copied from the origin. */
+  edges: number;
+  /** The provenance memory stored in the child at birth. */
+  provenance: UUID;
+}
+
 /** The doctor's finding-producing checks. See .scratch/memory-doctor/. */
 export type DoctorCheck =
   | "broken_links"

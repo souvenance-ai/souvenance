@@ -59,3 +59,7 @@ _Avoid_: delete, remove, archive
 **Merge**:
 Combine two or more duplicate memories into a single new memory. Originals are marked `merged`; a `merges` relation links each original to the merged result. The merged memory starts with a clean relation set.
 _Avoid_: combine, deduplicate, consolidate
+
+**Fork**:
+A store born from a store: `memory fork <path>` copies the whole store file (a consistent `VACUUM INTO` snapshot) to a new name, and the child is born knowing its origin — one provenance memory opens its recovery, linked to the inherited trajectory's newest summary. From birth the two stores are individuals: they never re-sync and never cross-write; communication is read-only. An unused fork is a **dormant fork** (an archive); restoring it is rebirth, never resync. `fork` does no scheduling and no transport — protecting the files is the installer's backup software's job.
+_Avoid_: backup (the verb does not schedule or transport anything), sync, mirror (a mirror is a dead read-only reflection; a fork is a potential individual)
