@@ -23,6 +23,8 @@ import type {
   DoctorFinding,
   DoctorOptions,
   DoctorReport,
+  FinishFinding,
+  FinishReport,
 } from "./types.ts";
 
 export const DEFAULT_DB_PATH = ".ai-memory/memory.db";
@@ -31,6 +33,17 @@ export const DEFAULT_DB_PATH = ".ai-memory/memory.db";
 const MEMORY_LINK_RE = /memory:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
 
 const DOCTOR_CHECK_COUNT = 10;
+
+/** Closing-ritual window: when the session stored memories, a summary and an
+ *  experience note must exist within this window. 24h covers every lived
+ *  session so far; the timeless doctor checks (stale_handoff et al.) catch
+ *  what a fixed window cannot. */
+const FINISH_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** The dream volume line: +10 new memories since the last dream blocks the
+ *  verdict outright; below it the session-end clause stays a visible warn
+ *  (the agent's judgment debt, paid or argued aloud — never silent). */
+const DREAM_VOLUME_LINE = 10;
 
 const SQLITE_BUSY = 5;
 const BUSY_RETRIES = 50;
@@ -931,6 +944,147 @@ export class Store {
         edges_by_kind,
         active_to_superseded,
         fts_rebuilt: opts.fix === true,
+      },
+    };
+  }
+
+  /**
+   * The closing ritual, composed: doctor first as a hard gate (never
+   * finish, dream or recommend a relaunch over a sick store), then the
+   * session obligations the doctor is deliberately blind to — it validates
+   * the store, not the session. A fresh summary and the standing
+   * evaluation's experience note must exist in the window when the session
+   * stored memories, and the dream debt is made mechanical: the volume line
+   * blocks, the session-end clause surfaces as a visible warn instead of
+   * the agent's silent judgment call. Read-only — runs against a read-only
+   * store; the judgment debts it names stay the agent's to pay. Exit code
+   * semantics match doctor: 1 when blocking findings exist (a successful
+   * diagnosis, not an error).
+   */
+  finish(): FinishReport {
+    const doctor = this.doctor();
+    const findings: FinishFinding[] = doctor.findings.map((f) => ({
+      ...f,
+      severity: "block" as const,
+    }));
+
+    const rows = this.db
+      .prepare("SELECT id, metadata, created_at, status FROM memories")
+      .all() as unknown as Pick<MemoryRow, "id" | "metadata" | "created_at" | "status">[];
+
+    let windowMemories = 0;
+    let summaryInWindow = false;
+    let evalNoteInWindow = false;
+    for (const m of rows) {
+      const created = Date.parse(m.created_at);
+      const inWindow = created >= Date.now() - FINISH_WINDOW_MS;
+      if (!inWindow) continue;
+      // Any status: stored within the window is stored, superseded or not.
+      windowMemories++;
+      if (m.status !== "active" || m.metadata === null) continue;
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(m.metadata) as Record<string, unknown>;
+      } catch {
+        continue; // invalid JSON is already a blocked doctor finding
+      }
+      const kind = typeof parsed["kind"] === "string" ? parsed["kind"] : undefined;
+      if (kind === "summary") summaryInWindow = true;
+      if (
+        kind === "note" &&
+        Array.isArray(parsed["tags"]) &&
+        parsed["tags"].includes("evaluation")
+      ) {
+        evalNoteInWindow = true;
+      }
+    }
+
+    // The dream debt: the newest dream, and what accumulated since.
+    let lastDream: string | null = null;
+    for (const m of rows) {
+      if (m.status !== "active" || m.metadata === null) continue;
+      try {
+        const parsed = JSON.parse(m.metadata) as Record<string, unknown>;
+        if (parsed["kind"] !== "dream") continue;
+      } catch {
+        continue;
+      }
+      if (lastDream === null || m.created_at > lastDream) lastDream = m.created_at;
+    }
+    let sinceDream = 0;
+    if (lastDream !== null) {
+      const dreamTime = Date.parse(lastDream);
+      for (const m of rows) {
+        if (Date.parse(m.created_at) > dreamTime) sinceDream++;
+      }
+    }
+
+    if (windowMemories > 0 && !summaryInWindow) {
+      findings.push({
+        check: "session_summary",
+        severity: "block",
+        detail: `${windowMemories} memories stored within the last ${
+          FINISH_WINDOW_MS / (60 * 60 * 1000)
+        }h but no active summary in the window — the register is not self-sufficient for a fresh session`,
+        hint: 'store a kind:"summary" recapping the arcs of the session before ending it or recommending a relaunch',
+      });
+    }
+
+    if (windowMemories > 0 && !evalNoteInWindow) {
+      findings.push({
+        check: "experience_note",
+        severity: "block",
+        detail: `no experience note within the last ${
+          FINISH_WINDOW_MS / (60 * 60 * 1000)
+        }h while ${windowMemories} memories were stored — the standing evaluation is owed this session`,
+        hint: 'store kind:"note" with tags ["evaluation"]: retrieval hits and misses, friction, gotchas',
+      });
+    }
+
+    if (lastDream === null) {
+      if (rows.length >= DREAM_VOLUME_LINE) {
+        findings.push({
+          check: "dream_debt",
+          severity: "block",
+          detail: `no dream exists while the store holds ${rows.length} memories — the volume line is long past and consolidation never happened`,
+          hint: "run the five dream operations (relink, merge, supersede, rebalance, synthesize) and store a kind:\"dream\" memory",
+        });
+      } else if (rows.length > 0) {
+        findings.push({
+          check: "dream_debt",
+          severity: "warn",
+          detail: `no dream exists yet; ${rows.length} memories accumulated — young store, no consolidation due until a threshold fires`,
+          hint: "dream when a threshold fires (edge ratio below 1.5, +10 memories, or a non-trivial session ends)",
+        });
+      }
+    } else if (sinceDream >= DREAM_VOLUME_LINE) {
+      findings.push({
+        check: "dream_debt",
+        severity: "block",
+        detail: `${sinceDream} memories stored since the last dream (${lastDream}) — the volume line passed`,
+        hint: "run the five dream operations (relink, merge, supersede, rebalance, synthesize) and store a kind:\"dream\" memory",
+      });
+    } else if (sinceDream > 0 && Date.parse(lastDream) < Date.now() - FINISH_WINDOW_MS) {
+      findings.push({
+        check: "dream_debt",
+        severity: "warn",
+        detail: `${sinceDream} memories stored since the last dream (${lastDream}), none within the window — the session-end clause fired`,
+        hint: "run the five dream operations or state aloud why this session does not owe one",
+      });
+    }
+
+    const blocks = findings.filter((f) => f.severity === "block").length;
+    return {
+      healthy: blocks === 0,
+      findings,
+      summary: {
+        window_hours: FINISH_WINDOW_MS / (60 * 60 * 1000),
+        window_memories: windowMemories,
+        last_dream: lastDream,
+        memories_since_dream: sinceDream,
+        blocks,
+        warns: findings.length - blocks,
+        doctor: { checks: doctor.summary.checks, issues: doctor.summary.issues },
       },
     };
   }

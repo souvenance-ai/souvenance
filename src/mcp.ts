@@ -52,6 +52,7 @@ const INSTRUCTIONS = `ai-memory: a persistent, searchable memory for agents — 
 
 Ritual: run recover FIRST — it loads the binding directives, the latest summaries (the handoff from prior sessions), the open objectives (standing commitments) and the store stats. Search when you need context you don't have; trust the summaries as the recovery point.
 Write one concept per memory, self-contained, with search keywords in the text (search matches tokens, not semantics). Link new memories to related ones — an unlinked memory is an island.
+Before ending a session: store the summary and the experience note, then run finish — it gates on doctor and surfaces the session obligations (summary, experience note, dream debt). A session is closable — a relaunch recommendable — only when finish reports healthy.
 Content is immutable: supersede a changed decision, deprecate a stale one, merge duplicates — delete only with force. Weight is importance 0-1 (0.9 binding, 0.5 routine).`;
 
 /** Argument readers — every tool validates its own inputs so the lib receives
@@ -403,6 +404,13 @@ export const TOOLS: McpTool[] = [
       const fix = optBoolean(args, "fix");
       return store.doctor({ ...(fix !== undefined ? { fix } : {}) });
     },
+  },
+  {
+    name: "finish",
+    description:
+      "The closing ritual in one call, composed: the doctor as a hard gate plus the session obligations it cannot see (summary in the window, experience note, dream debt — volume line blocks, session-end clause warns). Run before ending a session; healthy means the register is self-sufficient for a fresh one.",
+    inputSchema: { type: "object", properties: {} },
+    run: (store) => store.finish(),
   },
 ];
 

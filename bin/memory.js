@@ -30,6 +30,11 @@ Commands:
       of the fork model only
   doctor [--fix]                              Validate store integrity (links, edges, kinds, weights,
       titles, FTS index); prints a JSON report, exit 1 when findings
+  finish                                      Closing ritual in one call: the doctor as a hard gate plus
+      the session obligations it cannot see (summary in the window,
+      experience note, dream debt — volume line blocks, session-end
+      clause warns); exit 1 when blocking findings — a clear/relaunch
+      recommendation is valid only once finish reports healthy
   mcp                                         Serve the store as an MCP stdio server (JSON-RPC 2.0 on
       stdin/stdout; tools mirror the CLI verbs 1:1)
   serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...
@@ -83,6 +88,18 @@ Notes:
     (the one mechanical repair); every other finding is repaired by hand
     (supersede, merge, update, link). Exit code is 1 when findings exist
     (a successful diagnosis, not an error — stderr stays empty)
+  finish is the closing ritual, composed: it RUNS doctor as a hard gate
+    (never finish, dream or recommend a relaunch over a sick store), then
+    checks the session obligations the doctor is blind to — a summary and
+    an experience note within the 24h window when memories were stored,
+    and the dream debt made mechanical: the +10 volume line blocks, the
+    session-end clause surfaces as a warn instead of the agent's silent
+    judgment call. Read-only; warns are reported, never blocking (judgment
+    debts are paid or argued aloud, never silent). Exit 1 when blocking
+    findings exist — the same diagnosis-not-error semantics as doctor.
+    Precedent: /recover bundles the opening ritual; finish bundles the
+    closing one. Doctor and finish both exist: doctor stays standalone
+    (mid-session, --fix); finish composes it, never replaces it
   serve keeps the root routes on the process store (--db): one agent =
     one store. Each --store <name>=<path> mounts another store at
     /<name>/... — read-only by default (personality isolation: an agent
@@ -398,6 +415,12 @@ async function main() {
         const report = store.doctor({
           ...(flags["--fix"] ? { fix: true } : {}),
         });
+        print(report);
+        if (!report.healthy) exitCode = 1;
+        break;
+      }
+      case "finish": {
+        const report = store.finish();
         print(report);
         if (!report.healthy) exitCode = 1;
         break;

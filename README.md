@@ -42,6 +42,7 @@ The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
 | `stats` | Print store statistics as JSON |
 | `tags [--where <sql>] [--all]` | List all distinct metadata tags with counts |
 | `doctor [--fix]` | Validate store integrity (links, edges, kinds, weights, titles, handoff, FTS); exit 1 when findings |
+| `finish` | Closing ritual in one call: the doctor as a hard gate plus the session obligations it cannot see (summary in the window, experience note, dream debt); exit 1 when blocking findings |
 | `export [--output <dir>]` | Export the entire store as a flat directory of markdown files |
 | `fork <path> [--force]` | Copy the store to a new store file (VACUUM INTO) — an exact copy, nothing added |
 | `serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...` | Serve the store over HTTP as JSON (default `127.0.0.1:3141`); auxiliary stores mount at `/<name>/` |
@@ -55,6 +56,16 @@ Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failu
 `memory fork <path>` copies the store to a new store file: an exact `VACUUM INTO` snapshot — safe under concurrent writers, compacted, FTS index included, and nothing added. From birth the two stores are individuals: they never re-sync and never cross-write. Restoring an old fork is a rebirth, never a resync (see `docs/adr/0002-fork-never-sync.md`).
 
 A fork that should know its origin gets told by its forker, in the forker's own words: `memory --db <fork> store "..."` after the copy — the tool does not presume the narrative (archive, gift, sandbox, product seed). `fork` deliberately does no scheduling and no transport: keeping copies off-disk and fresh is the installer's backup software's job. An existing target is refused without `--force` — a fork never clobbers an individual silently.
+
+### Finish — the closing ritual
+
+`memory finish` is the closing counterpart of `GET /recover`: one call that bundles every obligation an ending session owes. It runs `doctor` first as a hard gate — never finish, dream or recommend a relaunch over a sick store — then checks what the doctor is deliberately blind to, because it validates the store, not the session:
+
+- **summary in the window** — memories stored in the last 24h with no summary: the register is not self-sufficient for a fresh session (block);
+- **experience note** — the standing evaluation is owed per session that stored memories (block);
+- **dream debt** — made mechanical: the `+10` volume line since the last dream blocks; the session-end clause surfaces as a visible **warn** instead of the agent's silent judgment call (warns are reported, never blocking — judgment debts are paid or argued aloud, never silent).
+
+Read-only, diagnosis-not-error exit semantics like `doctor`: exit 1 when blocking findings exist. Doctor and finish both exist — doctor stays standalone (mid-session, `--fix`); finish composes it, never replaces it, the same way `/recover` bundles the opening ritual without replacing `list`/`get`. A clear/relaunch recommendation is valid only once `finish` reports healthy.
 
 ## HTTP server
 

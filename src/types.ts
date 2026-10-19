@@ -143,3 +143,42 @@ export interface DoctorReport {
     fts_rebuilt: boolean;
   };
 }
+
+/** The finish ritual's own checks: session obligations the store-timeless
+ *  doctor is deliberately blind to (it validates the store, not the
+ *  session). Doctor findings propagate into a finish report with their own
+ *  check names intact, blocked as a gate. */
+export type FinishCheck = DoctorCheck | "session_summary" | "experience_note" | "dream_debt";
+
+export interface FinishFinding {
+  check: FinishCheck;
+  /** Implicated memory id where one exists. */
+  id?: UUID;
+  detail: string;
+  /** One-line remediation, ready to act on. */
+  hint: string;
+  /** "block" fails the verdict (exit 1). "warn" is reported, never blocking:
+   *  judgment debts (the dream) stay the agent's to pay or argue aloud. */
+  severity: "block" | "warn";
+}
+
+export interface FinishReport {
+  healthy: boolean;
+  findings: FinishFinding[];
+  summary: {
+    /** The session window, in hours. */
+    window_hours: number;
+    /** Memories stored within the window (any status — stored is stored). */
+    window_memories: number;
+    /** created_at of the newest kind:"dream" memory, null when none exists. */
+    last_dream: string | null;
+    /** Memories created after the last dream (volume + session-end lines). */
+    memories_since_dream: number;
+    /** Blocking findings — the verdict. */
+    blocks: number;
+    /** Reported judgment debts — never blocking. */
+    warns: number;
+    /** The composed doctor gate. */
+    doctor: { checks: number; issues: number };
+  };
+}

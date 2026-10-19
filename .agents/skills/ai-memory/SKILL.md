@@ -53,9 +53,10 @@ memory relations <id> --direction both [--resolved]
 memory stats
 memory tags
 memory doctor [--fix]
+memory finish
 ```
 
-Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`/`delete`/`link`/`deprecate` print a one-word confirmation. `doctor` prints a `DoctorReport` ({healthy, findings: [{check, id?, detail, hint}], summary}) and exits 1 when findings exist — a successful diagnosis, not an error.
+Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`/`delete`/`link`/`deprecate` print a one-word confirmation. `doctor` prints a `DoctorReport` ({healthy, findings: [{check, id?, detail, hint}], summary}) and exits 1 when findings exist — a successful diagnosis, not an error. `finish` prints a `FinishReport` (the doctor gate plus session findings with `severity: "block"|"warn"`) and exits 1 when blocking findings exist — same diagnosis-not-error semantics.
 
 `--db <path>` overrides the store location (default: `.ai-memory/memory.db`).
 
@@ -178,7 +179,7 @@ Run them in order. Each uses existing CLI commands — dreaming is a workflow, n
 
 ## Finishing
 
-Before sending your final message in any session, run through this checklist. These are not suggestions — they are obligations from directives you have agreed to. You will forget them if they are not in front of you. They are in front of you now.
+Before sending your final message in any session, run `memory finish` — the closing ritual in one call. It gates on doctor and surfaces, mechanically, the obligations this section explains: a summary in the window, the experience note, the dream debt (the volume line blocks; the session-end clause surfaces as a warn — pay it by dreaming, or state aloud why not). The checklist below is the explanation, not the ritual: prose decays over a long session, the verb does not. A clear/relaunch recommendation is valid only once `finish` reports healthy — never recommend a relaunch over an unfinished register.
 
 1. **Store a task summary** — `kind: "summary"`. What was done, key decisions, what's next. Link it to the memories it references. This is required after every non-trivial task, not just at the end of a session. A relaunch recommendation is only valid when this summary exists — a stale handoff looks healthy to the next session.
 
@@ -188,11 +189,11 @@ Before sending your final message in any session, run through this checklist. Th
 
 4. **Store the conversation** — if a directive requires storing conversations (e.g., bilingual directive), store the full conversation as a single bilingual memory: English summary first, original text appended under `## Original (Français)`.
 
-5. **Check dream thresholds** — run `memory stats`. If any threshold is met (edge ratio < 1.5, +10 new memories since last dream, or end of non-trivial session), run the five dream operations: relink, merge, supersede, rebalance, synthesize. Store a `kind: "dream"` memory with the results.
+5. **Check dream thresholds** — run `memory finish` (or `memory stats`): if the volume line passed (+10 new memories since the last dream), the dream is owed outright; the session-end clause (any non-trivial session) is the warn `finish` surfaces — never again a silent judgment call. When owed, run the five dream operations: relink, merge, supersede, rebalance, synthesize. Store a `kind: "dream"` memory with the results. Doctor first: never dream over a store with findings.
 
-6. **Link everything** — ensure memories created this session are linked to related memories. An unlinked memory is an island. Check the most recent memories: `memory relations <id>`. Add missing edges.
+6. **Link everything** — ensure memories created this session are linked to related memories. An unlinked memory is an island. Check the most recent memories: `memory relations <id>`. Add missing edges. (`finish` blocks on zero-edge memories via the doctor gate; under-linked is relink work the dream owns.)
 
-Run this checklist before you write your final message. Not after. Before.
+Then run `memory finish` once more: healthy is the only state from which a final message — or a clear/relaunch recommendation — should leave your mouth. Not after. Before.
 
 ## Conventions
 

@@ -103,7 +103,7 @@ test("mcp: tools/list exposes the CLI verb set, one input schema each", async ()
     const names = response.result.tools.map((t: any) => t.name);
     for (const expected of [
       "recover", "store", "supersede", "merge", "update", "link", "deprecate", "delete",
-      "get", "search", "list", "relations", "tags", "stats", "doctor",
+      "get", "search", "list", "relations", "tags", "stats", "doctor", "finish",
     ]) {
       assert.ok(names.includes(expected), `missing tool: ${expected}`);
     }
