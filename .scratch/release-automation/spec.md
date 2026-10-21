@@ -1,5 +1,13 @@
 # Spec: automated release loop — change → bump → tag → publish
 
+> **Addendum (2026-10-21, ticket 03 — Valentin's revision, same day).** The regime is stricter than the
+> original option A: main is PR-only (branch protection), changes land only via branch+PR, a
+> package-impacting PR carries its own bump, and the merge of a bump PR releases. The release PR
+> generator (leg 2 below, ticket 02) is superseded by `release-check.yml` — a PR gate that makes a
+> forgotten bump a red check instead of a silent skip; leg 1 (tag-on-bump) survives unchanged and is
+> the engine of "merge → release". Bump scope: artifact scope only. Agent merges no-bump PRs himself;
+> bump PRs merge only by Valentin's approve. Landing: rebase merge only.
+
 Valentin's finding (2026-10-21): the tag→publish leg is automated (release.yml — gate, tag==package.json
 guard, OIDC trusted publishing, install-path smoke, release page), but the change→bump→tag leg is an
 unscheduled human gesture: nothing detects that package-impacting commits accumulated since the last tag,

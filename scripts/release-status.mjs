@@ -7,25 +7,11 @@
 // every state.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { inScope } from "./release-scope.mjs";
 
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8" }).trim();
 
-// Artifact scope — the publish whitelist shape. src/ includes the shipped
-// tests (decision c9fb7125, re-confirmed c6914b23); README/LICENSE ship;
-// package.json and its build helpers shape the artifact. Publish plumbing
-// (.github/), docs, scratch and skills are excluded — a workflow edit is
-// not a package change.
-const SCOPE = [
-  "src/",
-  "bin/",
-  "scripts/build-bin.mjs",
-  "tsconfig.build.json",
-  "package.json",
-  "README.md",
-  "LICENSE",
-];
-
-const inScope = (file) => SCOPE.some((s) => file === s || file.startsWith(s));
+// Artifact scope lives in release-scope.mjs (shared with pr-check.mjs).
 
 // Last version tag; match v* only (the repo carries a non-version
 // `pre-genesis` tag that must never become the baseline).

@@ -1,7 +1,8 @@
 # 02 — release PR proposal: the detector opens the release moment
 
 Type: task
-Status: resolved
+Status: resolved (superseded by ticket 03 in-flight — the generator gave way to the PR-only regime; the
+detector and scope survive as shared infra)
 Spec: see `../spec.md` (leg 2)
 Blocked by: 01 (a release PR is only worth proposing once a bump publishes automatically)
 
