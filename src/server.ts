@@ -3,7 +3,7 @@ import { readFileSync, statSync } from "node:fs";
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { Hono, type Context, type Next } from "hono";
 import { Store } from "./db.ts";
-import type { Direction, StoreOptions, UpdateOptions } from "./types.ts";
+import type { Direction, RelationSpec, StoreOptions, UpdateOptions } from "./types.ts";
 
 /**
  * HTTP surface over a Store — the server consumes the LIB, not the CLI
@@ -494,6 +494,31 @@ function checkWeight(v: unknown): number | undefined {
   return v;
 }
 
+/** The one-gesture relations (store/supersede bodies): array of {to, kind}
+ *  objects, validated here so the lib receives exactly what its options
+ *  declare. Parsed SEPARATELY from storeOptions — merge builds its opts
+ *  with the same helper and has no relations semantics; an accepted-but-
+ *  ignored field would be a silent no-op, and the server refuses instead. */
+function checkRelations(v: unknown): RelationSpec[] | undefined {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.length === 0) {
+    throw new HttpError(400, "relations must be a non-empty array of {to, kind}");
+  }
+  return v.map((entry) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new HttpError(400, "relations must be an array of {to, kind} objects");
+    }
+    const { to, kind } = entry as Record<string, unknown>;
+    if (typeof to !== "string" || to.length === 0) {
+      throw new HttpError(400, "relations entries need a 'to' memory id string");
+    }
+    if (typeof kind !== "string" || kind.length === 0) {
+      throw new HttpError(400, "relations entries need a non-empty 'kind' string");
+    }
+    return { to, kind };
+  });
+}
+
 function numQuery(q: string | undefined, name: string): number | undefined {
   if (q === undefined) return undefined;
   const n = Number(q);
@@ -551,12 +576,12 @@ function storeOptions(body: Record<string, unknown>): StoreOptions {
 
 const ENDPOINTS: Array<{ method: string; path: string; note: string }> = [
   { method: "GET", path: "/recover", note: "recovery ritual: {directives, summaries, objectives, stats}, ?directives&summaries&objectives limits" },
-  { method: "POST", path: "/memories", note: "store {content, metadata?, weight?} -> 201 {id}" },
+  { method: "POST", path: "/memories", note: "store {content, metadata?, weight?, relations?: [{to, kind}]} -> 201 {id}" },
   { method: "GET", path: "/memories", note: "list ?where|kind&tag&limit&offset&min-weight&all" },
   { method: "GET", path: "/memories/:id", note: "get (bumps access_count)" },
   { method: "PATCH", path: "/memories/:id", note: "update {metadata?, weight?}" },
   { method: "DELETE", path: "/memories/:id", note: "hard delete, requires ?force=1 (prefer deprecate)" },
-  { method: "POST", path: "/memories/:id/supersede", note: "supersede {content, metadata?, weight?} -> 201 {id}" },
+  { method: "POST", path: "/memories/:id/supersede", note: "supersede {content, metadata?, weight?, relations?: [{to, kind}]} -> 201 {id}; relations attach to the NEW memory" },
   { method: "POST", path: "/memories/:id/deprecate", note: "soft-delete" },
   { method: "POST", path: "/memories/:id/link", note: "link {to, kind, metadata?} -> 201" },
   { method: "DELETE", path: "/memories/:id/link", note: "unlink {to, kind?} — removes the edge; kind required when the pair carries several (409 with the candidates)" },
@@ -631,7 +656,10 @@ function registerStoreRoutes(app: MemoryApp, prefix: string, resolve: StoreResol
 
   app.post(`${prefix}/memories`, async (c) => {
     const body = await readJson(c);
-    const id = resolve().store(requireContent(body["content"]), storeOptions(body));
+    const relations = checkRelations(body["relations"]);
+    const opts: StoreOptions = storeOptions(body);
+    if (relations) opts.relations = relations;
+    const id = resolve().store(requireContent(body["content"]), opts);
     return c.json({ id }, 201);
   });
 
@@ -685,10 +713,13 @@ function registerStoreRoutes(app: MemoryApp, prefix: string, resolve: StoreResol
 
   app.post(`${prefix}/memories/:id/supersede`, async (c) => {
     const body = await readJson(c);
+    const relations = checkRelations(body["relations"]);
+    const opts: StoreOptions = storeOptions(body);
+    if (relations) opts.relations = relations;
     const id = resolve().supersede(
       c.req.param("id"),
       requireContent(body["content"]),
-      storeOptions(body),
+      opts,
     );
     return c.json({ id }, 201);
   });

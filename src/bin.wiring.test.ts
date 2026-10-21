@@ -170,3 +170,85 @@ test("wiring: the real bin unlinks — removes, then refuses an ambiguous pair w
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("wiring: the real bin stores one-gesture relations — and refuses a malformed id at the flag", () => {
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-cli-relations-test-"));
+  try {
+    const dbPath = join(dir, "memory.db");
+    const s = Store.open({ dbPath });
+    const target = s.store("the referenced decision", { metadata: { kind: "decision" } });
+    s.close();
+
+    // Two --relation flags: both outgoing edges land in the same call.
+    const stored = spawnSync(
+      process.execPath,
+      [bin, "--db", dbPath, "store", "one gesture, written once",
+        "--relation", `references:${target}`, "--relation", `extends:${target}`],
+      { encoding: "utf8" },
+    );
+    assert.equal(stored.status, 0);
+    const id = stored.stdout.trim();
+
+    const verify = spawnSync(process.execPath, [bin, "--db", dbPath, "relations", id], { encoding: "utf8" });
+    assert.equal(verify.status, 0);
+    const rels = JSON.parse(verify.stdout);
+    assert.equal(rels.length, 2);
+    assert.deepEqual(rels.map((r: { kind: string }) => r.kind).sort(), ["extends", "references"]);
+    assert.ok(rels.every((r: { to_id: string }) => r.to_id === target));
+
+    // Supersede: the relations attach to the NEW memory...
+    const superseded = spawnSync(
+      process.execPath,
+      [bin, "--db", dbPath, "supersede", id, "--content", "revised, linked in one gesture",
+        "--relation", `references:${target}`],
+      { encoding: "utf8" },
+    );
+    assert.equal(superseded.status, 0);
+    const newId = superseded.stdout.trim();
+    const newRels = JSON.parse(
+      spawnSync(process.execPath, [bin, "--db", dbPath, "relations", newId, "--direction", "out"], { encoding: "utf8" }).stdout,
+    );
+    assert.equal(newRels.length, 1);
+    assert.equal(newRels[0].kind, "references");
+    // ...and the old memory keeps its history: the two authored edges AND
+    // the new supersedes bridge (addition-only — supersede never cascades).
+    const oldRels = JSON.parse(
+      spawnSync(process.execPath, [bin, "--db", dbPath, "relations", id], { encoding: "utf8" }).stdout,
+    );
+    assert.equal(oldRels.length, 3);
+    const bridge = oldRels.find((r: { kind: string }) => r.kind === "supersedes");
+    assert.ok(bridge, "the supersedes bridge is there");
+    assert.equal(bridge.to_id, newId);
+
+    // Refuse-don't-hide: a truncated uuid is refused AT THE FLAG.
+    const prefix = spawnSync(
+      process.execPath,
+      [bin, "--db", dbPath, "store", "prefix attempt", "--relation", `references:${target.slice(0, 8)}`],
+      { encoding: "utf8" },
+    );
+    assert.equal(prefix.status, 1);
+    assert.match(prefix.stderr, /is not a full uuid/);
+    assert.doesNotMatch(prefix.stderr, /^    at /m, "a refusal must not print a stack trace");
+
+    // Missing colon: the syntax error names the expected shape.
+    const noColon = spawnSync(
+      process.execPath,
+      [bin, "--db", dbPath, "store", "syntax attempt", "--relation", "references"],
+      { encoding: "utf8" },
+    );
+    assert.equal(noColon.status, 1);
+    assert.match(noColon.stderr, /expected <kind>:<uuid>/);
+
+    // A well-formed uuid that is not in the store: the lib's precise error.
+    const ghost = "00000000-0000-4000-8000-000000000006";
+    const missing = spawnSync(
+      process.execPath,
+      [bin, "--db", dbPath, "store", "ghost attempt", "--relation", `references:${ghost}`],
+      { encoding: "utf8" },
+    );
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, new RegExp(`memory not found: ${ghost}`));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

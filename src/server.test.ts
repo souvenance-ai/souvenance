@@ -122,6 +122,68 @@ test("server: POST /memories validates content, weight, metadata and JSON body",
   }
 });
 
+test("server: one-gesture relations on POST /memories and /supersede; bad shape is a 400", async () => {
+  const { app, cleanup } = tempApp();
+  try {
+    const target = (await call(app, "POST", "/memories", {
+      content: "the referenced decision",
+      metadata: { kind: "decision" },
+    })).json.id as string;
+
+    const created = await call(app, "POST", "/memories", {
+      content: "written and linked in one gesture",
+      metadata: { kind: "decision" },
+      relations: [
+        { to: target, kind: "references" },
+        { to: target, kind: "extends" },
+      ],
+    });
+    assert.equal(created.status, 201);
+    const id = created.json.id as string;
+
+    const rels = await call(app, "GET", `/memories/${id}/relations?direction=out`);
+    assert.equal(rels.status, 200);
+    assert.equal(rels.json.length, 2);
+    assert.deepEqual(rels.json.map((r: { kind: string }) => r.kind).sort(), ["extends", "references"]);
+
+    // Supersede body: relations attach to the NEW memory.
+    const sup = await call(app, "POST", `/memories/${id}/supersede`, {
+      content: "revised",
+      relations: [{ to: target, kind: "continues" }],
+    });
+    assert.equal(sup.status, 201);
+    const newRels = await call(app, "GET", `/memories/${sup.json.id}/relations?direction=out`);
+    assert.equal(newRels.json.length, 1);
+    assert.equal(newRels.json[0].kind, "continues");
+
+    // Refusals: wrong shape, missing kind, nonexistent target — all 400s
+    // (the lib's precise existence error) and nothing silently ignored.
+    const badShape = await call(app, "POST", "/memories", {
+      content: "x",
+      relations: { to: target, kind: "references" },
+    });
+    assert.equal(badShape.status, 400);
+    assert.match(badShape.json.error, /must be a non-empty array/);
+
+    const badEntry = await call(app, "POST", "/memories", {
+      content: "x",
+      relations: [{ to: target }],
+    });
+    assert.equal(badEntry.status, 400);
+    assert.match(badEntry.json.error, /'kind' string/);
+
+    const ghost = "00000000-0000-4000-8000-000000000004";
+    const missing = await call(app, "POST", "/memories", {
+      content: "x",
+      relations: [{ to: ghost, kind: "references" }],
+    });
+    assert.equal(missing.status, 404);
+    assert.match(missing.json.error, new RegExp(`memory not found: ${ghost}`));
+  } finally {
+    cleanup();
+  }
+});
+
 test("server: GET /memories honors limit, min-weight and all", async () => {
   const { app, store, cleanup } = tempApp();
   try {

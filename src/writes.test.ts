@@ -730,3 +730,117 @@ test("unlink: refuses on a read-only store", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("store: relations create the outgoing edges in the same call", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const target = store.store("the referenced decision", { metadata: { kind: "decision" } });
+    const id = store.store("# Decision: the new one\n\nOne gesture, no store-then-link.", {
+      metadata: { kind: "decision" },
+      relations: [
+        { to: target, kind: "references" },
+        { to: target, kind: "extends" },
+      ],
+    });
+    const rels = store.relations(id);
+    assert.equal(rels.length, 2);
+    assert.deepEqual(
+      rels.map((r) => `${r.kind}->${r.to_id}`).sort(),
+      [`extends->${target}`, `references->${target}`],
+    );
+    // The target's incoming side sees the edges too.
+    assert.equal(store.relations(target, { direction: "in" }).length, 2);
+  } finally {
+    cleanup();
+  }
+});
+
+test("store: an invalid relation target refuses and NOTHING lands (atomic write)", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const ghost = "00000000-0000-4000-8000-000000000009";
+    assert.throws(
+      () => store.store("doomed memory", { relations: [{ to: ghost, kind: "references" }] }),
+      new RegExp(`memory not found: ${ghost}`),
+    );
+    assert.equal(store.stats().memories, 0, "the memory and its edges rolled back together");
+  } finally {
+    cleanup();
+  }
+});
+
+test("store: an empty relation kind is refused", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const target = store.store("target");
+    assert.throws(
+      () => store.store("doomed memory", { relations: [{ to: target, kind: "" }] }),
+      /kind must be non-empty/,
+    );
+    assert.equal(store.stats().memories, 1, "only the pre-existing target is there");
+    assert.equal(store.stats().edges, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("supersede: relations attach to the NEW memory, supersedes edge still lands", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store("# Decision: v1", { metadata: { kind: "decision" } });
+    const other = store.store("a live target", { metadata: { kind: "note" } });
+    const newId = store.supersede(oldId, "# Decision: v2", {
+      relations: [{ to: other, kind: "references" }],
+    });
+    const out = store.relations(newId, { direction: "out" });
+    assert.equal(out.length, 1);
+    assert.equal(out[0].kind, "references");
+    assert.equal(out[0].to_id, other);
+    // The old memory keeps exactly its supersedes bridge.
+    const bridge = store.relations(oldId);
+    assert.equal(bridge.length, 1);
+    assert.equal(bridge[0].kind, "supersedes");
+    assert.equal(bridge[0].to_id, newId);
+    assert.equal(store.get(oldId)!.status, "superseded");
+  } finally {
+    cleanup();
+  }
+});
+
+test("supersede: an invalid relation target rolls the whole revision back", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store("# Decision: v1", { metadata: { kind: "decision" } });
+    const ghost = "00000000-0000-4000-8000-000000000008";
+    assert.throws(
+      () => store.supersede(oldId, "# Decision: v2", { relations: [{ to: ghost, kind: "references" }] }),
+      new RegExp(`memory not found: ${ghost}`),
+    );
+    // Old memory untouched: still active, no supersedes edge, no successor.
+    assert.equal(store.get(oldId)!.status, "active");
+    assert.equal(store.relations(oldId).length, 0);
+    assert.equal(store.stats().memories, 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test("store: a self-edge through the one-gesture path is a construction impossibility", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    // The relations target must exist BEFORE the call (validated per edge),
+    // and the new memory's id is generated inside it — a store-executed
+    // self-edge cannot exist. The only self-edge path is the link verb's,
+    // covered by the doctor's self_edges test. Asserted here as speaker
+    // for the invariant: a missing target is refused, not smuggled in.
+    const ghost = "00000000-0000-4000-8000-000000000007";
+    assert.throws(
+      () => store.store("self-edge attempt", { relations: [{ to: ghost, kind: "references" }] }),
+      /memory not found/,
+    );
+    assert.equal(store.stats().memories, 0);
+    assert.equal(store.stats().edges, 0);
+  } finally {
+    cleanup();
+  }
+});

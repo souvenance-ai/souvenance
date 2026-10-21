@@ -8,8 +8,9 @@ import { resolveVersion } from "../src/version.ts";
 const HELP = `Usage: souvenance <command> [args] [flags]
 
 Commands:
-  store <content> [--metadata <json>] [--weight <0-1>]  Store a new memory, print its id
-  supersede <old-id> --content <text> [--metadata <json>] [--weight <0-1>]
+  store <content> [--metadata <json>] [--weight <0-1>] [--relation <kind>:<uuid>]...
+      Store a new memory, print its id
+  supersede <old-id> --content <text> [--metadata <json>] [--weight <0-1>] [--relation <kind>:<uuid>]...
       Store a new version, mark old as superseded
   deprecate <id>                               Soft-delete a memory (mark as deprecated)
   merge <id1> <id2> [<id3> ...] --content <text> [--metadata <json>] [--weight <0-1>]  Combine memories into one
@@ -62,6 +63,12 @@ Output:
 
 Notes:
   --metadata accepts a JSON string: '{"tags":["a"],"kind":"note"}'
+  --relation <kind>:<uuid>, repeatable, on store/supersede: the outgoing
+    edges are created in the SAME call (one-gesture writing, full uuids
+    only, no prefix matching). Direction is outgoing from the stored
+    memory; on supersede the relations attach to the NEW memory — the
+    old→new supersedes edge still happens. The link verb stays for
+    arbitrary edges: reverse directions, retro-fixes, cross-memory repairs
   --where accepts a raw SQL fragment on the metadata JSON column using SQLite
     JSON operators, e.g.: metadata->>'$.kind' = 'note'
   --all includes superseded/deprecated/merged memories in search/list/tags results
@@ -183,9 +190,14 @@ function parseArgs(argv) {
       }
       const val = a.includes("=") ? a.slice(a.indexOf("=") + 1) : argv[i + 1];
       if (!a.includes("=")) i++;
-      // --store, --token and --token-file are repeatable: one flag per
-      // auxiliary store / inline grant / token file
-      if (key === "--store" || key === "--token" || key === "--token-file") {
+      // --store, --token, --token-file and --relation are repeatable: one
+      // flag per auxiliary store / inline grant / token file / authored edge
+      if (
+        key === "--store" ||
+        key === "--token" ||
+        key === "--token-file" ||
+        key === "--relation"
+      ) {
         if (!Array.isArray(flags[key])) flags[key] = [];
         flags[key].push(val);
       } else {
@@ -205,6 +217,29 @@ function parseMetadata(jsonStr) {
   } catch {
     fail(`invalid metadata JSON: ${jsonStr}`);
   }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** --relation <kind>:<uuid>, repeatable. Full uuids ONLY — refuse-don't-hide:
+ *  no prefix ambiguity, a truncated id is refused at the flag, not surfaced
+ *  later as "memory not found". Direction is always OUTGOING from the
+ *  stored (or newly superseded) memory. */
+function parseRelations(values) {
+  if (!values || values.length === 0) return undefined;
+  return values.map((raw) => {
+    const colon = raw.indexOf(":");
+    if (colon === -1) {
+      fail(`invalid --relation '${raw}', expected <kind>:<uuid> with a full uuid`);
+    }
+    const kind = raw.slice(0, colon);
+    const to = raw.slice(colon + 1);
+    if (!kind) fail(`invalid --relation '${raw}', kind must be non-empty`);
+    if (!UUID_RE.test(to)) {
+      fail(`invalid --relation '${raw}': '${to}' is not a full uuid (no prefix matching)`);
+    }
+    return { to, kind };
+  });
 }
 
 /** An operator-facing usage/validation error: thrown by fail(), caught once
@@ -263,9 +298,11 @@ async function main() {
         const content = rest[0];
         const metadata = parseMetadata(flags["--metadata"]);
         const weight = num(flags["--weight"]);
+        const relations = parseRelations(flags["--relation"]);
         const opts = {};
         if (metadata) opts.metadata = metadata;
         if (weight !== undefined) opts.weight = weight;
+        if (relations) opts.relations = relations;
         const id = store.store(content, opts);
         process.stdout.write(id + "\n");
         break;
@@ -277,9 +314,11 @@ async function main() {
         if (!content) fail("supersede requires --content <text>");
         const metadata = parseMetadata(flags["--metadata"]);
         const weight = num(flags["--weight"]);
+        const relations = parseRelations(flags["--relation"]);
         const opts = {};
         if (metadata) opts.metadata = metadata;
         if (weight !== undefined) opts.weight = weight;
+        if (relations) opts.relations = relations;
         const id = store.supersede(oldId, content, opts);
         process.stdout.write(id + "\n");
         break;

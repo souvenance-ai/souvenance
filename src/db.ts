@@ -17,6 +17,7 @@ import type {
   Memory,
   MemoryStatus,
   Relation,
+  RelationSpec,
   Stats,
   SearchResult,
   TagCount,
@@ -226,11 +227,21 @@ export class Store {
     const weight = opts.weight ?? 0.5;
     const created_at = new Date().toISOString();
     this.run(() => {
-      this.db
-        .prepare(
-          "INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)",
-        )
-        .run(id, content, metadata, created_at, weight);
+      this.db.exec("BEGIN");
+      try {
+        this.db
+          .prepare(
+            "INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)",
+          )
+          .run(id, content, metadata, created_at, weight);
+        if (opts.relations?.length) {
+          this.insertRelations(id, opts.relations, created_at);
+        }
+        this.db.exec("COMMIT");
+      } catch (err) {
+        this.db.exec("ROLLBACK");
+        throw err;
+      }
     });
     return id;
   }
@@ -265,6 +276,11 @@ export class Store {
               " VALUES (?, ?, ?, ?, ?)",
           )
           .run(oldId, newId, "supersedes", null, created_at);
+        // The one-gesture relations are the NEW memory's outgoing edges —
+        // the ritual citation "link it right after storing" dies here.
+        if (opts.relations?.length) {
+          this.insertRelations(newId, opts.relations, created_at);
+        }
         this.db
           .prepare("UPDATE memories SET status = 'superseded' WHERE id = ?")
           .run(oldId);
@@ -406,6 +422,34 @@ export class Store {
         )
         .run(fromId, toId, kind, metadata, created_at);
     });
+  }
+
+  /**
+   * The outgoing edges of a one-gesture write (StoreOptions.relations).
+   * Per-edge validation is link's own — kind non-empty, target exists —
+   * and the INSERT is link's statement verbatim (no duplicate SQL). A
+   * self-edge is left to land: the doctor's self_edges check is the
+   * visible enforcer, the write is not smarter than the graph. Runs
+   * INSIDE the caller's transaction, so the memory and its edges land
+   * atomically or not at all.
+   */
+  private insertRelations(fromId: string, relations: RelationSpec[], createdAt: string): void {
+    for (const rel of relations) {
+      if (!rel.kind) throw new Error("kind must be non-empty");
+      if (!rel.to) throw new Error("to must be a memory id");
+      const toExists = this.db
+        .prepare("SELECT 1 FROM memories WHERE id = ?")
+        .get(rel.to);
+      if (!toExists) throw new Error(`memory not found: ${rel.to}`);
+    }
+    const stmt = this.db.prepare(
+      "INSERT OR IGNORE INTO edges" +
+        " (from_id, to_id, kind, metadata, created_at)" +
+        " VALUES (?, ?, ?, NULL, ?)",
+    );
+    for (const rel of relations) {
+      stmt.run(fromId, rel.to, rel.kind, createdAt);
+    }
   }
 
   /**
