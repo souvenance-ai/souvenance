@@ -17,13 +17,24 @@ function tempStore(): { store: Store; cleanup: () => void } {
   };
 }
 
+/** The store's created_at has millisecond precision — back-to-back store() calls can
+ * land in the same ms and make created_at DESC ties undefined (caught live on the fast
+ * CI runner, 2026-10-21, by the first tests.yml run). Most seed callers are synchronous,
+ * so a spin wall to the next ms beats an async ripple: callers keep their signatures. */
+function advanceMs(): void {
+  const t0 = Date.now();
+  while (Date.now() === t0) {}
+}
+
 function seed(store: Store): { a: string; b: string; c: string } {
   const a = store.store("The quick brown fox jumps", {
     metadata: { tags: ["animal"], kind: "note" },
   });
+  advanceMs();
   const b = store.store("Hello world from the fox", {
     metadata: { tags: ["greeting"], kind: "log" },
   });
+  advanceMs();
   const c = store.store("A lazy dog sleeps", {
     metadata: { tags: ["animal"], kind: "note" },
   });
