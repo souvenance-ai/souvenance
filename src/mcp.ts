@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { Store } from "./db.ts";
-import type { Direction } from "./types.ts";
+import type { Direction, StoreOptions } from "./types.ts";
+import type { RelationSpec } from "./types.ts";
 
 /**
  * MCP stdio server — the third thin surface over the deep module (after the
@@ -114,13 +115,37 @@ function optBoolean(args: Args, key: string): boolean | undefined {
 
 const DIRECTIONS: Direction[] = ["in", "out", "both"];
 
-function storeOptions(args: Args): { metadata?: Record<string, unknown>; weight?: number } {
-  const opts: { metadata?: Record<string, unknown>; weight?: number } = {};
+function storeOptions(args: Args): StoreOptions {
+  const opts: StoreOptions = {};
   const metadata = optObject(args, "metadata");
   if (metadata !== undefined) opts.metadata = metadata;
   const weight = optWeight(args);
   if (weight !== undefined) opts.weight = weight;
   return opts;
+}
+
+/** relations: array of {to, kind} — the one-gesture outgoing edges created
+ *  in the same store/supersede call (ticket 01, single-write-graph). Shape
+ *  is validated here; the lib validates existence and edge content, the
+ *  same way it does for link. */
+function optRelations(args: Args): RelationSpec[] | undefined {
+  const v = args["relations"];
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v)) throw new Error("'relations' must be an array of {to, kind}");
+  return v.map((entry) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error("'relations' must be an array of {to, kind} objects");
+    }
+    const to = (entry as Args)["to"];
+    const kind = (entry as Args)["kind"];
+    if (typeof to !== "string" || to.length === 0) {
+      throw new Error("'relations' entries need a 'to' memory id string");
+    }
+    if (typeof kind !== "string" || kind.length === 0) {
+      throw new Error("'relations' entries need a non-empty 'kind' string");
+    }
+    return { to, kind };
+  });
 }
 
 export interface McpTool {
@@ -166,22 +191,39 @@ export const TOOLS: McpTool[] = [
   {
     name: "store",
     description:
-      "Store a new memory. One concept per memory, self-contained, search keywords in the text. Returns {id}.",
+      "Store a new memory. One concept per memory, self-contained, search keywords in the text. Author its outgoing edges in the SAME call via relations — no store-then-link two-step. Returns {id}.",
     inputSchema: {
       type: "object",
       properties: {
         content: { type: "string", description: "markdown, self-contained" },
         metadata: { type: "object", description: 'e.g. {"kind":"decision","tags":["a"]}' },
         weight: { type: "number", minimum: 0, maximum: 1, description: "importance 0-1, default 0.5" },
+        relations: {
+          type: "array",
+          description: "outgoing edges created in the same call; the link tool stays for reverse directions and retro-fixes",
+          items: {
+            type: "object",
+            properties: {
+              to: { type: "string", description: "target memory id (full uuid)" },
+              kind: { type: "string", description: "edge type, e.g. references, extends, continues" },
+            },
+            required: ["to", "kind"],
+          },
+        },
       },
       required: ["content"],
     },
-    run: (store, args) => ({ id: store.store(requireString(args, "content"), storeOptions(args)) }),
+    run: (store, args) => {
+      const relations = optRelations(args);
+      const opts: StoreOptions = storeOptions(args);
+      if (relations) opts.relations = relations;
+      return { id: store.store(requireString(args, "content"), opts) };
+    },
   },
   {
     name: "supersede",
     description:
-      "Revise a decision: stores new content as an active memory, links the old one to it via supersedes and marks it superseded. Content is immutable — this is how decisions change. Returns {id}.",
+      "Revise a decision: stores new content as an active memory, links the old one to it via supersedes and marks it superseded. Content is immutable — this is how decisions change. relations attach to the NEW memory. Returns {id}.",
     inputSchema: {
       type: "object",
       properties: {
@@ -189,12 +231,29 @@ export const TOOLS: McpTool[] = [
         content: { type: "string" },
         metadata: { type: "object", description: "override; default: inherit kind and tags from the source" },
         weight: { type: "number", minimum: 0, maximum: 1 },
+        relations: {
+          type: "array",
+          description: "outgoing edges of the NEW memory, created in the same call",
+          items: {
+            type: "object",
+            properties: {
+              to: { type: "string", description: "target memory id (full uuid)" },
+              kind: { type: "string", description: "edge type, e.g. references, extends, continues" },
+            },
+            required: ["to", "kind"],
+          },
+        },
       },
       required: ["id", "content"],
     },
-    run: (store, args) => ({
-      id: store.supersede(requireString(args, "id"), requireString(args, "content"), storeOptions(args)),
-    }),
+    run: (store, args) => {
+      const relations = optRelations(args);
+      const opts: StoreOptions = storeOptions(args);
+      if (relations) opts.relations = relations;
+      return {
+        id: store.supersede(requireString(args, "id"), requireString(args, "content"), opts),
+      };
+    },
   },
   {
     name: "merge",

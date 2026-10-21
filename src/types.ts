@@ -23,9 +23,22 @@ export interface Relation {
   resolved_to?: UUID;
 }
 
+/** One outgoing edge authored in the same gesture as the memory itself —
+ *  the one-gesture write that retires the prose-citation practice (see
+ *  .scratch/single-write-graph/). The `link` verb stays for arbitrary
+ *  edges: reverse directions, retro-fixes, cross-memory repairs. */
+export interface RelationSpec {
+  to: UUID;
+  kind: string;
+}
+
 export interface StoreOptions {
   metadata?: Record<string, unknown>;
   weight?: number;
+  /** Outgoing edges created in the same call (store: to the new memory;
+   *  supersede: to the NEW memory — the old→new supersedes edge still
+   *  happens). Per-edge validation identical to link. */
+  relations?: RelationSpec[];
 }
 
 export interface UpdateOptions {

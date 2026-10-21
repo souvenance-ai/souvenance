@@ -242,6 +242,50 @@ test("mcp: recover bundles directives, summaries, objectives and stats", async (
   }
 });
 
+test("mcp: one-gesture relations on store and supersede; a malformed shape is a tool error", async () => {
+  const r = rig();
+  try {
+    const target = (await call(r, "store", { content: "the referenced decision", metadata: { kind: "decision" } })).result.id;
+    const stored = await call(r, "store", {
+      content: "written and linked in one gesture",
+      metadata: { kind: "decision" },
+      relations: [
+        { to: target, kind: "references" },
+        { to: target, kind: "extends" },
+      ],
+    });
+    const id = stored.result.id;
+    const rels = (await call(r, "relations", { id, direction: "out" })).result;
+    assert.equal(rels.length, 2);
+    assert.deepEqual(rels.map((x: { kind: string }) => x.kind).sort(), ["extends", "references"]);
+
+    // supersede: relations attach to the NEW memory.
+    const superseded = await call(r, "supersede", {
+      id,
+      content: "revised",
+      relations: [{ to: target, kind: "continues" }],
+    });
+    const newRels = (await call(r, "relations", { id: superseded.result.id, direction: "out" })).result;
+    assert.equal(newRels.length, 1);
+    assert.equal(newRels[0].kind, "continues");
+
+    // Shape errors surface as tool-level errors, never protocol errors.
+    const badArray = await call(r, "store", { content: "x", relations: { to: target, kind: "references" } });
+    assert.equal(badArray.isError, true);
+    assert.match(badArray.text, /must be an array/);
+    const badEntry = await call(r, "store", { content: "x", relations: [{ to: target }] });
+    assert.equal(badEntry.isError, true);
+    assert.match(badArray.text, /'relations'/);
+    // The lib's precise existence error passes through.
+    const ghost = "00000000-0000-4000-8000-000000000005";
+    const missing = await call(r, "store", { content: "x", relations: [{ to: ghost, kind: "references" }] });
+    assert.equal(missing.isError, true);
+    assert.match(missing.text, new RegExp(`memory not found: ${ghost}`));
+  } finally {
+    await r.close();
+  }
+});
+
 test("mcp: tags, stats, doctor over the tool surface", async () => {
   const r = rig();
   try {
