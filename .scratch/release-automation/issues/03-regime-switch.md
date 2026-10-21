@@ -1,7 +1,7 @@
 # 03 — regime switch: PR-only main, bump-in-PR, release on merge
 
 Type: task
-Status: ready-for-agent
+Status: resolved (regime live and proven 2026-10-21 — see Comments)
 Spec: see `../spec.md` + the addendum below (decision d47ce3ec pending store)
 
 Valentin revised the model the day after leg 2 was built: instead of a separately generated release PR,

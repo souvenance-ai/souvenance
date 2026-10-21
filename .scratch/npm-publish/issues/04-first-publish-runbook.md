@@ -1,7 +1,7 @@
 # 04 — first publish runbook (manual — Valentin)
 
 Type: task
-Status: ready-for-human
+Status: resolved (first publish done 2026-10-21; 0.1.0 deprecated, 0.1.2 live from the registry)
 
 The first publish is YOUR hands (Q26: the sole exception to automation). Every release after it is tag-driven through `release.yml` — nothing for you then but a version bump and a tag.
 

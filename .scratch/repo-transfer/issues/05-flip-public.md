@@ -1,6 +1,6 @@
 # 05 — flip public after scrub verified
 
-Status: ready-for-human (gated: bundled ask granted)
+Status: resolved
 Type: task
 
 Phase 3 includes "flip public after scrub verified" (arc objective `dcd9d55c`).
