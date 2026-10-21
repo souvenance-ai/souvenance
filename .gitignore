@@ -160,7 +160,7 @@ dist
 /out-tsc
 
 # AI memory store
-.ai-memory/
+.souvenance/
 
 # misc
 .keys/

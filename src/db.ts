@@ -27,7 +27,7 @@ import type {
   FinishReport,
 } from "./types.ts";
 
-export const DEFAULT_DB_PATH = ".ai-memory/memory.db";
+export const DEFAULT_DB_PATH = ".souvenance/memory.db";
 
 /**
  * Tightens a store file and its WAL sidecars to owner-only permissions.
@@ -133,7 +133,7 @@ function parseRelationRow(row: RelationRow): Relation {
 }
 
 export interface OpenOptions {
-  /** Override the default `.ai-memory/memory.db` path. */
+  /** Override the default `.souvenance/memory.db` path. */
   dbPath?: string;
   /**
    * Open for reading only: a missing file is refused (nothing is created),

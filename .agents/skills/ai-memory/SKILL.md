@@ -58,7 +58,7 @@ souvenance finish
 
 Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`/`delete`/`link`/`deprecate` print a one-word confirmation. `doctor` prints a `DoctorReport` ({healthy, findings: [{check, id?, detail, hint}], summary}) and exits 1 when findings exist — a successful diagnosis, not an error. `finish` prints a `FinishReport` (the doctor gate plus session findings with `severity: "block"|"warn"`) and exits 1 when blocking findings exist — same diagnosis-not-error semantics.
 
-`--db <path>` overrides the store location (default: `.ai-memory/memory.db`).
+`--db <path>` overrides the store location (default: `.souvenance/memory.db`).
 
 ## FTS5 query tips
 
@@ -197,7 +197,7 @@ Then run `souvenance finish` once more: healthy is the only state from which a f
 
 ## Conventions
 
-- The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
+- The store lives at `.souvenance/memory.db` (gitignored). One store per project.
 - UUID v4 ids; `memory://` link scheme.
 - WAL mode for concurrent reads; writes retry on busy.
 - Schema migrates on open — no manual migration step.

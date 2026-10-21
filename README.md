@@ -22,7 +22,7 @@ node bin/souvenance.js link <from-id> <to-id> --kind references
 node bin/souvenance.js --help
 ```
 
-The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
+The store lives at `.souvenance/memory.db` (gitignored). One store per project.
 
 ## CLI commands
 
@@ -49,7 +49,7 @@ The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
 
 Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`, `delete`, `link`, and `deprecate` print a one-word confirmation; `fork` prints `{path, memories, edges}`.
 
-`--db <path>` overrides the store location (default: `.ai-memory/memory.db`).
+`--db <path>` overrides the store location (default: `.souvenance/memory.db`).
 
 ### Fork — copies, not backups
 
@@ -75,7 +75,7 @@ Read-only, diagnosis-not-error exit semantics like `doctor`: exit 1 when blockin
 with `--db`:
 
 ```bash
-node bin/souvenance.js --db .ai-memory/memory.db serve --port 3141
+node bin/souvenance.js --db .souvenance/memory.db serve --port 3141
 ```
 
 Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
@@ -121,7 +121,7 @@ they mount the same verb routes under a name:
 
 ```bash
 node bin/souvenance.js serve \
-  --store alice=/path/to/alice/.ai-memory/memory.db \
+  --store alice=/path/to/alice/.souvenance/memory.db \
   --store bench=/tmp/bench.db:rw   # :rw opts into writes (read-only by default)
 ```
 
@@ -287,7 +287,7 @@ opencode mcp add souvenance -- node /path/to/souvenance/bin/souvenance.js mcp
   `2025-06-18`.
 - Trust zone: stdio is the agent's own process — the loopback equivalent,
   no bearer tokens, raw `where` fragments stay available. The server
-  opened is the one at `--db` (default `.ai-memory/memory.db`); mounting
+  opened is the one at `--db` (default `.souvenance/memory.db`); mounting
   ANOTHER store is a `--db` flag away, cross-machine consumption stays
   with `serve`.
 

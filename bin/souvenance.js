@@ -47,8 +47,8 @@ Commands:
       its bearer token, scoped to its granted store
 
 Flags:
-  --db <path>      Override the DB path (default: .ai-memory/memory.db)
-  --output <dir>   Export output directory (default: .ai-memory/export/)
+  --db <path>      Override the DB path (default: .souvenance/memory.db)
+  --output <dir>   Export output directory (default: .souvenance/export/)
   --help, -h       Show this help
 
 Output:
@@ -83,7 +83,7 @@ Notes:
     own process (the loopback trust zone) — cross-machine consumption stays
     with 'serve'. Mount in OpenCode: 'opencode mcp add souvenance -- node
     <path>/bin/souvenance.js mcp' (project or --global); the store opened is the
-    one at --db (default .ai-memory/memory.db)
+    one at --db (default .souvenance/memory.db)
   doctor diagnoses, it never edits content. --fix rebuilds the FTS index
     (the one mechanical repair); every other finding is repaired by hand
     (supersede, merge, update, link). Exit code is 1 when findings exist
@@ -381,7 +381,7 @@ async function main() {
         break;
       }
       case "export": {
-        const outputDir = flags["--output"] ?? ".ai-memory/export";
+        const outputDir = flags["--output"] ?? ".souvenance/export";
         mkdirSync(outputDir, { recursive: true });
         const { memories, edges } = store.dump();
 
