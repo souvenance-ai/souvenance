@@ -297,6 +297,13 @@ test("mcp: one-gesture relations on store and supersede; a malformed shape is a 
     assert.equal(newRels.length, 1);
     assert.equal(newRels[0].kind, "continues");
 
+    // A plain supersede over MCP inherits the source's outgoing edges
+    // (ticket 03 ruling) — the head claims what its source claimed.
+    const plainSup = await call(r, "supersede", { id: superseded.result.id, content: "plain supersede, inherited" });
+    const inheritedRels = (await call(r, "relations", { id: plainSup.result.id, direction: "out" })).result;
+    assert.equal(inheritedRels.length, 1);
+    assert.equal(inheritedRels[0].kind, "continues");
+
     // Shape errors surface as tool-level errors, never protocol errors.
     const badArray = await call(r, "store", { content: "x", relations: { to: target, kind: "references" } });
     assert.equal(badArray.isError, true);

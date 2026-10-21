@@ -825,6 +825,95 @@ test("supersede: an invalid relation target rolls the whole revision back", () =
   }
 });
 
+test("supersede: the head inherits the source's outgoing edges (ticket 03 ruling)", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const targetA = store.store("target A", { metadata: { kind: "note" } });
+    const targetB = store.store("target B", { metadata: { kind: "note" } });
+    const oldId = store.store("# Decision: v1", {
+      metadata: { kind: "decision" },
+      relations: [
+        { to: targetA, kind: "references" },
+        { to: targetB, kind: "extends" },
+      ],
+    });
+    const newId = store.supersede(oldId, "# Decision: v2 (content)")
+    const inh = store.relations(newId, { direction: "out" });
+    // The two authored claims carried over, ROW VERBATIM (kind, metadata,
+    // created_at) — the head claims what v1 claimed.
+    assert.deepEqual(
+      inh.map((r) => [r.kind, r.to_id]).sort(),
+      [["extends", targetB], ["references", targetA]],
+    );
+    const sourceRows = store.relations(oldId).filter((r) => r.kind !== "supersedes");
+    for (const copy of inh) {
+      const src = sourceRows.find((r) => r.kind === copy.kind && r.to_id === copy.to_id);
+      assert.ok(src, "each copied edge has a source row");
+      assert.equal(copy.created_at, src!.created_at, "verbatim copy carries the original timestamp");
+      assert.deepEqual(copy.metadata, src!.metadata);
+    }
+    // Addition-only: the old memory KEEPS its edges (provenance), plus the
+    // new supersedes bridge.
+    assert.equal(store.relations(oldId).length, 3);
+    // The head is not isolated: no doctor finding.
+    assert.equal(store.doctor().findings.length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("supersede: explicit relations REPLACE the inherited set verbatim", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const targetA = store.store("target A", { metadata: { kind: "note" } });
+    const targetC = store.store("target C", { metadata: { kind: "note" } });
+    const oldId = store.store("# Decision: v1", {
+      metadata: { kind: "decision" },
+      relations: [{ to: targetA, kind: "references" }],
+    });
+    const newId = store.supersede(oldId, "# Decision: v2 — claims corrected", {
+      relations: [{ to: targetC, kind: "references" }],
+    });
+    const out = store.relations(newId, { direction: "out" });
+    // Verbatim wins over inheritance, the way explicit --metadata
+    // overrides kind/tags inheritance.
+    assert.equal(out.length, 1);
+    assert.equal(out[0].kind, "references");
+    assert.equal(out[0].to_id, targetC);
+    // The old memory keeps its authored claims AND the bridge.
+    assert.equal(store.relations(oldId).length, 2);
+  } finally {
+    cleanup();
+  }
+});
+
+test("supersede: a corrupted orphan SOURCE edge refuses the revision precisely", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store("# Decision: v1", { metadata: { kind: "decision" } });
+    const ghost = "00000000-0000-4000-8000-000000000003";
+    store.db.exec("PRAGMA foreign_keys = OFF");
+    store.db
+      .prepare(
+        "INSERT INTO edges (from_id, to_id, kind, metadata, created_at)" +
+          " VALUES (?, ?, 'references', NULL, ?)",
+      )
+      .run(oldId, ghost, new Date().toISOString());
+    store.db.exec("PRAGMA foreign_keys = ON");
+    // Refuse-don't-hide: the missing target is named precisely, and the
+    // ROLLBACK keeps the old memory active and unbridged.
+    assert.throws(
+      () => store.supersede(oldId, "# Decision: v2"),
+      new RegExp(`memory not found: ${ghost}`),
+    );
+    assert.equal(store.get(oldId)!.status, "active");
+    assert.equal(store.relations(oldId).length, 1);
+    assert.equal(store.stats().memories, 1);
+  } finally {
+    cleanup();
+  }
+});
+
 test("store: a self-edge through the one-gesture path is a construction impossibility", () => {
   const { store, cleanup } = tempStore();
   try {

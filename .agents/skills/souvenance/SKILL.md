@@ -109,7 +109,7 @@ A memory is read by a future session that has no prior context — write accordi
 - **Self-contained.** Each memory should make sense on its own. A reader who never saw this session should understand it without preamble.
 - **One concept per memory.** Split dense paragraphs covering multiple decisions into separate memories, and connect them with `--relation` in the same store call. Single-concept memories are more retrievable (better search hits) and more linkable (sharper graph edges).
 - **Include search keywords.** Use the words you'd search for — terms of art, names, identifiers — directly in the content. FTS5 matches tokens, not semantics; if the keyword isn't in the text, the search won't find it.
-- **Revise, don't overwrite.** When a decision changes, `supersede` the old memory rather than updating its content. This preserves the history of what was decided and when it changed — and `--relation` works on supersede too (the edges attach to the NEW memory).
+- **Revise, don't overwrite.** When a decision changes, `supersede` the old memory rather than updating its content. This preserves the history of what was decided and when it changed. The NEW head inherits the source's outgoing edges (a revision corrects content, not the relation set — the old memory keeps its edges as provenance); explicit `--relation` replaces that inheritance verbatim, the way explicit `--metadata` overrides kind/tags inheritance.
 
 ## Exploration: the frontier loop
 

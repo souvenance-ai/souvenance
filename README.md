@@ -48,7 +48,7 @@ Invoke as `souvenance <command>` (npm-installed) or `node bin/souvenance.js <com
 |---|---|
 | `recover [--directives N] [--summaries N] [--objectives N]` | The recovery ritual in one call: binding directives, the latest summaries (each enriched with its direct edges), open objectives, store stats |
 | `store <content> [--metadata <json>] [--weight <0-1>] [--relation <kind>:<uuid>]...` | Store a new memory, print its id |
-| `supersede <old-id> --content <text> [--metadata <json>] [--weight <0-1>] [--relation <kind>:<uuid>]...` | Store a new version, mark old as superseded |
+| `supersede <old-id> --content <text> [--metadata <json>] [--weight <0-1>] [--relation <kind>:<uuid>]...` | Store a new version, mark old as superseded; the head inherits kind/tags and the source's outgoing edges — explicit `--metadata`/`--relation` replaces them verbatim |
 | `deprecate <id>` | Soft-delete a memory (mark as deprecated) |
 | `merge <id1> <id2> [<id3> ...] --content <text> [--metadata <json>]` | Combine memories into one |
 | `update <id> --metadata <json>` | Update a memory's metadata (content is immutable) |
@@ -111,7 +111,7 @@ Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
 | `GET /memories/:id` | Get (bumps `access_count`); carries a `relations` block `{out: [...], in: [...]}` |
 | `PATCH /memories/:id` | Update metadata/weight (content is immutable) |
 | `DELETE /memories/:id?force=1` | Hard delete — guarded, prefer `deprecate` |
-| `POST /memories/:id/supersede` | New version, old marked superseded; body also takes `relations?: [{to, kind}]` (attached to the NEW memory) |
+| `POST /memories/:id/supersede` | New version, old marked superseded; body also takes `relations?: [{to, kind}]` (verbatim, instead of the inherited source edges) |
 | `POST /memories/:id/deprecate` | Soft-delete |
 | `POST /memories/:id/link` | `{to, kind, metadata?}` — typed edge |
 | `DELETE /memories/:id/link` | `{to, kind?}` — removes the edge; kind required when the pair carries several (`409` with the candidates) |
