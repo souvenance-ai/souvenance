@@ -12,7 +12,7 @@ This is a one-time setup skill. After it runs, the conventions live in `AGENTS.m
 ## Prerequisites
 
 - The `souvenance` skill is installed in this repo (check for `.agents/skills/souvenance/SKILL.md`).
-- `bin/souvenance.js` exists at the repo root.
+- The souvenance CLI resolves: `souvenance --help` (in a repo checkout: `node bin/souvenance.js --help`).
 - An `AGENTS.md` or `CLAUDE.md` file exists (if neither exists, ask the user which to create).
 
 ## Process
@@ -20,10 +20,10 @@ This is a one-time setup skill. After it runs, the conventions live in `AGENTS.m
 ### 1. Check the memory CLI works
 
 ```bash
-node bin/souvenance.js --help
+souvenance --help
 ```
 
-If this fails, stop and tell the user the souvenance skill doesn't appear to be installed.
+If this fails, stop and tell the user the souvenance CLI doesn't appear to be installed.
 
 ### 2. Pick the file to edit
 
@@ -57,7 +57,7 @@ Adapt the wording to match the voice of the surrounding sections, but keep these
 - [ ] The convention block is present in the file.
 - [ ] It sits under the `## Agent skills` heading (or equivalent).
 - [ ] No duplicate section was created.
-- [ ] The memory CLI (`node bin/souvenance.js --help`) works.
+- [ ] The memory CLI resolves (`souvenance --help`, or `node bin/souvenance.js --help` in a repo checkout).
 
 ### 6. Seed initial memory
 

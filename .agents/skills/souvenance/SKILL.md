@@ -35,7 +35,7 @@ See `CONTEXT.md` at the repo root for the canonical glossary: **memory**, **cont
 
 ## CLI
 
-All commands go through `bin/souvenance.js` (`node bin/souvenance.js <command> ...`, `souvenance <command> ...` if installed — `memory <command> ...` still works as a transition alias). Run `souvenance --help` for the full command reference. One-line examples:
+All commands go through the `souvenance` CLI (`souvenance <command> ...`; inside a repo checkout the same entry is `node bin/souvenance.js <command> ...`). Run `souvenance --help` for the full command reference. One-line examples:
 
 ```
 souvenance store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}' --weight 0.9

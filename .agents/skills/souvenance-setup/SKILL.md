@@ -16,7 +16,7 @@ npm install -g @souvenance/cli    # or zero-install: npx @souvenance/cli --help
 souvenance --help
 ```
 
-Two bins ship, one entry file: `souvenance` is the product's name; `memory` is a transition alias from the project's `ai-memory` era — same file, same verbs.
+One bin: `souvenance`. (Early releases ≤ 0.1.1 also installed a generic `memory` transition alias from the project's `ai-memory` era — removed in newer releases as too collision-prone on PATH; type `souvenance`.)
 
 ## 2. Create the store
 

@@ -9,7 +9,7 @@ npm install -g @souvenance/cli     # or zero-install: npx @souvenance/cli --help
 souvenance --help
 ```
 
-Requires **Node.js 24+** (uses the built-in `node:sqlite` module). Two bins ship, one entry file: `souvenance` is the product's name; `memory` is a transition alias from the project's `ai-memory` era — same file, same verbs, existing muscle memory keeps working.
+Requires **Node.js 24+** (uses the built-in `node:sqlite` module). One bin: `souvenance`. (Early releases ≤ 0.1.1 also installed a generic `memory` transition alias from the project's `ai-memory` era — removed in newer releases as too collision-prone on PATH; type `souvenance`.)
 
 ## 60-second quickstart
 
@@ -93,7 +93,7 @@ Read-only, diagnosis-not-error exit semantics like `doctor`: exit 1 when blockin
 with `--db`:
 
 ```bash
-node bin/souvenance.js --db .souvenance/memory.db serve --port 3141
+souvenance --db .souvenance/memory.db serve --port 3141
 ```
 
 Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
@@ -138,7 +138,7 @@ To *read* other stores (mirroring, evaluation), declare them at startup —
 they mount the same verb routes under a name:
 
 ```bash
-node bin/souvenance.js serve \
+souvenance serve \
   --store alice=/path/to/alice/.souvenance/memory.db \
   --store bench=/tmp/bench.db:rw   # :rw opts into writes (read-only by default)
 ```
@@ -171,7 +171,7 @@ binding a **non-loopback** host (anything but `127.0.0.1`, `::1`,
 `localhost`) **without token grants refuses to start**.
 
 ```bash
-node bin/souvenance.js serve \
+souvenance serve \
   --token valentin=souv-$(openssl rand -hex 32) \
   --token ci=souv-$(openssl rand -hex 32)@notes \
   --token writer=souv-$(openssl rand -hex 32)@root:rw:where
