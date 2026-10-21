@@ -20,6 +20,14 @@ on:
         required: false
         default: ''
 
+# Self-owned permissions: the two workflow callers (release.yml,
+# release-tag.yml) declare theirs, but a direct workflow_dispatch has no
+# caller — the lived catch of 2026-10-21 (npm EUSAGE: provenance needs
+# id-token write). The callable now carries its own.
+permissions:
+  contents: write # the release-page step
+  id-token: write # OIDC trusted publishing
+
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
 
