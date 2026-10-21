@@ -246,6 +246,42 @@ test("server: link creates an edge, relations reads it back", async () => {
   }
 });
 
+test("server: unlink removes an edge; ambiguity is a 409 carrying the candidates", async () => {
+  const { app, cleanup } = tempApp();
+  try {
+    const a = store_standalone(await call(app, "POST", "/memories", { content: "from" }));
+    const b = store_standalone(await call(app, "POST", "/memories", { content: "to" }));
+    await call(app, "POST", `/memories/${a}/link`, { to: b, kind: "references" });
+    const unlinked = await call(app, "DELETE", `/memories/${a}/link`, { to: b });
+    assert.equal(unlinked.status, 200);
+    assert.deepEqual(unlinked.json, { from_id: a, to_id: b, status: "unlinked" });
+    const out = await call(app, "GET", `/memories/${a}/relations?direction=out`);
+    assert.equal(out.json.length, 0);
+
+    // Two kinds on the same pair: kind-less removal is refused with the list.
+    await call(app, "POST", `/memories/${a}/link`, { to: b, kind: "references" });
+    await call(app, "POST", `/memories/${a}/link`, { to: b, kind: "extends" });
+    const ambiguous = await call(app, "DELETE", `/memories/${a}/link`, { to: b });
+    assert.equal(ambiguous.status, 409);
+    assert.match(ambiguous.json.error, /ambiguous: 2 edges between .* and .*, pass --kind: extends, references/);
+
+    // An explicit kind removes exactly that edge; then the edge is gone.
+    const one = await call(app, "DELETE", `/memories/${a}/link`, { to: b, kind: "extends" });
+    assert.equal(one.status, 200);
+    const gone = await call(app, "DELETE", `/memories/${a}/link`, { to: b, kind: "extends" });
+    assert.equal(gone.status, 404);
+    assert.match(gone.json.error, /edge not found/);
+
+    // A missing endpoint reads as the memory not found it is.
+    const missing = await call(app, "DELETE", `/memories/${a}/link`, {
+      to: "00000000-0000-0000-0000-000000000000",
+    });
+    assert.equal(missing.status, 404);
+  } finally {
+    cleanup();
+  }
+});
+
 test("server: merge combines actives and rejects degenerate input", async () => {
   const { app, cleanup } = tempApp();
   try {

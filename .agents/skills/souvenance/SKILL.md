@@ -46,6 +46,7 @@ souvenance update <id> --metadata '{"kind":"note"}'
 souvenance update <id> --weight 0.95
 souvenance delete <id> --force
 souvenance link <from-id> <to-id> --kind references
+souvenance unlink <from-id> <to-id> [--kind <kind>]
 souvenance fork <path> [--force]
 souvenance search "tabs spaces" --where "metadata->>'$.kind' = 'note'" --limit 5
 souvenance get <id>
@@ -58,7 +59,7 @@ souvenance doctor [--fix]
 souvenance finish
 ```
 
-Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`/`delete`/`link`/`deprecate` print a one-word confirmation. `doctor` prints a `DoctorReport` ({healthy, findings: [{check, id?, detail, hint}], summary}) and exits 1 when findings exist — a successful diagnosis, not an error. `finish` prints a `FinishReport` (the doctor gate plus session findings with `severity: "block"|"warn"`) and exits 1 when blocking findings exist — same diagnosis-not-error semantics.
+Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`/`delete`/`link`/`unlink`/`deprecate` print a one-word confirmation. `doctor` prints a `DoctorReport` ({healthy, findings: [{check, id?, detail, hint}], summary}) and exits 1 when findings exist — a successful diagnosis, not an error. `finish` prints a `FinishReport` (the doctor gate plus session findings with `severity: "block"|"warn"`) and exits 1 when blocking findings exist — same diagnosis-not-error semantics.
 
 `--db <path>` overrides the store location (default: `.souvenance/memory.db`).
 

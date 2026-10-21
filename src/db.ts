@@ -407,6 +407,75 @@ export class Store {
         .run(fromId, toId, kind, metadata, created_at);
     });
   }
+
+  /**
+   * Remove one edge. The pair (from, to) identifies the edge when it carries
+   * a single kind; with several kinds on the same directed pair the removal
+   * is refused with the candidate list — refuse, don't hide (the same grammar
+   * as token-file parsing). kind omitted + edges on the REVERSE pair surfaces
+   * them: the transposed-uuid mistake gets a direction hint, not a bare
+   * not-found. Removes exactly one edge row — no cascade, no update; a wrong
+   * edge is recreated right, never edited (addition-only spirit).
+   */
+  unlink(fromId: string, toId: string, kind?: string): void {
+    this.assertWritable();
+    // Endpoint existence first: a missing memory can hold no edge, and the
+    // transposed-id mistake (the lived failure behind this verb) reads as a
+    // precise endpoint error instead of a bare "edge not found".
+    const fromExists = this.run(() =>
+      this.db.prepare("SELECT 1 FROM memories WHERE id = ?").get(fromId),
+    );
+    if (!fromExists) throw new Error(`memory not found: ${fromId}`);
+    const toExists = this.run(() =>
+      this.db.prepare("SELECT 1 FROM memories WHERE id = ?").get(toId),
+    );
+    if (!toExists) throw new Error(`memory not found: ${toId}`);
+
+    if (kind !== undefined) {
+      if (!kind) throw new Error("kind must be non-empty");
+      const result = this.run(() =>
+        this.db
+          .prepare("DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?")
+          .run(fromId, toId, kind),
+      );
+      if (result.changes === 0) {
+        throw new Error(`edge not found: ${fromId} -> ${toId} (${kind})`);
+      }
+      return;
+    }
+
+    const directed = this.run(() =>
+      this.db
+        .prepare("SELECT kind FROM edges WHERE from_id = ? AND to_id = ? ORDER BY kind")
+        .all(fromId, toId),
+    ) as Array<{ kind: string }>;
+    if (directed.length === 1) {
+      this.run(() =>
+        this.db
+          .prepare("DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?")
+          .run(fromId, toId, directed[0].kind),
+      );
+      return;
+    }
+    if (directed.length === 0) {
+      const reverse = this.run(() =>
+        this.db
+          .prepare("SELECT kind FROM edges WHERE from_id = ? AND to_id = ? ORDER BY kind")
+          .all(toId, fromId),
+      ) as Array<{ kind: string }>;
+      if (reverse.length > 0) {
+        const list = reverse.map((e) => `${toId} -> ${fromId} (${e.kind})`).join(", ");
+        throw new Error(
+          `edge not found: ${fromId} -> ${toId}; edges exist in the reverse direction: ${list}`,
+        );
+      }
+      throw new Error(`edge not found: ${fromId} -> ${toId}`);
+    }
+    const kinds = directed.map((e) => e.kind).join(", ");
+    throw new Error(
+      `ambiguous: ${directed.length} edges between ${fromId} and ${toId}, pass --kind: ${kinds}`,
+    );
+  }
   /**
    * Bulk read for export/dump operations; not part of the stable API.
    * Yields all memories and edges lazily as lazy iterators.
@@ -800,6 +869,13 @@ export class Store {
           check: "orphan_edges",
           detail: `edge ${e.from_id} -> ${e.to_id} (${e.kind}) references a missing memory`,
           hint: "the store was edited outside the CLI; restore the missing memory or remove the edge with direct SQL",
+        });
+      }
+      if (e.from_id === e.to_id) {
+        findings.push({
+          check: "self_edges",
+          detail: `self-edge ${e.from_id} -> ${e.to_id} (${e.kind})`,
+          hint: `souvenance unlink ${e.from_id} ${e.to_id} --kind ${e.kind}`,
         });
       }
     }

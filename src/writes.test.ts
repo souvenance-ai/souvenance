@@ -610,3 +610,123 @@ test("link: throws on empty kind", () => {
     cleanup();
   }
 });
+
+test("unlink: removes the single edge on a pair without kind, round trip via relations", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    store.link(a, b, "references");
+    store.unlink(a, b);
+    assert.equal(store.relations(a, { direction: "out" }).length, 0);
+    assert.equal(store.relations(b, { direction: "in" }).length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("unlink: explicit kind removes exactly that edge among several", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    store.link(a, b, "references");
+    store.link(a, b, "extends");
+    store.unlink(a, b, "extends");
+    const rels = store.relations(a, { direction: "out" });
+    assert.equal(rels.length, 1);
+    assert.equal(rels[0].kind, "references");
+  } finally {
+    cleanup();
+  }
+});
+
+test("unlink: refuses an ambiguous pair with the candidate kinds", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    store.link(a, b, "references");
+    store.link(a, b, "extends");
+    assert.throws(
+      () => store.unlink(a, b),
+      /ambiguous: 2 edges between .* and .*, pass --kind: extends, references/,
+    );
+    // The refusal is not destructive: both edges survive.
+    assert.equal(store.relations(a, { direction: "out" }).length, 2);
+  } finally {
+    cleanup();
+  }
+});
+
+test("unlink: not found on an absent edge", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    assert.throws(
+      () => store.unlink(a, b),
+      /edge not found: .* -> .*/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("unlink: names reverse-direction edges to catch transposed ids", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    store.link(b, a, "references");
+    assert.throws(
+      () => store.unlink(a, b),
+      /edge not found: .* -> .*; edges exist in the reverse direction: .* -> .* \(references\)/,
+    );
+    // The reverse pair itself unlinks cleanly.
+    store.unlink(b, a, "references");
+    assert.equal(store.relations(b, { direction: "out" }).length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("unlink: names the missing endpoint before consulting edges", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    assert.throws(() => store.unlink(a, "nope"), /memory not found: nope/);
+    assert.throws(() => store.unlink("nope", a), /memory not found: nope/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("unlink: throws on empty explicit kind", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a");
+    const b = store.store("memory b");
+    store.link(a, b, "references");
+    assert.throws(() => store.unlink(a, b, ""), /kind must be non-empty/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("unlink: refuses on a read-only store", () => {
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-test-"));
+  const path = join(dir, "memory.db");
+  const rw = Store.open({ dbPath: path });
+  const a = rw.store("memory a");
+  const b = rw.store("memory b");
+  rw.link(a, b, "references");
+  rw.close();
+  const ro = Store.open({ dbPath: path, readOnly: true });
+  try {
+    assert.throws(() => ro.unlink(a, b), /store is read-only/);
+  } finally {
+    ro.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -264,6 +264,25 @@ export const TOOLS: McpTool[] = [
     },
   },
   {
+    name: "unlink",
+    description:
+      "Remove one typed edge between two memories. Without kind the pair must carry exactly one edge — ambiguous pairs are refused with the candidate kinds, never guessed; reverse-direction edges are named to catch transposed ids.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string" },
+        to: { type: "string" },
+        kind: { type: "string", description: "edge type; required when several edges join the pair" },
+      },
+      required: ["from", "to"],
+    },
+    run: (store, args) => {
+      const kind = optString(args, "kind");
+      store.unlink(requireString(args, "from"), requireString(args, "to"), kind);
+      return "unlinked";
+    },
+  },
+  {
     name: "deprecate",
     description: "Soft-delete: hides the memory from default search and list without removing it.",
     inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },

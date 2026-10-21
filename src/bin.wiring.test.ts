@@ -133,3 +133,40 @@ test("wiring: a CLI usage error prints one error line, exits 1, and closes the s
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("wiring: the real bin unlinks — removes, then refuses an ambiguous pair with exit 1", () => {
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-cli-unlink-test-"));
+  try {
+    const dbPath = join(dir, "memory.db");
+    const s = Store.open({ dbPath });
+    const a = s.store("memory alpha");
+    const b = s.store("memory beta");
+    s.close();
+
+    const link = spawnSync(process.execPath, [bin, "--db", dbPath, "link", a, b, "--kind", "references"], {
+      encoding: "utf8",
+    });
+    assert.equal(link.status, 0);
+    assert.equal(link.stdout.trim(), "linked");
+
+    // One edge on the pair: kind-less unlink removes it.
+    const unlink = spawnSync(process.execPath, [bin, "--db", dbPath, "unlink", a, b], {
+      encoding: "utf8",
+    });
+    assert.equal(unlink.status, 0);
+    assert.equal(unlink.stdout.trim(), "unlinked");
+
+    // Two kinds on the same pair: exit 1, the candidates on stderr, no stack.
+    spawnSync(process.execPath, [bin, "--db", dbPath, "link", a, b, "--kind", "references"], { encoding: "utf8" });
+    spawnSync(process.execPath, [bin, "--db", dbPath, "link", a, b, "--kind", "extends"], { encoding: "utf8" });
+    const ambiguous = spawnSync(process.execPath, [bin, "--db", dbPath, "unlink", a, b], {
+      encoding: "utf8",
+    });
+    assert.equal(ambiguous.status, 1);
+    assert.match(ambiguous.stderr, /^error: ambiguous: 2 edges between .* and .*/m);
+    assert.match(ambiguous.stderr, /pass --kind: extends, references/);
+    assert.doesNotMatch(ambiguous.stderr, /^    at /m, "a refusal must not print a stack trace");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

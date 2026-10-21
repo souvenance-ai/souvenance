@@ -16,6 +16,8 @@ Commands:
   update <id> [--metadata <json>] [--weight <0-1>]  Update a memory's metadata and/or weight (content is immutable)
   delete <id> --force                           Delete a memory (destructive; prefer 'deprecate')
   link <from-id> <to-id> --kind <kind> [--metadata <json>]  Create a typed edge
+  unlink <from-id> <to-id> [--kind <kind>]     Remove one typed edge (kind required when
+      the pair carries several — ambiguous pairs are refused with the candidates)
   search <query> [--where <sql>] [--limit N] [--all]  FTS5 search, ranked by bm25 × weight × recency × access_boost
   get <id>                                    Print a memory as JSON (or "not found"); increments access_count
   list [--where <sql>] [--limit N] [--offset N] [--all] [--min-weight <0-1>]  List memories by metadata filter
@@ -333,6 +335,13 @@ async function main() {
         const metadata = parseMetadata(flags["--metadata"]);
         store.link(fromId, toId, kind, metadata ? { metadata } : {});
         process.stdout.write("linked\n");
+        break;
+      }
+      case "unlink": {
+        if (rest.length < 2) fail("unlink requires <from-id> <to-id>");
+        const [fromId, toId] = rest;
+        store.unlink(fromId, toId, flags["--kind"]);
+        process.stdout.write("unlinked\n");
         break;
       }
       case "search": {
