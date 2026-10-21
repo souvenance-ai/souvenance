@@ -38,6 +38,15 @@ the breakage because the checkout is not under node_modules.
   runs the prepublish build (registry-true path), real tarball installed into
   a fresh consumer dir — `souvenance --help`, `memory --help`, store+list
   cycle green (memory id 6cb090d4 round-tripped through node:sqlite).
+- Live CI proof: release.yml inaugural run 39598104103 GREEN in 3m36s — the
+  OIDC Trusted Publishing publish succeeded (first proof of Valentin's config),
+  the CI install-path smoke passed, dist-tags.latest = 0.1.1, and a stranger
+  path npx store/list round-trip verified outside the repo (id f7fc3eb6).
+- Second catch the same hour: release.yml's `yarn install --immutable` died
+  first (run 39597774568) because yarn.lock pins the WORKSPACE bin paths —
+  regenerated (diff surgical, 2 lines); lesson: run the CI-equivalent entry
+  gate (`yarn install --immutable`) locally before pushing workflow-published
+  packages, lockfile drift is invisible to tests/typecheck.
 - 0.1.0 stays on npm (same-version republish impossible); deprecation is
-  Valentin's gesture. 0.1.1 ships via tag v0.1.1 — release.yml's inaugural run
-  and the first Trusted Publisher proof.
+  Valentin's gesture. 0.1.1 shipped via tag v0.1.1 — release.yml's inaugural
+  run and the first Trusted Publisher proof.
