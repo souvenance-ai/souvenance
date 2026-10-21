@@ -37,6 +37,12 @@ async function call(
   return { status: res.status, json: text ? JSON.parse(text) : null };
 }
 
+/** The store's created_at has millisecond precision; back-to-back POSTs can
+ * land in the same ms and make a created_at DESC tie-break undefined (observed
+ * live on the fast CI runner, 2026-10-21, in the /recover order asserts below).
+ * One tick guarantees a distinct timestamp. */
+const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 test("server: root describes the service", async () => {
@@ -524,12 +530,14 @@ test("server: GET /recover — the recovery ritual as one resource", async () =>
     const d1 = store_standalone(await call(app, "POST", "/memories", {
       content: "directive one", metadata: { kind: "directive" },
     }));
+    await tick();
     const d2 = store_standalone(await call(app, "POST", "/memories", {
       content: "directive two", metadata: { kind: "directive" },
     }));
     const s1 = store_standalone(await call(app, "POST", "/memories", {
       content: "summary one", metadata: { kind: "summary" },
     }));
+    await tick();
     const s2 = store_standalone(await call(app, "POST", "/memories", {
       content: "summary two", metadata: { kind: "summary" },
     }));
