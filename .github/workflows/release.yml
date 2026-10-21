@@ -1,0 +1,65 @@
+# Release path (decision 21fd24c8, Q26): tag-driven — pushing tag vK.L.M runs
+# the gate (typecheck + suite) then publishes @souvenance/cli to npm.
+# Credentials are TRUSTED PUBLISHING (OIDC): no npm token secret holds write
+# to the registry — npm exchanges the GitHub OIDC claim for a short-lived
+# publish grant (id-token: write below, one-time config in the npm org by
+# Valentin, ticket 04). The very first publish (0.1.0) stays MANUAL; this
+# workflow automates every release after it. Each tag also drafts a GitHub
+# release page with generated notes.
+name: release
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write # the release-page step
+  id-token: write # OIDC trusted publishing
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false # never race two publishes of the same ref
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: corepack enable
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      - run: yarn install --immutable
+
+      # — the gate, identical to tests.yml —
+      - run: yarn typecheck
+      - run: yarn test
+
+      # — guard: the tag names the version package.json will publish —
+      #   the version lives in the committed package.json; bump-then-tag
+      #   is the release gesture.
+      - name: guard — tag equals package.json version
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag v$tag does not match package.json version $pkg" >&2
+            echo "bump package.json#version, commit on main, re-tag" >&2
+            exit 1
+          fi
+
+      # Trusted publishing needs npm >= 11.5.1; the runner's bundled npm
+      # drifts, so upgrade explicitly instead of hoping.
+      - name: upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@latest
+
+      - name: publish to npm (OIDC — no token secret)
+        run: npm publish --access public --provenance
+
+      - name: draft the release page
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}

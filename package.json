@@ -2,10 +2,17 @@
   "name": "@souvenance/cli",
   "version": "0.1.0",
   "description": "Persistent, searchable agent memory in a per-project SQLite store",
+  "license": "MIT",
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "packageManager": "yarn@4.18.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "bin": {
     "memory": "bin/souvenance.js",
