@@ -119,8 +119,9 @@ Notes:
     need the token's :rw opt-in (409); raw --where fragments are
     local-only — remote requests use the structured kind/tag params or
     opt in per token with :where (400). Token specs:
-    <agent>=<secret>[@<store>][:rw][:where], secrets 16+ chars of
-    [A-Za-z0-9_-] (generate: openssl rand -hex 32), compared timing-safe.
+    <agent>=souv-token[@<store>][:rw][:where], tokens are 'souv-' plus
+    32-64 lowercase hex chars (128-256 bits; generate: echo
+    souv-$(openssl rand -hex 16)), compared timing-safe.
     Token files: --token-file <path> (repeatable, composes with --token)
     reads an env-style file, one grant per line as
     MEMORY_TOKEN_<agent>=<secret>[@<store>][:rw][:where] — the agent lives
@@ -152,8 +153,11 @@ Notes:
     (paginate with offset; bulk export stays a CLI verb); limit/offset
     must be non-negative integers (a negative LIMIT disables the SQL
     limit). Timeouts: request 30s, headers 10s, keep-alive 5s. No rate
-    limits: 64-hex bearer secrets are not brute-forceable and auth is
-    per-request, not per-connection.
+    limits: souv- tokens carry 128-256 bits of entropy (not
+    brute-forceable) and auth is per-request, not per-connection.
+    Store files: the db (and its WAL sidecars, and fork targets) are
+    tightened to owner-only 0600 on open/copy (POSIX); the doctor check
+    file_permissions reports any drift below owner-only.
 `;
 
 const BOOLEAN_FLAGS = new Set(["--all", "--force", "--resolved", "--fix"]);
@@ -199,9 +203,13 @@ function parseMetadata(jsonStr) {
   }
 }
 
+/** An operator-facing usage/validation error: thrown by fail(), caught once
+ *  in main() so the store can still close in the finally block — the old
+ *  process.exit skipped it and littered WAL sidecars (security audit, issue 07). */
+class FailError extends Error {}
+
 function fail(msg) {
-  process.stderr.write(`error: ${msg}\n`);
-  process.exit(1);
+  throw new FailError(msg);
 }
 
 function print(obj) {
@@ -230,17 +238,13 @@ async function main() {
   let exitCode = 0;
 
   const dbPath = flags["--db"];
-  let store;
-  try {
-    store = Store.open(dbPath ? { dbPath } : {});
-  } catch (err) {
-    fail(`could not open store: ${err instanceof Error ? err.message : err}`);
-  }
+  let store = null;
   // Auxiliary stores declared for 'serve', opened lazily on first request;
   // closed after shutdown alongside the main store.
   const auxiliaries = [];
 
   try {
+    store = Store.open(dbPath ? { dbPath } : {});
     switch (command) {
       case "store": {
         if (rest.length < 1) fail("store requires <content>");
@@ -461,8 +465,13 @@ async function main() {
           ...(flags["--token-file"] ?? []).flatMap(parseTokenFile),
           ...(flags["--token"] ?? []).map(parseTokenSpec),
         ];
-        const openStore = (dbPath) => {
-          const s = Store.open({ dbPath });
+        // The server's readOnly decision (ro-declared mounts in local mode)
+        // MUST flow into the lib open — dropping it would open the mount
+        // writable and silently MIGRATE a foreign store on first request
+        // (security audit, issue 01: tests inject this seam, the real wiring
+        // is exercised by serve.wiring.test.ts).
+        const openStore = (dbPath, readOnly) => {
+          const s = Store.open({ dbPath, readOnly });
           auxiliaries.push(s);
           return s;
         };
@@ -513,12 +522,14 @@ async function main() {
       }
       default:
         fail(`unknown command: ${command}\n\n${HELP}`);
+        break;
     }
   } catch (err) {
-    fail(err instanceof Error ? err.message : String(err));
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    exitCode = 1;
   } finally {
     for (const aux of auxiliaries) aux.close();
-    store.close();
+    if (store) store.close();
   }
   if (exitCode !== 0) process.exit(exitCode);
 }

@@ -55,8 +55,8 @@ async function call(
   return { status: res.status, json: text ? JSON.parse(text) : null, text };
 }
 
-const SECRET = "0123456789abcdef0123456789abcdef";
-const SECRET_AUX = "fedcba9876543210fedcba9876543210";
+const SECRET = "souv-0123456789abcdef0123456789abcdef";
+const SECRET_AUX = "souv-fedcba9876543210fedcba9876543210";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 test("parseTokenSpec: defaults, @store, modifiers in any order", () => {
@@ -78,11 +78,11 @@ test("parseTokenSpec: defaults, @store, modifiers in any order", () => {
 test("parseTokenSpec: rejects malformed specs", () => {
   assert.throws(() => parseTokenSpec("noequals"), /--token expects/);
   assert.throws(() => parseTokenSpec(`Val=${SECRET}`), /invalid agent name/);
-  assert.throws(() => parseTokenSpec("val="), /the secret needs/);
-  assert.throws(() => parseTokenSpec("val=short"), /the secret needs/);
+  assert.throws(() => parseTokenSpec("val="), /secret must be 'souv-'/);
+  assert.throws(() => parseTokenSpec("val=short"), /secret must be 'souv-'/);
   assert.throws(() => parseTokenSpec(`val=${SECRET}@`), /requires a store name/);
-  assert.throws(() => parseTokenSpec(`val=${SECRET}:rw:BAD`), /the secret needs/);
-  assert.throws(() => parseTokenSpec("val=abcdef0123456789:extra"), /@' or ':'/);
+  assert.throws(() => parseTokenSpec(`val=${SECRET}:rw:BAD`), /secret must be 'souv-'/);
+  assert.throws(() => parseTokenSpec("val=abcdef0123456789:extra"), /secret must be 'souv-'/);
   // '@' splits secret from store at its FIRST occurrence; a second one
   // lands in the store segment and is rejected by the store rule.
   assert.throws(() => parseTokenSpec("val=abc@def@notes"), /invalid grant store/);

@@ -154,9 +154,9 @@ binding a **non-loopback** host (anything but `127.0.0.1`, `::1`,
 
 ```bash
 node bin/souvenance.js serve \
-  --token valentin=$(openssl rand -hex 32) \
-  --token ci=$(openssl rand -hex 32)@notes \
-  --token writer=$(openssl rand -hex 32)@root:rw:where
+  --token valentin=souv-$(openssl rand -hex 32) \
+  --token ci=souv-$(openssl rand -hex 32)@notes \
+  --token writer=souv-$(openssl rand -hex 32)@root:rw:where
 ```
 
 - Token mode (`--token` declared): every request needs
@@ -164,9 +164,11 @@ node bin/souvenance.js serve \
   store: `root` names the process store, otherwise an auxiliary store name
   (`403` elsewhere). Reads are always allowed; writes need the token's
   `:rw` opt-in (`409`).
-- Spec: `<agent>=<secret>[@<store>][:rw][:where]` — secrets are 16+ chars
-  of `[A-Za-z0-9_-]` (64 with `openssl rand -hex 32`), compared
-  timing-safe. `:where` opts the token into raw `where` fragments;
+- Spec: `<agent>=souv-token[@<store>][:rw][:where]` — tokens are structured
+  (`souv-` + 32-64 lowercase hex chars = 128-256 bits of entropy, enforced
+  by parsing; generate with `echo souv-$(openssl rand -hex 16)`) and
+  compared timing-safe. The prefix makes a leaked token recognizable by
+  scanner regex. `:where` opts the token into raw `where` fragments;
   without it the structured `?kind=&tag=` filters (compiled server-side
   into the same JSON1) are the remote-safe query path.
 - In token mode, store-level `:rw` mounts are rejected at startup — write

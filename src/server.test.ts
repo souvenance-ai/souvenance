@@ -663,3 +663,26 @@ function store_standalone(created: { status: number; json: any }): string {
   assert.match(id, UUID_RE);
   return id;
 }
+
+test("server: 5xx bodies never leak internal error text; the detail goes to stderr", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-server-test-"));
+  const store = Store.open({ dbPath: join(dir, "memory.db") });
+  const app = createApp(store);
+  try {
+    const calls: unknown[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => { calls.push(args); };
+    try {
+      store.close(); // the next request surfaces a raw SQLite "not open" error: a 500
+      const { status, json } = await call(app, "GET", "/stats");
+      assert.equal(status, 500);
+      assert.deepEqual(json, { error: "internal error" }, "the client body is generic");
+      assert.equal(calls.length, 1, "the operator log carries the detail");
+      assert.match(String((calls[0] as string[])[0]), /database is not open/);
+    } finally {
+      console.error = original;
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

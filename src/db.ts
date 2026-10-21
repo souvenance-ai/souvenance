@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { migrate, SCHEMA_VERSION, schemaVersion } from "./migrations.ts";
@@ -29,10 +29,29 @@ import type {
 
 export const DEFAULT_DB_PATH = ".ai-memory/memory.db";
 
+/**
+ * Tightens a store file and its WAL sidecars to owner-only permissions.
+ * The store IS the agent's identity (directives, decisions, transcripts) —
+ * the same argument that makes parseTokenFile refuse a group-readable token
+ * file applies to the db file. Best-effort: a failed chmod never bricks the
+ * open; the doctor's file_permissions check is the visible enforcer for
+ * anything this pass cannot reach (win32 skipped — stat mode is unreliable).
+ */
+function tightenPermissions(dbPath: string): void {
+  if (process.platform === "win32") return;
+  for (const p of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    try {
+      if (existsSync(p)) chmodSync(p, 0o600);
+    } catch {
+      // best effort — the doctor reports drift
+    }
+  }
+}
+
 /** memory:// links are authored text in content; the doctor validates each target. */
 const MEMORY_LINK_RE = /memory:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
 
-const DOCTOR_CHECK_COUNT = 10;
+const DOCTOR_CHECK_COUNT = 11;
 
 /** Closing-ritual window: when the session stored memories, a summary and an
  *  experience note must exist within this window. 24h covers every lived
@@ -172,6 +191,7 @@ export class Store {
     const db = new DatabaseSync(dbPath);
     execPragma(db);
     migrate(db);
+    tightenPermissions(dbPath);
     return new Store(db, dbPath, false);
   }
 
@@ -454,6 +474,7 @@ export class Store {
     ).c;
     const quoted = target.replace(/'/g, "''");
     this.run(() => this.db.exec(`VACUUM INTO '${quoted}'`));
+    tightenPermissions(target);
     return { path: target, memories, edges };
   }
 
@@ -920,6 +941,27 @@ export class Store {
     }
 
     findings.push(...this.checkFts());
+
+    // Store-file permissions (security audit, issue 02): the db file carries
+    // the agent's whole identity — group/world-readable store files void the
+    // boundary the token-file check enforces elsewhere, the same way. The
+    // runtime chmod (tightenPermissions) is best-effort; this is the
+    // mechanical report for anything it could not reach.
+    if (process.platform !== "win32") {
+      try {
+        const mode = statSync(this.dbPath).mode;
+        if ((mode & 0o077) !== 0) {
+          findings.push({
+            check: "file_permissions",
+            detail: `store file readable by group/others (mode 0${(mode & 0o777).toString(8)})`,
+            hint: `chmod 600 ${this.dbPath} — shared-readable store files void the identity boundary`,
+          });
+        }
+      } catch {
+        // an unreadable stat is no finding here — the other checks surface
+        // what actually matters about the store's contents
+      }
+    }
 
     const edges_by_kind: Record<string, number> = {};
     for (const e of edges) {

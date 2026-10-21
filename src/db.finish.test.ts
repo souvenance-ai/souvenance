@@ -65,7 +65,7 @@ test("finish: a fresh empty store is closable — nothing owed, nothing blocked"
     assert.equal(report.summary.memories_since_dream, 0);
     assert.equal(report.summary.blocks, 0);
     assert.equal(report.summary.warns, 0);
-    assert.equal(report.summary.doctor.checks, 10);
+    assert.equal(report.summary.doctor.checks, 11);
     assert.equal(report.summary.doctor.issues, 0);
   } finally {
     cleanup();

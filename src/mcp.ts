@@ -444,8 +444,23 @@ export async function runMcpServer(
       if (line.length === 0) continue;
       handleMessage(store, line, respond);
     }
+    if (buffer.length > MAX_LINE_BYTES) {
+      respond(null, { error: { code: -32700, message: "input line exceeds the 10 MiB cap" } });
+      return;
+    }
   }
 }
+
+/**
+ * Input cap — the largest single JSON-RPC line (10 MiB dwarfs any real tool
+ * call, matching the HTTP body cap's generosity). A client streaming bytes
+ * without a newline must not grow the heap without bound: breach → one
+ * parse-error response and the session ends (a stream that oversized its
+ * line is garbage by then). Checked on the UNTERMINATED tail only —
+ * complete lines are processed first, so one giant chunk carrying valid
+ * lines plus a huge tail still serves those lines.
+ */
+const MAX_LINE_BYTES = 10 * 1024 * 1024;
 
 /** Dispatches one protocol line. Notifications (`notifications/*`) are never
  *  responded to; every request gets exactly one response line. */

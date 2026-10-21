@@ -323,3 +323,29 @@ test("mcp: bin wiring — the real process speaks JSON-RPC over stdio", async ()
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("mcp: an unterminated line past the 10 MiB cap refuses and ends the session", async () => {
+  const { path, cleanup } = tempStorePathMcp();
+  try {
+    const store = Store.open({ dbPath: path });
+    const input = new PassThrough();
+    const collected: string[] = [];
+    const running = runMcpServer(store, { input, output: { write: (data) => collected.push(data) } });
+    input.write("a".repeat(10 * 1024 * 1024 + 1));
+    input.end();
+    await running;
+    assert.equal(collected.length, 1, "exactly one refusal response");
+    const parsed = JSON.parse(collected[0]);
+    assert.equal(parsed.id, null);
+    assert.equal(parsed.error.code, -32700);
+    assert.match(parsed.error.message, /10 MiB cap/);
+    store.close();
+  } finally {
+    cleanup();
+  }
+});
+
+function tempStorePathMcp(): { path: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-mcp-cap-test-"));
+  return { path: join(dir, "memory.db"), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}

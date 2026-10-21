@@ -54,6 +54,17 @@ export function filenameFor(memory: Memory): string {
   return `${prefix}-${slug}.md`;
 }
 
+/**
+ * Renders one frontmatter KEY. Keys are interpolated raw only when they
+ * cannot escape the block they belong to (`[\w.-]+`, no whitespace, no
+ * colon); anything else is double-quote-wrapped, which YAML parses as a
+ * string key — a crafted metadata key containing a newline must not be
+ * able to inject a top-level frontmatter field (security audit, issue 06).
+ */
+function yamlKey(k: string): string {
+  return /^[\w.-]+$/.test(k) ? k : JSON.stringify(k);
+}
+
 function toYamlValue(value: unknown, indent: number): string {
   const pad = "  ".repeat(indent);
   if (value === null || value === undefined) return "null";
@@ -98,7 +109,7 @@ export function renderFrontmatter(memory: Memory): string {
     if (rest.length > 0) {
       lines.push("metadata:");
       for (const [k, v] of rest) {
-        lines.push(`  ${k}: ${toYamlValue(v, 1)}`);
+        lines.push(`  ${yamlKey(k)}: ${toYamlValue(v, 1)}`);
       }
     }
   }

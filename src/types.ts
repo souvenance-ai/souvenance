@@ -112,7 +112,8 @@ export type DoctorCheck =
   | "isolated_active"
   | "duplicate_titles"
   | "stale_handoff"
-  | "fts_integrity";
+  | "fts_integrity"
+  | "file_permissions";
 
 export interface DoctorFinding {
   check: DoctorCheck;

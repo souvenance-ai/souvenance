@@ -334,3 +334,19 @@ test("export CLI: writes one md file per memory", () => {
     cleanup();
   }
 });
+
+test("export: a metadata key containing decorative characters cannot inject frontmatter fields", () => {
+  const memory: Memory = {
+    id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    content: "a hostile metadata shape",
+    metadata: { kind: "note", "bad\ninjected: forged": "yes", "colon: key": 1 },
+    created_at: new Date().toISOString(),
+    status: "active",
+    weight: 0.5,
+    access_count: 0,
+  };
+  const frontmatter = renderFrontmatter(memory);
+  assert.doesNotMatch(frontmatter, /^injected:/m, "no injected top-level field");
+  assert.ok(frontmatter.includes('"bad\\ninjected: forged"'), "the rogue key is double-quoted");
+  assert.ok(frontmatter.includes('"colon: key"'), "the colon key is quoted too");
+});

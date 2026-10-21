@@ -207,8 +207,15 @@ export interface TokenGrant {
  * Parses a `--token <agent>=<secret>[@<store>][:rw][:where]` spec. Omitting
  * `@<store>` grants the process store ("root"). Modifiers may appear in any
  * order and are stripped iteratively; secrets cannot contain ':' or '@' so
- * the split is unambiguous. Secrets must be at least 16 chars (openssl
- * rand -hex 32 generates 64) — a weak secret would undermine the boundary.
+ * the split is unambiguous (the structured prefix never does — it is hex).
+ *
+ * Tokens are STRUCTURED (decision c88a9a61, security audit finding 04):
+ * `souv-` + 32-64 lowercase hex chars = 128-256 bits of entropy, enforced by
+ * parsing — a weak token cannot exist by construction, and a leak is
+ * detectable by scanner regex (the prefix makes the bearer family
+ * recognizable). Generated with `echo souv-$(openssl rand -hex 16)`. No
+ * legacy bare-hex form: the first npm publish has not happened, so the
+ * cheapest possible breaking moment is now.
  */
 export function parseTokenSpec(spec: string): TokenGrant {
   const eq = spec.indexOf("=");
@@ -249,9 +256,9 @@ export function parseTokenSpec(spec: string): TokenGrant {
       `invalid grant store '${store}': 'root' or a store name (lowercase letters, digits and hyphens, starting with a letter)`,
     );
   }
-  if (!/^[A-Za-z0-9_-]{16,}$/.test(rest)) {
+  if (!/^souv-[0-9a-f]{32,64}$/.test(rest)) {
     throw new Error(
-      `--token '${agent}': the secret needs at least 16 chars of [A-Za-z0-9_-] (no '@' or ':' — they are delimiters); generate one with: openssl rand -hex 32`,
+      `--token '${agent}': the secret must be 'souv-' + 32 to 64 lowercase hex chars (128-256 bits) — generate one with: echo souv-$(openssl rand -hex 16)`,
     );
   }
   return { agent, token: rest, store, mode, where };
@@ -908,7 +915,21 @@ export function createApp(store: Store, opts: MultiStoreOptions = {}): MemoryApp
 
   app.notFound((c) => c.json({ error: "not found" }, 404));
 
-  app.onError((err, c) => c.json({ error: err.message }, statusFor(err)));
+  app.onError((err, c) => {
+    const status = statusFor(err);
+    if (status >= 500) {
+      // 500/503 never carry internal text to the client — lib/SQLite error
+      // messages embed server filesystem paths, and the internet-facing
+      // surface must not disclose them (security audit, issue 03). The
+      // operator sees the real detail on stderr; the client gets a generic
+      // body (the 503 status itself still says retry-later).
+      console.error(
+        `souvenance: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+      );
+      return c.json({ error: "internal error" }, status);
+    }
+    return c.json({ error: err.message }, status);
+  });
 
   return app;
 }

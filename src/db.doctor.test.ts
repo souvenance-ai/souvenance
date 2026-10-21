@@ -50,7 +50,7 @@ test("doctor: a healthy pair has zero findings and coherent summary", () => {
     const report = store.doctor();
     assert.equal(report.healthy, true);
     assert.deepEqual(report.findings, []);
-    assert.equal(report.summary.checks, 10);
+    assert.equal(report.summary.checks, 11);
     assert.equal(report.summary.issues, 0);
     assert.equal(report.summary.memories, 2);
     assert.equal(report.summary.edges, 1);

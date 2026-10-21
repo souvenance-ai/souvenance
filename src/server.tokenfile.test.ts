@@ -6,11 +6,11 @@ import { tmpdir } from "node:os";
 import { Store } from "./db.ts";
 import { createApp, parseTokenFile, parseTokenSpec, type TokenGrant } from "./server.ts";
 
-const SECRET = "0123456789abcdef0123456789abcdef";
-const SECRET_CI = "fedcba9876543210fedcba9876543210";
-const SECRET_W = "aaaa1111bbbb2222cccc3333dddd4444";
-const SECRET_R = "99998888777766665555444433332222";
-const SECRET_CLI = "deadbeefdeadbeefdeadbeefdeadbeef";
+const SECRET = "souv-0123456789abcdef0123456789abcdef";
+const SECRET_CI = "souv-fedcba9876543210fedcba9876543210";
+const SECRET_W = "souv-aaaa1111bbbb2222cccc3333dddd4444";
+const SECRET_R = "souv-99998888777766665555444433332222";
+const SECRET_CLI = "souv-deadbeefdeadbeefdeadbeefdeadbeef";
 
 /** A temp dir with a file written at an explicit mode (new files default to
  * 0644 — every token file in these tests is chmod'd deliberately). */
@@ -143,7 +143,7 @@ test("tokenfile: strict — missing file, empty agent, bad value all refuse", ()
   const badValue = tempFile("b.env", `MEMORY_TOKEN_ci=short`);
   try {
     assert.throws(() => parseTokenFile(emptyAgent.path), /line 1/);
-    assert.throws(() => parseTokenFile(badValue.path), /line 1.*secret needs at least 16 chars/);
+    assert.throws(() => parseTokenFile(badValue.path), /line 1.*the secret must be 'souv-'/);
   } finally {
     emptyAgent.cleanup();
     badValue.cleanup();
