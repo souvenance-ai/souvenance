@@ -1,0 +1,127 @@
+# The release-moment proposer (leg 2, decision b6882bf2, spec release-automation):
+# on every push to main, ask the detector (scripts/release-status.mjs) for the
+# release debt. Debt → generate (or refresh) ONE release PR proposing one
+# patch bump; Valentin's merge is the approval that triggers the automatic
+# tag + publish (release-tag.yml). No debt, or a release already staged →
+# close any standing release PR. Branch pushes from Actions do not trigger
+# other workflows (the same GITHUB_TOKEN rule) — no self-recursion; the loop
+# closes only on Valentin's merge, by design.
+name: release-pr
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write # the release/current branch push
+  pull-requests: write
+
+concurrency:
+  group: release-pr
+  cancel-in-progress: false # two racing pushes must not fight over the branch
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags and history — the detector needs both
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: detect release debt
+        id: report
+        run: |
+          node scripts/release-status.mjs > status.json && cat status.json
+          echo "staged=$(node -p "require('./status.json').staged")" >> "$GITHUB_OUTPUT"
+          echo "pending=$(node -p "require('./status.json').pending_commits")" >> "$GITHUB_OUTPUT"
+          echo "suggested=$(node -p "require('./status.json').suggested_version")" >> "$GITHUB_OUTPUT"
+          echo "last_tag=$(node -p "require('./status.json').last_tag")" >> "$GITHUB_OUTPUT"
+          {
+            echo "commits<<COMMITS_EOF"
+            node -p "require('./status.json').commits.map((c) => '- ' + c).join('\n')"
+            echo "COMMITS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Nothing pending, or a release already staged (a bump landed on main —
+      # the publish is underway): a standing release PR would be noise. Close it.
+      - name: close obsolete release PR
+        if: steps.report.outputs.staged == 'true' || steps.report.outputs.pending == '0'
+        run: |
+          n=$(gh pr list --head release/current --state open --json number -q '.[0].number' || true)
+          if [ -n "$n" ]; then
+            reason=$([ "${{ steps.report.outputs.staged }}" = "true" ] \
+              && echo "release staged — the publish is underway" \
+              || echo "nothing package-impacting is pending")
+            gh pr close "$n" --comment "Closing: $reason."
+            echo "closed release PR #$n ($reason)"
+          else
+            echo "no open release PR to close"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Debt → the release moment, proposed: one PR, always generated from the
+      # current HEAD. A standing PR whose bump commit sits directly on HEAD is
+      # already current — leave it (e.g. a docs-only push re-running this job).
+      # Otherwise refresh the branch and the PR in place (review thread kept).
+      - name: generate release PR
+        if: steps.report.outputs.staged == 'false' && steps.report.outputs.pending != '0'
+        run: |
+          existing=$(gh pr list --head release/current --state open --json number,headRefOid \
+            -q '.[0] | "\(.number) \(.headRefOid)"' || true)
+          if [ -n "$existing" ]; then
+            n=${existing%% *}
+            headsha=${existing#* }
+            parent=$(git rev-parse "$headsha^" 2>/dev/null || true)
+            if [ "$parent" = "$GITHUB_SHA" ]; then
+              echo "release PR #$n already reflects HEAD (bump commit directly on top) — leaving it"
+              exit 0
+            fi
+            echo "refreshing stale release PR #$n"
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B release/current
+
+          # Bump one patch — the proposal, adjustably INSIDE the PR: the
+          # version is decided at approval time, never auto-guessed. The file's
+          # CRLF line endings are preserved (yarn-format parity).
+          node -e '
+            const fs = require("fs");
+            const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            p.version = process.argv[1];
+            fs.writeFileSync("package.json", JSON.stringify(p, null, 2).replace(/\n/g, "\r\n") + "\r\n");
+          ' "${{ steps.report.outputs.suggested }}"
+          git add package.json
+          git commit -m "release: v${{ steps.report.outputs.suggested }}"
+          git push -f origin release/current
+
+          node -e '
+            const s = require("./status.json");
+            const body = [
+              "## Release proposal: " + s.suggested_version,
+              "",
+              "These " + s.pending_commits + " commits touch the published package scope since " + (s.last_tag ?? "the start of history") + ":",
+              "",
+              ...s.commits.map((c) => "- " + c),
+              "",
+              "**Contract:** merging approves the publish — the tag `v" + s.suggested_version + "` is pushed automatically, then the flow runs: gate, OIDC publish, install-path smoke, release page.",
+              "",
+              "**Version:** one patch bump is proposed by default. If these changes deserve more (a feature, a break), adjust the version directly in this PR before merging — the published tag follows `package.json`.",
+              "",
+            ].join("\n");
+            require("fs").writeFileSync("pr-body.md", body);
+          '
+
+          if [ -n "$existing" ]; then
+            gh pr edit "${existing%% *}" --title "release: ${{ steps.report.outputs.suggested }}" --body-file pr-body.md
+          else
+            gh pr create --head release/current --base main \
+              --title "release: ${{ steps.report.outputs.suggested }}" \
+              --body-file pr-body.md
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
