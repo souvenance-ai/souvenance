@@ -175,6 +175,40 @@ test("get: returns null for unknown id", () => {
   }
 });
 
+test("get: projects the graph — relations {out, in}, both directions, raw", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store("memory a", { metadata: { kind: "note" } });
+    const b = store.store("memory b", { metadata: { kind: "note" } });
+    const c = store.store("memory c", { metadata: { kind: "note" } });
+    store.link(a, b, "references"); // b: an incoming edge
+    store.link(b, c, "extends");    // b: an outgoing edge
+    const m = store.get(b)!;
+    assert.equal(m.relations.out.length, 1);
+    assert.equal(m.relations.out[0].kind, "extends");
+    assert.equal(m.relations.out[0].to_id, c);
+    assert.equal(m.relations.in.length, 1);
+    assert.equal(m.relations.in[0].kind, "references");
+    assert.equal(m.relations.in[0].from_id, a);
+    // Raw rows: no resolution annotation without opt-in.
+    assert.equal("resolved_to" in m.relations.out[0], false);
+    assert.equal("resolved_to" in m.relations.in[0], false);
+  } finally {
+    cleanup();
+  }
+});
+
+test("get: an unlinked memory carries empty relations arrays", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const id = store.store("an island", { metadata: { kind: "note" } });
+    const m = store.get(id)!;
+    assert.deepEqual(m.relations, { out: [], in: [] });
+  } finally {
+    cleanup();
+  }
+});
+
 test("get: returns null metadata as null", () => {
   const { store, cleanup } = tempStore();
   try {

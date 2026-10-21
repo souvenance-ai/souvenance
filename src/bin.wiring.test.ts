@@ -252,3 +252,46 @@ test("wiring: the real bin stores one-gesture relations — and refuses a malfor
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("wiring: the real bin recover — the ritual in one call, summaries drilled-in", () => {
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-cli-recover-test-"));
+  try {
+    const dbPath = join(dir, "memory.db");
+    const s = Store.open({ dbPath });
+    const decision = s.store("the arc decision", { metadata: { kind: "decision" } });
+    s.close();
+
+    // The agent's one-gesture summary: stored AND linked in the same call.
+    const summary = spawnSync(
+      process.execPath,
+      [bin, "--db", dbPath, "store", "# Summary: the arc",
+        "--metadata", '{"kind":"summary"}', "--relation", `references:${decision}`],
+      { encoding: "utf8" },
+    );
+    assert.equal(summary.status, 0);
+
+    const rec = spawnSync(process.execPath, [bin, "--db", dbPath, "recover"], { encoding: "utf8" });
+    assert.equal(rec.status, 0);
+    const ritual = JSON.parse(rec.stdout);
+    assert.equal(ritual.summaries.length, 1);
+    assert.equal(ritual.summaries[0].relations.out.length, 1);
+    assert.equal(ritual.summaries[0].relations.out[0].kind, "references");
+    assert.equal(ritual.summaries[0].relations.out[0].to_id, decision);
+    assert.deepEqual(ritual.summaries[0].relations.in, []);
+    // The directives and objectives blocks stay their list selves.
+    assert.deepEqual(ritual.directives, []);
+    assert.deepEqual(ritual.objectives, []);
+    assert.equal(ritual.stats.edges, 1);
+
+    // The limit flags bound the blocks.
+    const zero = spawnSync(
+      process.execPath,
+      [bin, "--db", dbPath, "recover", "--summaries", "0"],
+      { encoding: "utf8" },
+    );
+    assert.equal(zero.status, 0);
+    assert.deepEqual(JSON.parse(zero.stdout).summaries, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

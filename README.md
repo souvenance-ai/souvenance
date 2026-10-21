@@ -46,8 +46,9 @@ Invoke as `souvenance <command>` (npm-installed) or `node bin/souvenance.js <com
 
 | Command | Description |
 |---|---|
-| `store <content> [--metadata <json>]` | Store a new memory, print its id |
-| `supersede <old-id> --content <text> [--metadata <json>]` | Store a new version, mark old as superseded |
+| `recover [--directives N] [--summaries N] [--objectives N]` | The recovery ritual in one call: binding directives, the latest summaries (each enriched with its direct edges), open objectives, store stats |
+| `store <content> [--metadata <json>] [--weight <0-1>] [--relation <kind>:<uuid>]...` | Store a new memory, print its id |
+| `supersede <old-id> --content <text> [--metadata <json>] [--weight <0-1>] [--relation <kind>:<uuid>]...` | Store a new version, mark old as superseded |
 | `deprecate <id>` | Soft-delete a memory (mark as deprecated) |
 | `merge <id1> <id2> [<id3> ...] --content <text> [--metadata <json>]` | Combine memories into one |
 | `update <id> --metadata <json>` | Update a memory's metadata (content is immutable) |
@@ -55,18 +56,20 @@ Invoke as `souvenance <command>` (npm-installed) or `node bin/souvenance.js <com
 | `link <from-id> <to-id> --kind <kind> [--metadata <json>]` | Create a typed edge |
 | `unlink <from-id> <to-id> [--kind <kind>]` | Remove one typed edge (kind required when the pair carries several; ambiguous pairs are refused with the candidates) |
 | `search <query> [--where <sql>] [--limit N] [--all]` | FTS5 search, ranked results as JSON |
-| `get <id>` | Print a memory as JSON |
+| `get <id>` | Print a memory as JSON (with its `relations` block: `{out: [...], in: [...]}`) |
 | `list [--where <sql>] [--limit N] [--offset N] [--all]` | List memories by metadata filter |
 | `relations <id> [--direction out\|in\|both]` | List edges to/from a memory |
 | `stats` | Print store statistics as JSON |
 | `tags [--where <sql>] [--all]` | List all distinct metadata tags with counts |
-| `doctor [--fix]` | Validate store integrity (links, edges, kinds, weights, titles, handoff, FTS); exit 1 when findings |
+| `doctor [--fix]` | Validate store integrity (edges, kinds, weights, titles, handoff, FTS); exit 1 when findings |
 | `finish` | Closing ritual in one call: the doctor as a hard gate plus the session obligations it cannot see (summary in the window, experience note, dream debt); exit 1 when blocking findings |
 | `export [--output <dir>]` | Export the entire store as a flat directory of markdown files |
 | `fork <path> [--force]` | Copy the store to a new store file (VACUUM INTO) — an exact copy, nothing added |
 | `serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...` | Serve the store over HTTP as JSON (default `127.0.0.1:3141`); auxiliary stores mount at `/<name>/` |
 
 Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`, `delete`, `link`, `unlink`, and `deprecate` print a one-word confirmation; `fork` prints `{path, memories, edges}`.
+
+**One-gesture writing** — `--relation <kind>:<uuid>` on `store` and `supersede` creates the outgoing edges in the SAME call: no store-then-link two-step, no prose `memory://` citations needed. Full uuids only (refused at the flag when truncated — no prefix ambiguity); repeatable for several edges; direction is outgoing from the stored memory, and on `supersede` the relations attach to the NEW memory while the old→new `supersedes` edge still happens. The `link` verb stays for the rest: reverse directions, retro-fixes, arbitrary cross-memory edges.
 
 `--db <path>` overrides the store location (default: `.souvenance/memory.db`).
 
@@ -102,13 +105,13 @@ Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
 | Endpoint | Description |
 |---|---|
 | `GET /` | List every route |
-| `GET /recover` | Recovery ritual in one call: `{directives, summaries, objectives, stats}` — active `kind: directive` (20) + latest `kind: summary` (3) + open `kind: objective` (10), `?directives&summaries&objectives` limits |
-| `POST /memories` | Store — body `{content, metadata?, weight?}` → `201 {id}` |
+| `GET /recover` | Recovery ritual in one call: `{directives, summaries (each with its direct edges), objectives, stats}` — active `kind: directive` (20) + latest `kind: summary` (3) + open `kind: objective` (10), `?directives&summaries&objectives` limits |
+| `POST /memories` | Store — body `{content, metadata?, weight?, relations?: [{to, kind}]}` → `201 {id}` |
 | `GET /memories` | List — `?where` (local) or `?kind&tag` (structured), `&limit&offset&min-weight&all` |
-| `GET /memories/:id` | Get (bumps `access_count`) |
+| `GET /memories/:id` | Get (bumps `access_count`); carries a `relations` block `{out: [...], in: [...]}` |
 | `PATCH /memories/:id` | Update metadata/weight (content is immutable) |
 | `DELETE /memories/:id?force=1` | Hard delete — guarded, prefer `deprecate` |
-| `POST /memories/:id/supersede` | New version, old marked superseded |
+| `POST /memories/:id/supersede` | New version, old marked superseded; body also takes `relations?: [{to, kind}]` (attached to the NEW memory) |
 | `POST /memories/:id/deprecate` | Soft-delete |
 | `POST /memories/:id/link` | `{to, kind, metadata?}` — typed edge |
 | `DELETE /memories/:id/link` | `{to, kind?}` — removes the edge; kind required when the pair carries several (`409` with the candidates) |
@@ -332,8 +335,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the layout, the domain conventions an
   out-of-date schema is refused (open it read-write once to migrate), every
   write verb throws, and reads leave `access_count` untouched.
 - **Search**: FTS5 full-text search with bm25 ranking, combinable with metadata filters via SQLite JSON1.
-- **Graph**: Typed directed edges between memories (`from → to` with a `kind`); FK cascades delete edges when a memory is removed.
+- **Graph**: Typed directed edges between memories (`from → to` with a `kind`); FK cascades delete edges when a memory is removed. The graph is the single relation surface: `store`/`supersede` accept the outgoing edges in the same call (`relations`), `get` projects both directions at read, and the doctor checks the table itself (orphan/self edges, bridge integrity). `memory://` prose links are the legacy layer: the scheme stays valid and existing links keep meaning, but nothing new cites with them — a dead prose link is history, not corruption (no doctor finding since 0.1.4).
 - **Schema**: Migrates on open — no manual migration step.
-- **IDs**: UUID v4; `memory://<id>` link scheme for referencing memories in content.
+- **IDs**: UUID v4.
 
 See `CONTEXT.md` for the domain glossary and `docs/adr/0001` for the graph-over-triple-store decision.

@@ -23,6 +23,40 @@ export interface Relation {
   resolved_to?: UUID;
 }
 
+/** Both directions of one memory's edges, raw (no resolution — resolved_to
+ *  stays opt-in via the relations verb's --resolved). The read-side
+ *  projection that lets content be self-sufficient: the graph is the
+ *  single relation surface, and reading surfaces project it (see
+ *  .scratch/single-write-graph/). */
+export interface RelationsBlock {
+  out: Relation[];
+  in: Relation[];
+}
+
+/** A memory carrying its projects-at-read relations block (get, and the
+ *  summaries inside recover). */
+export type MemoryWithRelations = Memory & { relations: RelationsBlock };
+
+export interface RecoverOptions {
+  /** Cap on the returned directives (default 20). */
+  directivesLimit?: number;
+  /** Cap on the returned summaries (default 3). */
+  summariesLimit?: number;
+  /** Cap on the returned open objectives (default 10). */
+  objectivesLimit?: number;
+}
+
+/** The recovery ritual in one call — directives, summaries, open objectives
+ *  and stats, exactly the composition the HTTP GET /recover and the MCP
+ *  recover tool serve. Each summary carries its direct edges (RelationsBlock)
+ *  so a fresh session's frontier starts with zero drill-in calls. */
+export interface RecoverReport {
+  directives: Memory[];
+  summaries: MemoryWithRelations[];
+  objectives: Memory[];
+  stats: Stats;
+}
+
 /** One outgoing edge authored in the same gesture as the memory itself —
  *  the one-gesture write that retires the prose-citation practice (see
  *  .scratch/single-write-graph/). The `link` verb stays for arbitrary
@@ -114,9 +148,11 @@ export interface ForkResult {
   edges: number;
 }
 
-/** The doctor's finding-producing checks. See .scratch/memory-doctor/. */
+/** The doctor's finding-producing checks. See .scratch/memory-doctor/ and
+ *  .scratch/single-write-graph/ (broken_links retired: a dead memory://
+ *  prose link is history, not corruption — the edges table is the single
+ *  relation surface and its own integrity checker). */
 export type DoctorCheck =
-  | "broken_links"
   | "orphan_edges"
   | "self_edges"
   | "active_without_kind"

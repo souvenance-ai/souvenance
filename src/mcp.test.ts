@@ -218,6 +218,34 @@ test("mcp: unlink removes an edge; an ambiguous pair is refused with the candida
   }
 });
 
+test("mcp: recover enriches summaries with their direct edges; get projects the block", async () => {
+  const r = rig();
+  try {
+    const decision = (await call(r, "store", { content: "the arc decision", metadata: { kind: "decision" } })).result.id;
+    // One-gesture summary: the summary references the decision in the same call.
+    const summary = (await call(r, "store", {
+      content: "# Summary: the arc",
+      metadata: { kind: "summary" },
+      relations: [{ to: decision, kind: "references" }],
+    })).result.id;
+    const rec = (await call(r, "recover", { summaries_limit: 1 })).result;
+    assert.equal(rec.summaries.length, 1);
+    const s = rec.summaries[0];
+    assert.equal(s.id, summary);
+    assert.equal(s.relations.out.length, 1);
+    assert.equal(s.relations.out[0].kind, "references");
+    assert.equal(s.relations.out[0].to_id, decision);
+    assert.deepEqual(s.relations.in, []);
+
+    // get carries the same projection.
+    const got = (await call(r, "get", { id: summary })).result;
+    assert.equal(got.relations.out.length, 1);
+    assert.equal(got.relations.out[0].to_id, decision);
+  } finally {
+    await r.close();
+  }
+});
+
 test("mcp: recover bundles directives, summaries, objectives and stats", async () => {
   const r = rig();
   try {

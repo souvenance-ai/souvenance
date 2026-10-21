@@ -19,15 +19,14 @@ A persistent, searchable memory for agents: markdown documents stored in a per-p
 
 ## Recovery protocol
 
-At the start of a session, recover prior context in three steps — then stop recovering and start working.
+At the start of a session, recover prior context — then stop recovering and start working.
 
-1. **Load directives** — `list --where "metadata->>'$.kind' = 'directive'" --limit 20`. These are binding rules that must be respected before acting.
-2. **Load recent summaries** — `list --where "metadata->>'$.kind' = 'summary'" --limit 3`. These are the handoff from prior sessions: what was done, key decisions, what's next.
-3. **Load open objectives** — `list --where "metadata->>'$.kind' = 'objective' AND metadata->>'$.state' = 'open'" --limit 10`. These are standing commitments that have no arc and no consumer: they await realization, and only recovery presents them.
+1. **Run `souvenance recover`** — one call: the binding directives (latest 20), the latest 3 summaries **each enriched with its direct edges** (what they reference is already drilled-in), the open objectives (standing commitments that await realization) and the store stats. Limit flags: `--directives N`, `--summaries N`, `--objectives N`.
+2. (Equivalent, verb by verb, if you prefer the manual ritual:) `list --where "metadata->>'$.kind' = 'directive'" --limit 20`, then summaries at `limit 3`, then open objectives at `limit 10`.
 
-**Served store**: when your only access to the store is HTTP (`souvenance serve`), `GET /recover` runs this same ritual in one call — `{directives, summaries, objectives, stats}` — and `GET /<name>/recover` reorients an agent mounted on an auxiliary store read-only, where no CLI verb works. Route details: README "HTTP server".
+**Served store**: when your only access to the store is HTTP (`souvenance serve`), `GET /recover` runs this same ritual in one call — `{directives, summaries (with their edges), objectives, stats}` — and `GET /<name>/recover` reorients an agent mounted on an auxiliary store read-only, where no CLI verb works. Route details: README "HTTP server".
 
-Trust the summaries. They are the recovery point — not a hint to re-derive, but the prior session's finished work. Do not re-run verification (tests, typecheck, git log, stats) that the summaries already report as done. If you need deeper context, follow links from the summaries — the frontier loop starts there, not from scratch.
+Trust the summaries. They are the recovery point — not a hint to re-derive, but the prior session's finished work. Do not re-run verification (tests, typecheck, git log, stats) that the summaries already report as done. If you need deeper context, follow the summaries' edges (already projected) or the frontier loop — not from scratch.
 
 ## Domain vocabulary
 
@@ -38,7 +37,9 @@ See `CONTEXT.md` at the repo root for the canonical glossary: **memory**, **cont
 All commands go through the `souvenance` CLI (`souvenance <command> ...`; inside a repo checkout the same entry is `node bin/souvenance.js <command> ...`). Run `souvenance --help` for the full command reference. One-line examples:
 
 ```
+souvenance recover [--directives N] [--summaries N] [--objectives N]
 souvenance store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}' --weight 0.9
+souvenance store "The decision follows the earlier one" --metadata '{"kind":"decision"}' --relation "references:<uuid>"
 souvenance supersede <old-id> --content "Revised decision: use spaces" --metadata '{"kind":"preference"}' --weight 0.8
 souvenance deprecate <id>
 souvenance merge <id1> <id2> --content "Combined decision" --metadata '{"kind":"decision"}' --weight 0.7
@@ -83,11 +84,13 @@ souvenance search '"design alternatives" rejected'  # phrase AND term
 
 If a search returns nothing, try simpler queries, OR alternatives, or individual keywords drawn from what you're looking for.
 
-## Memory links
+## Memory links (legacy layer — retired as practice since 0.1.4)
 
-A **memory link** is a `memory://<uuid>` reference inside a memory's content. The `get` command resolves it to the full memory. Markdown links to external resources (http URLs, file paths) are just authored text — they are not graph edges.
+A **memory link** is a `memory://<uuid>` reference inside a memory's content. The scheme stays valid and the ~170 existing links keep meaning — they are proof of the past, never rewritten (addition-only). But the edges table is the **single relation surface**: nothing new cites with prose links.
 
-A memory link is distinct from a **relation**: a link is authored text in content; a relation is a searchable graph edge created via `link`. A link may optionally be materialized into a relation, but the two are separate concepts.
+Since 0.1.4 the writing gesture absorbs the relation: `store` and `supersede` accept `--relation <kind>:<uuid>` (CLI) / a `relations: [{to, kind}]` option (MCP/HTTP) and create the outgoing edges **in the same call**. Reading surfaces project the graph: `get` returns a `relations` block (`{out: [...], in: [...]}`), and `recover` enriches each summary with its direct edges. Content no longer needs inline citations to be self-sufficient.
+
+The `link` verb stays for everything one-gesture writing cannot express: reverse directions, retro-fixes, arbitrary cross-memory edges. A dead prose link (pointing at a deleted memory) is history, not corruption — the doctor no longer reports it.
 
 ## Evolving memories (addition-only model)
 
@@ -104,9 +107,9 @@ Content is immutable — never overwrite a memory. Instead of updating or deleti
 A memory is read by a future session that has no prior context — write accordingly:
 
 - **Self-contained.** Each memory should make sense on its own. A reader who never saw this session should understand it without preamble.
-- **One concept per memory.** Split dense paragraphs covering multiple decisions into separate memories, then `link` them. Single-concept memories are more retrievable (better search hits) and more linkable (sharper graph edges).
+- **One concept per memory.** Split dense paragraphs covering multiple decisions into separate memories, and connect them with `--relation` in the same store call. Single-concept memories are more retrievable (better search hits) and more linkable (sharper graph edges).
 - **Include search keywords.** Use the words you'd search for — terms of art, names, identifiers — directly in the content. FTS5 matches tokens, not semantics; if the keyword isn't in the text, the search won't find it.
-- **Revise, don't overwrite.** When a decision changes, `supersede` the old memory rather than updating its content. This preserves the history of what was decided and when it changed.
+- **Revise, don't overwrite.** When a decision changes, `supersede` the old memory rather than updating its content. This preserves the history of what was decided and when it changed — and `--relation` works on supersede too (the edges attach to the NEW memory).
 
 ## Exploration: the frontier loop
 
@@ -151,7 +154,7 @@ Run them in order. Each uses existing CLI commands — dreaming is a workflow, n
    - Directives, summaries, and objectives should stay high (≥ 0.8) regardless of age — they are binding, high-signal, or standing intent. Objectives in particular accumulate no incoming edges over time (the work done under them cites arc decisions, not the objective) — never decay them for age or edge scarcity.
    - Use `souvenance update <id> --weight <0-1>` to adjust.
 
-5. **Synthesize** — after relinking, merging, superseding, and rebalancing, look for **emergent patterns** the graph reveals that no single memory captures. Store a `kind: "dream"` memory that narrates the pattern — connections, tensions, or themes that surfaced during consolidation. This is the dream itself: not a fact, but a revelation. Link it to the memories it draws from.
+5. **Synthesize** — after relinking, merging, superseding, and rebalancing, look for **emergent patterns** the graph reveals that no single memory captures. Store a `kind: "dream"` memory that narrates the pattern — connections, tensions, or themes that surfaced during consolidation — and cite by graph: pass `--relation "references:<id>"` for the memories it draws from, in the same store call. This is the dream itself: not a fact, but a revelation.
 
 ### Dream memory format
 
@@ -171,7 +174,7 @@ Run them in order. Each uses existing CLI commands — dreaming is a workflow, n
 <the emergent insight — what the graph revealed that no single memory contained>
 
 ## Links
-<memory:// links to the memories this dream draws from>
+<the ids this dream draws from — connected as graph edges (the store call carried --relation), not prose links>
 ```
 
 ### What dreaming is not

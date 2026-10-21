@@ -51,8 +51,8 @@ function packageVersion(): string {
  *  markdown skill (decision ae1259fd). */
 const INSTRUCTIONS = `souvenance: a persistent, searchable memory for agents — markdown memories in a per-project SQLite store, connected by a typed directed graph.
 
-Ritual: run recover FIRST — it loads the binding directives, the latest summaries (the handoff from prior sessions), the open objectives (standing commitments) and the store stats. Search when you need context you don't have; trust the summaries as the recovery point.
-Write one concept per memory, self-contained, with search keywords in the text (search matches tokens, not semantics). Link new memories to related ones — an unlinked memory is an island.
+Ritual: run recover FIRST — it loads the binding directives, the latest summaries (the handoff from prior sessions, each enriched with its direct edges), the open objectives (standing commitments) and the store stats. Search when you need context you don't have; trust the summaries as the recovery point.
+Write one concept per memory, self-contained, with search keywords in the text (search matches tokens, not semantics). Author the outgoing edges in the SAME call via store's relations option — no store-then-link two-step; an unlinked memory is an island.
 Before ending a session: store the summary and the experience note, then run finish — it gates on doctor and surfaces the session obligations (summary, experience note, dream debt). A session is closable — a relaunch recommendable — only when finish reports healthy.
 Content is immutable: supersede a changed decision, deprecate a stale one, merge duplicates — delete only with force. Weight is importance 0-1 (0.9 binding, 0.5 routine).`;
 
@@ -163,7 +163,7 @@ export const TOOLS: McpTool[] = [
   {
     name: "recover",
     description:
-      "The recovery ritual in one call: binding directives (kind: directive, latest 20), the latest 3 summaries (prior sessions' handoff), the open objectives (the standing register, kind: objective, state: open) and store stats. Run this FIRST, before any work.",
+      "The recovery ritual in one call: binding directives (kind: directive, latest 20), the latest 3 summaries (each enriched with its direct edges — the frontier starts drilled-in), the open objectives (the standing register, kind: objective, state: open) and store stats. Run this FIRST, before any work.",
     inputSchema: {
       type: "object",
       properties: {
@@ -172,21 +172,16 @@ export const TOOLS: McpTool[] = [
         objectives_limit: { type: "integer", minimum: 0, description: "default 10" },
       },
     },
-    run: (store, args) => ({
-      directives: store.list({
-        where: "metadata->>'$.kind' = 'directive'",
-        limit: optInteger(args, "directives_limit") ?? 20,
-      }),
-      summaries: store.list({
-        where: "metadata->>'$.kind' = 'summary'",
-        limit: optInteger(args, "summaries_limit") ?? 3,
-      }),
-      objectives: store.list({
-        where: "metadata->>'$.kind' = 'objective' AND metadata->>'$.state' = 'open'",
-        limit: optInteger(args, "objectives_limit") ?? 10,
-      }),
-      stats: store.stats(),
-    }),
+    run: (store, args) => {
+      const directivesLimit = optInteger(args, "directives_limit");
+      const summariesLimit = optInteger(args, "summaries_limit");
+      const objectivesLimit = optInteger(args, "objectives_limit");
+      return store.recover({
+        ...(directivesLimit !== undefined ? { directivesLimit } : {}),
+        ...(summariesLimit !== undefined ? { summariesLimit } : {}),
+        ...(objectivesLimit !== undefined ? { objectivesLimit } : {}),
+      });
+    },
   },
   {
     name: "store",

@@ -660,6 +660,13 @@ test("server: GET /recover — the recovery ritual as one resource", async () =>
     assert.deepEqual(rec.json.summaries.map((m: { id: string }) => m.id), [s2, s1]);
     assert.ok(!JSON.stringify(rec.json).includes("summary old"));
 
+    // Each summary carries its direct edges — the read-side projection that
+    // lets a fresh session's frontier start drilled-in (single-write-graph).
+    const enriched = rec.json.summaries.find((m: { id: string }) => m.id === s2);
+    assert.ok(enriched.relations, "the summary carries a relations block");
+    assert.deepEqual(enriched.relations.out, []);
+    assert.deepEqual(enriched.relations.in, []);
+
     // params override the ritual limits
     const oneSummary = await call(app, "GET", "/recover?summaries=1");
     assert.deepEqual(oneSummary.json.summaries.map((m: { id: string }) => m.id), [s2]);

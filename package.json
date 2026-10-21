@@ -1,6 +1,6 @@
 {
   "name": "@souvenance/cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Persistent, searchable agent memory in a per-project SQLite store",
   "license": "MIT",
   "files": [
