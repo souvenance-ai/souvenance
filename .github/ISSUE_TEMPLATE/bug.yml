@@ -1,0 +1,53 @@
+name: Bug report
+description: Something broke — install, CLI, HTTP server, MCP, or the store itself
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: run `souvenance doctor` — most store problems diagnose themselves. Paste the findings below if they are not clean.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - CLI
+        - HTTP server
+        - MCP
+        - Install / npm
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`npm ls -g @souvenance/cli`, or paste the exact `npx @souvenance/cli@<version>` command you ran. (The CLI does not yet print a `--version`.)"
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: "`node --version` — souvenance requires Node 24+ (`node:sqlite`)."
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: The exact commands and their output, from a scratch directory if possible.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: "`souvenance doctor` output — leave empty if clean."

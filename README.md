@@ -1,30 +1,48 @@
 # souvenance
 
-Persistent, searchable agent memory: markdown documents stored in a per-project SQLite database, connected by a typed directed graph.
+Persistent, searchable agent memory: markdown documents stored in a per-project SQLite database, connected by a typed directed graph. An agent's memory survives session restarts, mounts anywhere (CLI, HTTP, MCP), and evolves the way minds do — decisions are superseded, never overwritten; the graph is consolidated, never pruned.
 
-## Requirements
+## Install
 
-- **Node.js 22+** (uses the built-in `node:sqlite` module)
+```bash
+npm install -g @souvenance/cli     # or zero-install: npx @souvenance/cli --help
+souvenance --help
+```
 
-## Quick start
+Requires **Node.js 24+** (uses the built-in `node:sqlite` module). Two bins ship, one entry file: `souvenance` is the product's name; `memory` is a transition alias from the project's `ai-memory` era — same file, same verbs, existing muscle memory keeps working.
+
+## 60-second quickstart
 
 ```bash
 # Store a memory
-node bin/souvenance.js store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}'
+souvenance store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}' --weight 0.9
 
 # Search for it later
-node bin/souvenance.js search "tabs spaces"
+souvenance search "tabs spaces"
 
-# Link two memories with a typed relation
-node bin/souvenance.js link <from-id> <to-id> --kind references
-
-# See all commands
-node bin/souvenance.js --help
+# Check the store's health
+souvenance doctor
 ```
 
-The store lives at `.souvenance/memory.db` (gitignored). One store per project.
+The store lives at `.souvenance/memory.db` (add `.souvenance/` to `.gitignore`). One store per project — the first command creates it. Memories are markdown with queryable JSON metadata, connected by typed relations (`souvenance link <from-id> <to-id> --kind references`); search is SQLite FTS5 ranked by bm25 × weight × recency. This quickstart is proven from a cold `npx` — no clone, no build, a scratch directory.
+
+## The three surfaces
+
+Every surface speaks the same verbs and returns the same JSON shapes — one library underneath:
+
+| Surface | Command | For |
+|---|---|---|
+| **CLI** | `souvenance <verb>` | A single agent on its own machine — daily store, search, link, finish |
+| **HTTP** | `souvenance serve` | Long-lived, cross-machine consumption — token grants, `GET /recover`, multi-store mounts |
+| **MCP** | `souvenance mcp` | Any MCP client: the memory as first-class typed tools, no skill needed |
+
+## Agents: load the skill
+
+The daily practice — the recovery ritual at session start (directives, summaries, open objectives), decisions stored the moment they happen, the closing `finish` ritual, threshold-triggered dreaming — lives in two skills, [`souvenance`](.agents/skills/souvenance/SKILL.md) (daily use) and [`souvenance-setup`](.agents/skills/souvenance-setup/SKILL.md) (first-time setup for a new project). Mount once, and every session compounds.
 
 ## CLI commands
+
+Invoke as `souvenance <command>` (npm-installed) or `node bin/souvenance.js <command>` (repo checkout). Reference:
 
 | Command | Description |
 |---|---|
@@ -253,7 +271,10 @@ the same library behind a typed-tool surface any MCP client can mount —
 an agent gets the memory as first-class tools, no markdown skill needed.
 
 ```sh
-# OpenCode — project or --global
+# OpenCode (CLI installed via npm):
+opencode mcp add souvenance -- souvenance mcp
+
+# OpenCode (repo checkout):
 opencode mcp add souvenance -- node /path/to/souvenance/bin/souvenance.js mcp
 ```
 
@@ -294,10 +315,12 @@ opencode mcp add souvenance -- node /path/to/souvenance/bin/souvenance.js mcp
 ## Development
 
 ```bash
-yarn install
+yarn install       # yarn 4; Node.js 24+ required
 yarn typecheck    # tsc --noEmit
 yarn test         # node --experimental-strip-types --test src/**/*.test.ts
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the layout, the domain conventions and how to file bugs.
 
 ## How it works
 
