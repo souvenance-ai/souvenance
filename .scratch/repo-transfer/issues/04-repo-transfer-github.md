@@ -37,4 +37,10 @@ new owner `souvenance-ai`, name `souvenance`. GitHub redirects the old URL
 
 ## Resolution
 
-(done — after the bundled push ask)
+DONE (2026-10-21): push ask granted → `git push origin main` (7a6403a..3711f34,
+the old remote's last push); `gh api -X POST repos/lifaon74/ai-memory/transfer
+-f new_owner=souvenance-ai -f new_name=souvenance` → 202 Accepted; redirect
+verified (`gh api repos/lifaon74/ai-memory --jq .full_name` →
+`souvenance-ai/souvenance`); local remote set-url to the new origin + fetch
+green; package.json `repository` field (committed in 3711f34) correct
+pre-transfer via redirect, exact post-transfer.

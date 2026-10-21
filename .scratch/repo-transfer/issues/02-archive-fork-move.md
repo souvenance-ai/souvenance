@@ -1,6 +1,6 @@
 # 02 — archive fork move (Valentin's backup software)
 
-Status: ready-for-human
+Status: resolved (agent-side done; Valentin-side acts: backup-software paths, his hands)
 Type: task
 
 `archive.db` is the archive fork produced/maintained by Valentin's personal
@@ -28,4 +28,8 @@ directory (`.souvenance/archive.db`, 816K, 0644) — it already moved with the
 
 ## Resolution
 
-(done — Valentin answers in the bundled ask)
+COORDINATED (2026-10-21): bundled ask answered "Je gère mon côté" — Valentin
+updates the paths in his own backup software; archive.db stays 0644 until he
+does (opening it with souvenance later would tighten it to 0600). The file
+itself already sits at `.souvenance/archive.db` (moved with ticket 01's mv).
+No agent action pending.
