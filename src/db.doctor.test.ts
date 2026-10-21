@@ -117,6 +117,24 @@ test("doctor: orphan_edges finds an edge row with a missing endpoint", () => {
   }
 });
 
+test("doctor: self_edges finds a from_id = to_id edge; the hint is the unlink repair", () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const { a } = healthyPair(store);
+    store.link(a, a, "references");
+    const report = store.doctor();
+    assert.equal(report.findings.length, 1);
+    assert.equal(report.findings[0].check, "self_edges");
+    assert.match(report.findings[0].detail, new RegExp(a));
+    assert.match(report.findings[0].hint, new RegExp(`unlink ${a} ${a} --kind references`));
+    // The repair path is the verb itself — doctor clean after it.
+    store.unlink(a, a, "references");
+    assert.equal(store.doctor().findings.length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
 test("doctor: active_without_kind finds null metadata and kindless metadata", () => {
   const { store, cleanup } = tempStore();
   try {

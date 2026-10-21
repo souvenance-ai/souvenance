@@ -105,6 +105,7 @@ export interface ForkResult {
 export type DoctorCheck =
   | "broken_links"
   | "orphan_edges"
+  | "self_edges"
   | "active_without_kind"
   | "weight_bounds"
   | "invalid_metadata_json"

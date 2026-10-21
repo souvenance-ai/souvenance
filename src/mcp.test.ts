@@ -102,7 +102,7 @@ test("mcp: tools/list exposes the CLI verb set, one input schema each", async ()
     const [response] = await r.rpc([JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })], 1);
     const names = response.result.tools.map((t: any) => t.name);
     for (const expected of [
-      "recover", "store", "supersede", "merge", "update", "link", "deprecate", "delete",
+      "recover", "store", "supersede", "merge", "update", "link", "unlink", "deprecate", "delete",
       "get", "search", "list", "relations", "tags", "stats", "doctor", "finish",
     ]) {
       assert.ok(names.includes(expected), `missing tool: ${expected}`);
@@ -177,6 +177,42 @@ test("mcp: lifecycle — supersede, deprecate, merge, update, delete-with-force"
     assert.match(refused.text, /force/);
     await call(r, "delete", { id: a, force: true });
     assert.equal((await call(r, "get", { id: a })).result, null);
+  } finally {
+    await r.close();
+  }
+});
+
+test("mcp: unlink removes an edge; an ambiguous pair is refused with the candidates", async () => {
+  const r = rig();
+  try {
+    const a = (await call(r, "store", { content: "alpha", metadata: { kind: "note" } })).result.id;
+    const b = (await call(r, "store", { content: "beta", metadata: { kind: "note" } })).result.id;
+    const linked = await call(r, "link", { from: a, to: b, kind: "references" });
+    assert.equal(linked.result, "linked");
+    const unlinked = await call(r, "unlink", { from: a, to: b });
+    assert.equal(unlinked.result, "unlinked");
+    assert.equal((await call(r, "relations", { id: a, direction: "out" })).result.length, 0);
+
+    // Transposed ids surface the reverse edges instead of a bare not-found.
+    await call(r, "link", { from: b, to: a, kind: "references" });
+    const transposed = await call(r, "unlink", { from: a, to: b });
+    assert.equal(transposed.isError, true);
+    assert.match(transposed.text, /edges exist in the reverse direction/);
+    await call(r, "unlink", { from: b, to: a, kind: "references" });
+
+    // Two kinds on the SAME direction: the refusal carries the candidates.
+    await call(r, "link", { from: a, to: b, kind: "references" });
+    await call(r, "link", { from: a, to: b, kind: "extends" });
+    const ambiguous = await call(r, "unlink", { from: a, to: b });
+    assert.equal(ambiguous.isError, true);
+    assert.match(ambiguous.text, /ambiguous: 2 edges between .* and .*, pass --kind: extends, references/);
+
+    // The explicit kind removes exactly that edge (the tool's repair path).
+    const one = await call(r, "unlink", { from: a, to: b, kind: "extends" });
+    assert.equal(one.result, "unlinked");
+    const remaining = (await call(r, "relations", { id: a, direction: "out" })).result;
+    assert.equal(remaining.length, 1);
+    assert.equal(remaining[0].kind, "references");
   } finally {
     await r.close();
   }

@@ -91,6 +91,10 @@ export function statusFor(err: unknown): 400 | 401 | 403 | 404 | 409 | 413 | 500
   if (err instanceof HttpError) return err.status;
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.startsWith("memory not found:")) return 404;
+  if (msg.startsWith("edge not found:")) return 404;
+  // An edge-removal refusal (several kinds join the pair; a reverse-direction
+  // edge exists) — a conflict with the request, not a client-syntax error.
+  if (msg.startsWith("ambiguous:")) return 409;
   if (/^cannot .* a memory with status '/.test(msg)) return 409;
   // The store itself refuses (read-only open) — the lib-level floor behind
   // the ro mount middleware; 409 like every serving-mode conflict.
@@ -555,6 +559,7 @@ const ENDPOINTS: Array<{ method: string; path: string; note: string }> = [
   { method: "POST", path: "/memories/:id/supersede", note: "supersede {content, metadata?, weight?} -> 201 {id}" },
   { method: "POST", path: "/memories/:id/deprecate", note: "soft-delete" },
   { method: "POST", path: "/memories/:id/link", note: "link {to, kind, metadata?} -> 201" },
+  { method: "DELETE", path: "/memories/:id/link", note: "unlink {to, kind?} — removes the edge; kind required when the pair carries several (409 with the candidates)" },
   { method: "GET", path: "/memories/:id/relations", note: "relations ?direction=in|out|both&resolve=1" },
   { method: "POST", path: "/merge", note: "merge {ids, content, metadata?, weight?} -> 201 {id}" },
   { method: "GET", path: "/search", note: "search ?q&where|kind&tag&limit&all" },
@@ -707,6 +712,23 @@ function registerStoreRoutes(app: MemoryApp, prefix: string, resolve: StoreResol
     const kind = body["kind"];
     resolve().link(from, to, kind, { metadata: checkMetadata(body["metadata"]) ?? {} });
     return c.json({ from_id: from, to_id: to, kind }, 201);
+  });
+
+  app.delete(`${prefix}/memories/:id/link`, async (c) => {
+    const from = c.req.param("id");
+    const body = await readJson(c);
+    if (typeof body["to"] !== "string" || body["to"].length === 0) {
+      throw new HttpError(400, "to must be a memory id string");
+    }
+    let kind: string | undefined;
+    if (body["kind"] !== undefined) {
+      if (typeof body["kind"] !== "string" || body["kind"].length === 0) {
+        throw new HttpError(400, "kind must be a non-empty string when given");
+      }
+      kind = body["kind"];
+    }
+    resolve().unlink(from, body["to"], kind);
+    return c.json({ from_id: from, to_id: body["to"], status: "unlinked" });
   });
 
   app.get(`${prefix}/memories/:id/relations`, (c) => {

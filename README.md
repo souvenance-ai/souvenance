@@ -53,6 +53,7 @@ Invoke as `souvenance <command>` (npm-installed) or `node bin/souvenance.js <com
 | `update <id> --metadata <json>` | Update a memory's metadata (content is immutable) |
 | `delete <id> --force` | Delete a memory (destructive; prefer `deprecate`) |
 | `link <from-id> <to-id> --kind <kind> [--metadata <json>]` | Create a typed edge |
+| `unlink <from-id> <to-id> [--kind <kind>]` | Remove one typed edge (kind required when the pair carries several; ambiguous pairs are refused with the candidates) |
 | `search <query> [--where <sql>] [--limit N] [--all]` | FTS5 search, ranked results as JSON |
 | `get <id>` | Print a memory as JSON |
 | `list [--where <sql>] [--limit N] [--offset N] [--all]` | List memories by metadata filter |
@@ -65,7 +66,7 @@ Invoke as `souvenance <command>` (npm-installed) or `node bin/souvenance.js <com
 | `fork <path> [--force]` | Copy the store to a new store file (VACUUM INTO) — an exact copy, nothing added |
 | `serve [--port N] [--host <addr>] [--store <name>=<path>[:rw]]...` | Serve the store over HTTP as JSON (default `127.0.0.1:3141`); auxiliary stores mount at `/<name>/` |
 
-Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`, `delete`, `link`, and `deprecate` print a one-word confirmation; `fork` prints `{path, memories, edges}`.
+Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`, `delete`, `link`, `unlink`, and `deprecate` print a one-word confirmation; `fork` prints `{path, memories, edges}`.
 
 `--db <path>` overrides the store location (default: `.souvenance/memory.db`).
 
@@ -110,6 +111,7 @@ Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
 | `POST /memories/:id/supersede` | New version, old marked superseded |
 | `POST /memories/:id/deprecate` | Soft-delete |
 | `POST /memories/:id/link` | `{to, kind, metadata?}` — typed edge |
+| `DELETE /memories/:id/link` | `{to, kind?}` — removes the edge; kind required when the pair carries several (`409` with the candidates) |
 | `GET /memories/:id/relations` | `?direction=in\|out\|both&resolve=1` |
 | `POST /merge` | `{ids, content, ...}` — combine memories |
 | `GET /search?q=...` | FTS5 search, ranked results — `&where` (local) or `&kind&tag` (structured), `&limit&all` |
