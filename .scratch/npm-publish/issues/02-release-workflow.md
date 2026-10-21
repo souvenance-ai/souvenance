@@ -1,7 +1,7 @@
 # 02 — release workflow (tag-driven, trusted publishing)
 
 Type: task
-Status: resolved (workflow written; live verification pending the first post-first-publish tag)
+Status: resolved (live-verified: v0.1.2 tagged on merge and published, dispatch run 39613623714 green)
 
 ## Resolution (2026-10-21, commit npm-publish arc)
 

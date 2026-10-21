@@ -1,6 +1,6 @@
 # 04 — repo transfer lifaon74/ai-memory → souvenance-ai/souvenance
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 
 Valentin ordered phase 3 ("go pour la phase 3"). The arc objective lists the

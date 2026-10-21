@@ -1,6 +1,6 @@
 # 01 — store-path default + dogfood move
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 
 Rename the default store path `.ai-memory/memory.db` → `.souvenance/memory.db`
