@@ -23,8 +23,8 @@ __metadata:
     hono: "npm:^4.13.13"
     typescript: "npm:5.8.3"
   bin:
-    memory: bin/souvenance.js
-    souvenance: bin/souvenance.js
+    memory: dist/bin/souvenance.js
+    souvenance: dist/bin/souvenance.js
   languageName: unknown
   linkType: soft
 
