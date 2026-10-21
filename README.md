@@ -1,4 +1,4 @@
-# ai-memory
+# souvenance
 
 Persistent, searchable agent memory: markdown documents stored in a per-project SQLite database, connected by a typed directed graph.
 
@@ -10,16 +10,16 @@ Persistent, searchable agent memory: markdown documents stored in a per-project 
 
 ```bash
 # Store a memory
-node bin/memory.js store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}'
+node bin/souvenance.js store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}'
 
 # Search for it later
-node bin/memory.js search "tabs spaces"
+node bin/souvenance.js search "tabs spaces"
 
 # Link two memories with a typed relation
-node bin/memory.js link <from-id> <to-id> --kind references
+node bin/souvenance.js link <from-id> <to-id> --kind references
 
 # See all commands
-node bin/memory.js --help
+node bin/souvenance.js --help
 ```
 
 The store lives at `.ai-memory/memory.db` (gitignored). One store per project.
@@ -53,13 +53,13 @@ Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failu
 
 ### Fork — copies, not backups
 
-`memory fork <path>` copies the store to a new store file: an exact `VACUUM INTO` snapshot — safe under concurrent writers, compacted, FTS index included, and nothing added. From birth the two stores are individuals: they never re-sync and never cross-write. Restoring an old fork is a rebirth, never a resync (see `docs/adr/0002-fork-never-sync.md`).
+`souvenance fork <path>` copies the store to a new store file: an exact `VACUUM INTO` snapshot — safe under concurrent writers, compacted, FTS index included, and nothing added. From birth the two stores are individuals: they never re-sync and never cross-write. Restoring an old fork is a rebirth, never a resync (see `docs/adr/0002-fork-never-sync.md`).
 
-A fork that should know its origin gets told by its forker, in the forker's own words: `memory --db <fork> store "..."` after the copy — the tool does not presume the narrative (archive, gift, sandbox, product seed). `fork` deliberately does no scheduling and no transport: keeping copies off-disk and fresh is the installer's backup software's job. An existing target is refused without `--force` — a fork never clobbers an individual silently.
+A fork that should know its origin gets told by its forker, in the forker's own words: `souvenance --db <fork> store "..."` after the copy — the tool does not presume the narrative (archive, gift, sandbox, product seed). `fork` deliberately does no scheduling and no transport: keeping copies off-disk and fresh is the installer's backup software's job. An existing target is refused without `--force` — a fork never clobbers an individual silently.
 
 ### Finish — the closing ritual
 
-`memory finish` is the closing counterpart of `GET /recover`: one call that bundles every obligation an ending session owes. It runs `doctor` first as a hard gate — never finish, dream or recommend a relaunch over a sick store — then checks what the doctor is deliberately blind to, because it validates the store, not the session:
+`souvenance finish` is the closing counterpart of `GET /recover`: one call that bundles every obligation an ending session owes. It runs `doctor` first as a hard gate — never finish, dream or recommend a relaunch over a sick store — then checks what the doctor is deliberately blind to, because it validates the store, not the session:
 
 - **summary in the window** — memories stored in the last 24h with no summary: the register is not self-sufficient for a fresh session (block);
 - **experience note** — the standing evaluation is owed per session that stored memories (block);
@@ -69,13 +69,13 @@ Read-only, diagnosis-not-error exit semantics like `doctor`: exit 1 when blockin
 
 ## HTTP server
 
-`memory serve` runs a long-lived process that consumes the **library** directly
+`souvenance serve` runs a long-lived process that consumes the **library** directly
 (`~1.3ms` per operation) instead of paying the CLI's process-spawn cost
 (~40–100ms per call). The root routes serve the process's own store — pick it
 with `--db`:
 
 ```bash
-node bin/memory.js --db .ai-memory/memory.db serve --port 3141
+node bin/souvenance.js --db .ai-memory/memory.db serve --port 3141
 ```
 
 Routes mirror the CLI verbs 1:1 and return the same JSON shapes:
@@ -120,7 +120,7 @@ To *read* other stores (mirroring, evaluation), declare them at startup —
 they mount the same verb routes under a name:
 
 ```bash
-node bin/memory.js serve \
+node bin/souvenance.js serve \
   --store alice=/path/to/alice/.ai-memory/memory.db \
   --store bench=/tmp/bench.db:rw   # :rw opts into writes (read-only by default)
 ```
@@ -153,7 +153,7 @@ binding a **non-loopback** host (anything but `127.0.0.1`, `::1`,
 `localhost`) **without token grants refuses to start**.
 
 ```bash
-node bin/memory.js serve \
+node bin/souvenance.js serve \
   --token valentin=$(openssl rand -hex 32) \
   --token ci=$(openssl rand -hex 32)@notes \
   --token writer=$(openssl rand -hex 32)@root:rw:where
@@ -177,7 +177,7 @@ node bin/memory.js serve \
   `--token`) reads an env-style file instead:
 
   ```bash
-  # /etc/ai-memory/tokens.env  — chmod 600
+  # /etc/souvenance/tokens.env  — chmod 600
   # one grant per line: MEMORY_TOKEN_<agent>=<secret>[@<store>][:rw][:where]
   MEMORY_TOKEN_valentin=6c4b...            # process store, read-only
   export MEMORY_TOKEN_ci=9f1e...@notes     # 'export' accepted, comments too
@@ -225,7 +225,7 @@ startup — the exact URLs to hand a remote agent — plus the
 plaintext-HTTP reminder:
 
 ```
-memory server listening on http://0.0.0.0:3141 ...
+souvenance server listening on http://0.0.0.0:3141 ...
   exposed: http://192.168.1.42:3141
   note: plaintext HTTP — terminate TLS at a reverse proxy (Caddy/nginx) or use a private overlay (Tailscale/WireGuard); the bearer boundary travels end-to-end
 ```
@@ -246,22 +246,22 @@ Request caps (every mode):
 
 ### MCP — the typed-tool surface
 
-`memory mcp` speaks **MCP over stdio** (JSON-RPC 2.0, newline-delimited):
+`souvenance mcp` speaks **MCP over stdio** (JSON-RPC 2.0, newline-delimited):
 the same library behind a typed-tool surface any MCP client can mount —
 an agent gets the memory as first-class tools, no markdown skill needed.
 
 ```sh
 # OpenCode — project or --global
-opencode mcp add memory -- node /path/to/ai-memory/bin/memory.js mcp
+opencode mcp add souvenance -- node /path/to/souvenance/bin/souvenance.js mcp
 ```
 
 ```jsonc
 {
   "mcp": {
     "servers": {
-      "memory": {
+      "souvenance": {
         "type": "local",
-        "command": ["node", "/path/to/ai-memory/bin/memory.js", "mcp"],
+        "command": ["node", "/path/to/souvenance/bin/souvenance.js", "mcp"],
       },
     },
   },

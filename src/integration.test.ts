@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { Store } from "./db.ts";
 
 function tempStore(): { store: Store; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   return {
     store,
@@ -112,9 +112,9 @@ test("integration: full end-to-end flow against a temp DB", () => {
 
 test("integration: CLI-reachable end-to-end via execSync", async () => {
   const { execSync } = await import("node:child_process");
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-cli-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-cli-test-"));
   const dbPath = join(dir, "memory.db");
-  const bin = join(process.cwd(), "bin", "memory.js");
+  const bin = join(process.cwd(), "bin", "souvenance.js");
 
   function run(args: string): string {
     return execSync(`node ${bin} --db ${dbPath} ${args}`, {

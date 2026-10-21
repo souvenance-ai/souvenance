@@ -7,7 +7,7 @@ import { Store } from "./db.ts";
 import { createApp, parseStoreSpec, type DeclaredStore } from "./server.ts";
 
 function tempApp(): { app: ReturnType<typeof createApp>; store: Store; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-server-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-server-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   const app = createApp(store);
   return {
@@ -44,7 +44,7 @@ test("server: root describes the service", async () => {
   try {
     const { status, json } = await call(app, "GET", "/");
     assert.equal(status, 200);
-    assert.equal(json.name, "ai-memory");
+    assert.equal(json.name, "souvenance");
     assert.ok(json.endpoints.length > 0);
   } finally {
     cleanup();
@@ -379,7 +379,7 @@ function tempMultiApp(
   opened: Array<{ dbPath: string; store: Store }>;
   cleanup: () => void;
 } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-server-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-server-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   const opened: Array<{ dbPath: string; store: Store }> = [];
   const app = createApp(store, {
@@ -637,7 +637,7 @@ test("server: recover joins the reserved store names", () => {
 });
 
 test("server: createApp rejects duplicate store names", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-server-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-server-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   try {
     assert.throws(

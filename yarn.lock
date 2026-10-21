@@ -14,6 +14,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@souvenance/cli@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "@souvenance/cli@workspace:."
+  dependencies:
+    "@hono/node-server": "npm:^2.1.5"
+    "@types/node": "npm:^26.2.0"
+    hono: "npm:^4.13.13"
+    typescript: "npm:5.8.3"
+  bin:
+    memory: bin/souvenance.js
+    souvenance: bin/souvenance.js
+  languageName: unknown
+  linkType: soft
+
 "@types/node@npm:^26.2.0":
   version: 26.2.0
   resolution: "@types/node@npm:26.2.0"
@@ -22,19 +36,6 @@ __metadata:
   checksum: 10c0/f8566d88162241eb55a46f7e4ea097188eab0aaafefea7a58e63adab8c4144eb98c08b7911452c846104c339a0f82282f5e1ed4b26b578d60709614fe2843f4d
   languageName: node
   linkType: hard
-
-"ai-memory@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "ai-memory@workspace:."
-  dependencies:
-    "@hono/node-server": "npm:^2.1.5"
-    "@types/node": "npm:^26.2.0"
-    hono: "npm:^4.13.13"
-    typescript: "npm:5.8.3"
-  bin:
-    memory: bin/memory.js
-  languageName: unknown
-  linkType: soft
 
 "hono@npm:^4.13.13":
   version: 4.13.13

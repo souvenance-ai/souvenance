@@ -8,7 +8,7 @@ import { createApp, exposedAddresses, MAX_BODY_BYTES, MAX_LIMIT } from "./server
 
 /** A temp store + app (local mode — caps are mode-independent). */
 function tempApp(): { app: ReturnType<typeof createApp>; store: Store; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-caps-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-caps-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   const app = createApp(store);
   return {

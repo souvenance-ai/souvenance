@@ -15,7 +15,7 @@ const SECRET_CLI = "deadbeefdeadbeefdeadbeefdeadbeef";
 /** A temp dir with a file written at an explicit mode (new files default to
  * 0644 — every token file in these tests is chmod'd deliberately). */
 function tempFile(name: string, content: string, mode = 0o600): { path: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-tokenfile-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-tokenfile-test-"));
   const path = join(dir, name);
   writeFileSync(path, content);
   chmodSync(path, mode);
@@ -24,7 +24,7 @@ function tempFile(name: string, content: string, mode = 0o600): { path: string; 
 
 /** A temp store + app in token mode with the given grants. */
 function tempApp(tokens: TokenGrant[]): { app: ReturnType<typeof createApp>; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-tokenfile-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-tokenfile-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   const app = createApp(store, { tokens, host: "127.0.0.1" });
   return {

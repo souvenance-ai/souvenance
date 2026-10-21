@@ -41,7 +41,7 @@ import type { Direction, StoreOptions, UpdateOptions } from "./types.ts";
  * HTTP client gets the exact contract documented in SKILL.md / bin HELP.
  */
 
-/** Default listen address for `memory serve`. */
+/** Default listen address for `souvenance serve`. */
 export const DEFAULT_PORT = 3141;
 export const DEFAULT_HOST = "127.0.0.1";
 
@@ -59,7 +59,7 @@ export const MAX_BODY_BYTES = 1024 * 1024;
  */
 export const MAX_LIMIT = 1000;
 
-/** The long-lived listener's explicit timeouts (wired in bin/memory.js). */
+/** The long-lived listener's explicit timeouts (wired in bin/souvenance.js). */
 export const REQUEST_TIMEOUT_MS = 30_000;
 export const HEADERS_TIMEOUT_MS = 10_000;
 export const KEEPALIVE_TIMEOUT_MS = 5_000;
@@ -863,14 +863,14 @@ export function createApp(store: Store, opts: MultiStoreOptions = {}): MemoryApp
     const grant = tokenMode ? c.get("tokenGrant") : undefined;
     if (grant !== undefined) {
       return c.json({
-        name: "ai-memory",
+        name: "souvenance",
         endpoints: ENDPOINTS,
         stores: [{ name: grant.store, mode: grant.mode }],
         note: `token '${grant.agent}' grants store '${grant.store}' in mode '${grant.mode}'${grant.where ? " with raw where" : ""}; routes mirror the CLI verbs`,
       });
     }
     return c.json({
-      name: "ai-memory",
+      name: "souvenance",
       endpoints: ENDPOINTS,
       ...(declared.length > 0
         ? {

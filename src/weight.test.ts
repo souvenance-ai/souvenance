@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { Store } from "./db.ts";
 
 function tempStore(): { store: Store; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   return {
     store,
@@ -262,7 +262,7 @@ test("search: zero-weight memory excluded from ranking impact", () => {
 });
 
 test("migration: existing memories get default weight 0.5", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-test-"));
   const path = join(dir, "memory.db");
   try {
     const s1 = Store.open({ dbPath: path });

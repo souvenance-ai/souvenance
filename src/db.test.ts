@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { Store, sanitizeFtsQuery, ftsErrorFromQuery } from "./db.ts";
 
 function tempStore(): { store: Store; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   return { store, cleanup: () => { store.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
@@ -28,7 +28,7 @@ test("open creates all tables on a fresh project", () => {
 });
 
 test("reopening is a no-op (schema_version unchanged)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-test-"));
   const path = join(dir, "memory.db");
   try {
     const s1 = Store.open({ dbPath: path });

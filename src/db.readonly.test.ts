@@ -13,7 +13,7 @@ import { Store } from "./db.ts";
  */
 
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), "ai-memory-ro-"));
+  return mkdtempSync(join(tmpdir(), "souvenance-ro-"));
 }
 
 function seededStorePath(): { path: string; cleanup: () => void } {

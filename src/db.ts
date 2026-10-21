@@ -1101,7 +1101,7 @@ export class Store {
    */
   private checkFts(): DoctorFinding[] {
     const out: DoctorFinding[] = [];
-    const snapDir = mkdtempSync(join(tmpdir(), "ai-memory-doctor-"));
+    const snapDir = mkdtempSync(join(tmpdir(), "souvenance-doctor-"));
     try {
       const snapPath = join(snapDir, "snapshot.db").replace(/'/g, "''");
       this.run(() => this.db.exec(`VACUUM INTO '${snapPath}'`));

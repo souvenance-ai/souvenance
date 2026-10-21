@@ -7,10 +7,10 @@ import { Store } from "./db.ts";
 import { spawnSync } from "node:child_process";
 
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), "ai-memory-concurrency-"));
+  return mkdtempSync(join(tmpdir(), "souvenance-concurrency-"));
 }
 
-const BIN = join(process.cwd(), "bin", "memory.js");
+const BIN = join(process.cwd(), "bin", "souvenance.js");
 
 function cli(dbPath: string, args: string): { stdout: string; stderr: string; code: number } {
   const result = spawnSync("node", [BIN, "--db", dbPath, ...args.split(" ")], {

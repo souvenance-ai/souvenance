@@ -4,7 +4,7 @@ import type { Direction } from "./types.ts";
 
 /**
  * MCP stdio server — the third thin surface over the deep module (after the
- * CLI and the HTTP server). `memory mcp` speaks JSON-RPC 2.0 on stdin/stdout
+ * CLI and the HTTP server). `souvenance mcp` speaks JSON-RPC 2.0 on stdin/stdout
  * (newline-delimited), so any MCP client mounts the store as typed tools
  * without the markdown skill.
  *
@@ -28,7 +28,7 @@ import type { Direction } from "./types.ts";
  * stdout byte-for-byte, so stray output corrupts the stream).
  */
 
-const SERVER_NAME = "ai-memory";
+const SERVER_NAME = "souvenance";
 /** The revision this server answers with when the client requests an unknown one. */
 const PROTOCOL_VERSION = "2025-06-18";
 const KNOWN_PROTOCOL_VERSIONS = new Set(["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]);
@@ -48,7 +48,7 @@ function packageVersion(): string {
 /** Injected into the client's system prompt at initialize — the MCP-native
  *  place where the identity ritual reaches an agent that never loaded the
  *  markdown skill (decision ae1259fd). */
-const INSTRUCTIONS = `ai-memory: a persistent, searchable memory for agents — markdown memories in a per-project SQLite store, connected by a typed directed graph.
+const INSTRUCTIONS = `souvenance: a persistent, searchable memory for agents — markdown memories in a per-project SQLite store, connected by a typed directed graph.
 
 Ritual: run recover FIRST — it loads the binding directives, the latest summaries (the handoff from prior sessions), the open objectives (standing commitments) and the store stats. Search when you need context you don't have; trust the summaries as the recovery point.
 Write one concept per memory, self-contained, with search keywords in the text (search matches tokens, not semantics). Link new memories to related ones — an unlinked memory is an island.

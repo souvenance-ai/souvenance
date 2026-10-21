@@ -15,7 +15,7 @@ import { createApp, statusFor } from "./server.ts";
  */
 
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), "ai-memory-server-ro-"));
+  return mkdtempSync(join(tmpdir(), "souvenance-server-ro-"));
 }
 
 function seededPath(): { path: string; cleanup: (dir?: string) => void } {

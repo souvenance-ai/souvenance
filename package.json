@@ -1,5 +1,5 @@
 {
-  "name": "ai-memory",
+  "name": "@souvenance/cli",
   "version": "0.1.0",
   "description": "Persistent, searchable agent memory in a per-project SQLite store",
   "type": "module",
@@ -8,7 +8,8 @@
     "node": ">=22"
   },
   "bin": {
-    "memory": "bin/memory.js"
+    "memory": "bin/souvenance.js",
+    "souvenance": "bin/souvenance.js"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

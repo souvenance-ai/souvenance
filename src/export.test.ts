@@ -8,7 +8,7 @@ import { slugify, filenameFor, renderFrontmatter, rewriteLinks, renderRelations,
 import type { Memory, Relation } from "./types.ts";
 
 function tempStore(): { store: Store; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   return {
     store,
@@ -298,7 +298,7 @@ test("export CLI: writes one md file per memory", () => {
     const b = store.store("Hello world from the fox", { metadata: { kind: "log" } });
     store.link(a, b, "references");
 
-    const outputDir = join(tmpdir(), "ai-memory-export-test-" + process.pid);
+    const outputDir = join(tmpdir(), "souvenance-export-test-" + process.pid);
     rmSync(outputDir, { recursive: true, force: true });
 
     const { memories, edges } = store.dump();

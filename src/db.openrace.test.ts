@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 // opens on a FRESH store raced on the WAL file-header grab with no busy handler. Losers died
 // with 'could not open store: database is locked'. Order flipped; this test locks it.
 test("open: simultaneous CLI opens on a fresh store all succeed (busy_timeout first)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-race-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-race-"));
   const dbPath = join(dir, "memory.db");
   const N = 4;
   const gate = Date.now() + 400;
@@ -18,7 +18,7 @@ test("open: simultaneous CLI opens on a fresh store all succeed (busy_timeout fi
     let dbPath=process.argv[1]; let gate=parseInt(process.argv[2],10); const tag=process.argv[3];
     const fire=()=>{ const {execFileSync}=require('child_process');
       try {
-        const out=execFileSync(process.execPath,['bin/memory.js','--db',dbPath,'store','race '+tag]);
+        const out=execFileSync(process.execPath,['bin/souvenance.js','--db',dbPath,'store','race '+tag]);
         process.stdout.write(String(out).trim());
       } catch (e) {
         process.stdout.write('FAILED '+(e.stderr||'').toString());

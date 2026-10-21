@@ -16,7 +16,7 @@ function rig(): {
   rpc: (lines: string[], expected: number) => Promise<any[]>;
   close: () => Promise<void>;
 } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-mcp-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-mcp-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   const input = new PassThrough();
   const collected: string[] = [];
@@ -71,7 +71,7 @@ test("mcp: initialize echoes a known protocolVersion and carries serverInfo + in
     assert.equal(response.id, 0);
     assert.equal(response.result.protocolVersion, "2025-06-18");
     assert.deepEqual(response.result.capabilities, { tools: { listChanged: false } });
-    assert.equal(response.result.serverInfo.name, "ai-memory");
+    assert.equal(response.result.serverInfo.name, "souvenance");
     assert.match(response.result.instructions, /recover FIRST/);
   } finally {
     await r.close();
@@ -269,8 +269,8 @@ test("mcp: protocol — ping, parse error, invalid request, unknown method, sile
 });
 
 test("mcp: bin wiring — the real process speaks JSON-RPC over stdio", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-mcp-bin-test-"));
-  const bin = fileURLToPath(new URL("../bin/memory.js", import.meta.url));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-mcp-bin-test-"));
+  const bin = fileURLToPath(new URL("../bin/souvenance.js", import.meta.url));
   const child = spawn(process.execPath, [bin, "--db", join(dir, "memory.db"), "mcp"], {
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -313,7 +313,7 @@ test("mcp: bin wiring — the real process speaks JSON-RPC over stdio", async ()
     );
     await until(2);
     const [init, stored] = lines.map((l) => JSON.parse(l));
-    assert.equal(init.result.serverInfo.name, "ai-memory");
+    assert.equal(init.result.serverInfo.name, "souvenance");
     const id = JSON.parse(stored.result.content[0].text).id;
     assert.match(id, /^[0-9a-f-]{36}$/);
   } finally {

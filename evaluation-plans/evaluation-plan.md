@@ -11,8 +11,8 @@ You are the **evaluator**. You orchestrate the evaluation by spawning sub-agents
 ## Prerequisites
 
 - This repo is cloned and `node` (>=22) is on PATH.
-- The `memory` CLI is installed: run `yarn install` first, then confirm `node bin/memory.js --help` prints the command reference.
-- You (the evaluator) have bash access to run `node bin/memory.js` against any `--db` path.
+- The `memory` CLI is installed: run `yarn install` first, then confirm `node bin/souvenance.js --help` prints the command reference.
+- You (the evaluator) have bash access to run `node bin/souvenance.js` against any `--db` path.
 
 ## Evaluation harness
 
@@ -42,7 +42,7 @@ Each **scenario** follows this lifecycle:
 
 ```bash
 # Create an isolated temp directory for this scenario's store
-EVAL_DIR=$(mktemp -d -t ai-memory-eval-XXXXXX)
+EVAL_DIR=$(mktemp -d -t souvenance-eval-XXXXXX)
 EVAL_DB="$EVAL_DIR/memory.db"
 ```
 
@@ -59,7 +59,7 @@ Use the `task` tool with `subagent_type: "general"` for each evaluated sub-agent
 
 1. The **task** (see each scenario below) — phrased as a real-world goal, not as "test the skill."
 2. The **repo path** (the working directory) so it can run CLI commands.
-3. The **`--db` path** to use for every `memory` command: tell it explicitly, e.g. "Use `--db /tmp/ai-memory-eval-XXXX/memory.db` for all memory commands."
+3. The **`--db` path** to use for every `memory` command: tell it explicitly, e.g. "Use `--db /tmp/souvenance-eval-XXXX/memory.db` for all memory commands."
 4. A reminder: "You have access to persistent memory via a skill. Discover and use it."
 
 ### Sub-agent prompt template
@@ -82,7 +82,7 @@ When you are done, write a short summary of what you did and what you stored in 
 
 ### A. DB state assertions (deterministic)
 
-After sub-agents finish, you run `node bin/memory.js --db <EVAL_DB> <command>` yourself and assert on the output. Each assertion is either PASS or FAIL.
+After sub-agents finish, you run `node bin/souvenance.js --db <EVAL_DB> <command>` yourself and assert on the output. Each assertion is either PASS or FAIL.
 
 - **Exact**: `stats` returns a specific memory/edge count. Note: `stats` also reports `active_memories` and `memories_by_status` (a breakdown by status: `active`, `superseded`, `deprecated`, `merged`).
 - **Existence**: `search` or `list --where` returns at least one memory matching a condition. Note: `search`, `list`, and `tags` default to `active` memories only; pass `--all` to include superseded, deprecated, and merged memories.
@@ -243,9 +243,9 @@ Before spawning any sub-agent, pre-seed the DB with 50+ memories across several 
 Use this seeding script:
 
 ```bash
-EVAL_DIR=$(mktemp -d -t ai-memory-eval-XXXXXX)
+EVAL_DIR=$(mktemp -d -t souvenance-eval-XXXXXX)
 EVAL_DB="$EVAL_DB/memory.db"
-BIN="node $(pwd)/bin/memory.js"
+BIN="node $(pwd)/bin/souvenance.js"
 
 # Helper: store a memory and capture its id
 sm() { $BIN --db "$EVAL_DB" store "$1" --metadata "$2"; }
@@ -442,9 +442,9 @@ Use `--db <EVAL_DB>` for all memory commands.
 Before spawning any sub-agent, pre-seed the DB with ~18 decoy memories that share individual keywords with the 3 target memories but are about unrelated topics. This ensures single-term searches (e.g., "monolith", "microservices", "architecture") return many results, forcing the agent to narrow with OR or quoted-phrase queries to find the specific design-decision memories.
 
 ```bash
-EVAL_DIR=$(mktemp -d -t ai-memory-eval-XXXXXX)
+EVAL_DIR=$(mktemp -d -t souvenance-eval-XXXXXX)
 EVAL_DB="$EVAL_DIR/memory.db"
-BIN="node $(pwd)/bin/memory.js"
+BIN="node $(pwd)/bin/souvenance.js"
 
 sm() { $BIN --db "$EVAL_DB" store "$1" --metadata "$2"; }
 
@@ -621,9 +621,9 @@ Use `--db <EVAL_DB>` for all memory commands.
 **Pre-seed (evaluator does this before spawning #1):**
 
 ```bash
-EVAL_DIR=$(mktemp -d -t ai-memory-eval-XXXXXX)
+EVAL_DIR=$(mktemp -d -t souvenance-eval-XXXXXX)
 EVAL_DB="$EVAL_DIR/memory.db"
-BIN="node $(pwd)/bin/memory.js"
+BIN="node $(pwd)/bin/souvenance.js"
 
 sm() { $BIN --db "$EVAL_DB" store "$1" --metadata "$2"; }
 

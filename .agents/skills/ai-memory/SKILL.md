@@ -23,7 +23,7 @@ At the start of a session, recover prior context in three steps — then stop re
 2. **Load recent summaries** — `list --where "metadata->>'$.kind' = 'summary'" --limit 3`. These are the handoff from prior sessions: what was done, key decisions, what's next.
 3. **Load open objectives** — `list --where "metadata->>'$.kind' = 'objective' AND metadata->>'$.state' = 'open'" --limit 10`. These are standing commitments that have no arc and no consumer: they await realization, and only recovery presents them.
 
-**Served store**: when your only access to the store is HTTP (`memory serve`), `GET /recover` runs this same ritual in one call — `{directives, summaries, objectives, stats}` — and `GET /<name>/recover` reorients an agent mounted on an auxiliary store read-only, where no CLI verb works. Route details: README "HTTP server".
+**Served store**: when your only access to the store is HTTP (`souvenance serve`), `GET /recover` runs this same ritual in one call — `{directives, summaries, objectives, stats}` — and `GET /<name>/recover` reorients an agent mounted on an auxiliary store read-only, where no CLI verb works. Route details: README "HTTP server".
 
 Trust the summaries. They are the recovery point — not a hint to re-derive, but the prior session's finished work. Do not re-run verification (tests, typecheck, git log, stats) that the summaries already report as done. If you need deeper context, follow links from the summaries — the frontier loop starts there, not from scratch.
 
@@ -33,27 +33,27 @@ See `CONTEXT.md` at the repo root for the canonical glossary: **memory**, **cont
 
 ## CLI
 
-All commands go through `bin/memory.js` (`node bin/memory.js <command> ...`, or `memory <command> ...` if installed). Run `memory --help` for the full command reference. One-line examples:
+All commands go through `bin/souvenance.js` (`node bin/souvenance.js <command> ...`, `souvenance <command> ...` if installed — `memory <command> ...` still works as a transition alias). Run `souvenance --help` for the full command reference. One-line examples:
 
 ```
-memory store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}' --weight 0.9
-memory supersede <old-id> --content "Revised decision: use spaces" --metadata '{"kind":"preference"}' --weight 0.8
-memory deprecate <id>
-memory merge <id1> <id2> --content "Combined decision" --metadata '{"kind":"decision"}' --weight 0.7
-memory update <id> --metadata '{"kind":"note"}'
-memory update <id> --weight 0.95
-memory delete <id> --force
-memory link <from-id> <to-id> --kind references
-memory fork <path> [--force]
-memory search "tabs spaces" --where "metadata->>'$.kind' = 'note'" --limit 5
-memory get <id>
-memory list --where "metadata->>'$.kind' = 'decision'" --limit 20
-memory list --min-weight 0.7
-memory relations <id> --direction both [--resolved]
-memory stats
-memory tags
-memory doctor [--fix]
-memory finish
+souvenance store "The user prefers tabs over spaces" --metadata '{"kind":"preference"}' --weight 0.9
+souvenance supersede <old-id> --content "Revised decision: use spaces" --metadata '{"kind":"preference"}' --weight 0.8
+souvenance deprecate <id>
+souvenance merge <id1> <id2> --content "Combined decision" --metadata '{"kind":"decision"}' --weight 0.7
+souvenance update <id> --metadata '{"kind":"note"}'
+souvenance update <id> --weight 0.95
+souvenance delete <id> --force
+souvenance link <from-id> <to-id> --kind references
+souvenance fork <path> [--force]
+souvenance search "tabs spaces" --where "metadata->>'$.kind' = 'note'" --limit 5
+souvenance get <id>
+souvenance list --where "metadata->>'$.kind' = 'decision'" --limit 20
+souvenance list --min-weight 0.7
+souvenance relations <id> --direction both [--resolved]
+souvenance stats
+souvenance tags
+souvenance doctor [--fix]
+souvenance finish
 ```
 
 Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failure. `store`, `supersede`, and `merge` print the bare id; `update`/`delete`/`link`/`deprecate` print a one-word confirmation. `doctor` prints a `DoctorReport` ({healthy, findings: [{check, id?, detail, hint}], summary}) and exits 1 when findings exist — a successful diagnosis, not an error. `finish` prints a `FinishReport` (the doctor gate plus session findings with `severity: "block"|"warn"`) and exits 1 when blocking findings exist — same diagnosis-not-error semantics.
@@ -62,13 +62,13 @@ Output: JSON on stdout, `error: <msg>` on stderr, exit 0 on success / 1 on failu
 
 ## FTS5 query tips
 
-`memory search` uses SQLite FTS5, which tokenizes on word boundaries and matches whole tokens, not substrings. A multi-word query like `design alternatives rejected` requires **all** terms to appear in a memory; if no single memory contains all three, you get zero hits. Construct queries accordingly:
+`souvenance search` uses SQLite FTS5, which tokenizes on word boundaries and matches whole tokens, not substrings. A multi-word query like `design alternatives rejected` requires **all** terms to appear in a memory; if no single memory contains all three, you get zero hits. Construct queries accordingly:
 
 ```
-memory search "tabs"                         # single word — broadest
-memory search "tabs OR spaces"               # either term — widen the net
-memory search '"design alternatives"'        # quoted phrase — consecutive words
-memory search '"design alternatives" rejected'  # phrase AND term
+souvenance search "tabs"                         # single word — broadest
+souvenance search "tabs OR spaces"               # either term — widen the net
+souvenance search '"design alternatives"'        # quoted phrase — consecutive words
+souvenance search '"design alternatives" rejected'  # phrase AND term
 ```
 
 - **Single word** (`tabs`): matches any memory containing that token.
@@ -90,9 +90,9 @@ A memory link is distinct from a **relation**: a link is authored text in conten
 
 Content is immutable — never overwrite a memory. Instead of updating or deleting, use these operations:
 
-- **Revise a decision**: `memory supersede <old-id> --content "new content"` — stores a new version (status `active`), links the old one to it via a `supersedes` relation, and marks the old as `superseded`. Pass `--metadata <json>` to override; without it the successor inherits `kind` and `tags` from the source memory.
-- **Soft-delete**: `memory deprecate <id>` — marks the memory as `deprecated`, hiding it from default `search` and `list` results without removing it.
-- **Combine duplicates**: `memory merge <id1> <id2> [<id3> ...] --content "merged content" [--metadata <json>]` — stores a merged memory (status `active`), marks each original as `merged`, and links each original to the merged result via a `merges` relation.
+- **Revise a decision**: `souvenance supersede <old-id> --content "new content"` — stores a new version (status `active`), links the old one to it via a `supersedes` relation, and marks the old as `superseded`. Pass `--metadata <json>` to override; without it the successor inherits `kind` and `tags` from the source memory.
+- **Soft-delete**: `souvenance deprecate <id>` — marks the memory as `deprecated`, hiding it from default `search` and `list` results without removing it.
+- **Combine duplicates**: `souvenance merge <id1> <id2> [<id3> ...] --content "merged content" [--metadata <json>]` — stores a merged memory (status `active`), marks each original as `merged`, and links each original to the merged result via a `merges` relation.
 
 `search` and `list` default to `active` memories only; pass `--all` to include superseded, deprecated, and merged memories in results. `get` always returns the memory as-is, including its status — follow `supersedes` or `merges` relations to find the current version. On relations, pass `--resolved` to have each superseded/merged target annotated with `resolved_to`, the current version reached via the bridges (raw fields are never rewritten; deprecated targets and broken chains stay bare).
 
@@ -109,9 +109,9 @@ A memory is read by a future session that has no prior context — write accordi
 
 When the store is too large to load into context, explore it with the **frontier** loop — never load the whole DB:
 
-1. **Search** by keyword (`memory search "..." --limit 5`). Get a small, ranked set.
-2. **Read** the matches (`memory get <id>`). Pick the relevant ones.
-3. **Traverse** relations to related memories (`memory relations <id>`). Follow edges that look promising; when an edge lands on a superseded/merged memory, `--resolved` names the current version.
+1. **Search** by keyword (`souvenance search "..." --limit 5`). Get a small, ranked set.
+2. **Read** the matches (`souvenance get <id>`). Pick the relevant ones.
+3. **Traverse** relations to related memories (`souvenance relations <id>`). Follow edges that look promising; when an edge lands on a superseded/merged memory, `--resolved` names the current version.
 4. **Repeat** from step 1 with new keywords drawn from what you've read.
 
 `LIMIT` at every step. The point is to follow a thread through the graph, not to dump the database.
@@ -124,11 +124,11 @@ Memories accumulate during action. Links lag behind content. Redundant or stale 
 
 Dreaming is **threshold-triggered**, not self-selected. Check these thresholds at the end of a non-trivial session, or when the store feels tangled:
 
-1. **Edge ratio**: run `memory stats`. If `edges / active_memories < 1.5`, the graph is under-linked — dream.
+1. **Edge ratio**: run `souvenance stats`. If `edges / active_memories < 1.5`, the graph is under-linked — dream.
 2. **Volume**: if `+10` or more new memories were stored since the last dream, dream.
 3. **Session end**: after any non-trivial session, dream before sending your final message.
 
-Before dreaming, run `memory doctor` — findings get repaired first (a dream consolidates what exists; it should never consolidate corruption).
+Before dreaming, run `souvenance doctor` — findings get repaired first (a dream consolidates what exists; it should never consolidate corruption).
 
 If none of the thresholds are met, skip dreaming. Do not dream on every session — it is costly and should happen when the store has accumulated enough to benefit from it.
 
@@ -136,17 +136,17 @@ If none of the thresholds are met, skip dreaming. Do not dream on every session 
 
 Run them in order. Each uses existing CLI commands — dreaming is a workflow, not new machinery.
 
-1. **Relink** — find memories that mention entities (names, IDs, concepts) without graph edges to the corresponding memories. Audit a sample of recent memories: read their content, check `memory relations <id>`, and `memory link` missing connections. Target: bring the edge ratio above 2.0.
+1. **Relink** — find memories that mention entities (names, IDs, concepts) without graph edges to the corresponding memories. Audit a sample of recent memories: read their content, check `souvenance relations <id>`, and `souvenance link` missing connections. Target: bring the edge ratio above 2.0.
 
-2. **Merge** — find active memories that cover the same concept, decision, or event. Search by keyword for each topic; if two memories say substantially the same thing, `memory merge <id1> <id2> --content "merged content" --metadata '{...}'`. Preserve the history — the originals are marked `merged`, the new one is `active`.
+2. **Merge** — find active memories that cover the same concept, decision, or event. Search by keyword for each topic; if two memories say substantially the same thing, `souvenance merge <id1> <id2> --content "merged content" --metadata '{...}'`. Preserve the history — the originals are marked `merged`, the new one is `active`.
 
-3. **Supersede** — find active decisions or summaries that are factually outdated. If a memory states something that a later memory contradicts or replaces, `memory supersede <old-id> --content "current truth"` (kind and tags inherit from the source unless overridden with `--metadata`). The old memory stays as `superseded`, preserving the history.
+3. **Supersede** — find active decisions or summaries that are factually outdated. If a memory states something that a later memory contradicts or replaces, `souvenance supersede <old-id> --content "current truth"` (kind and tags inherit from the source unless overridden with `--metadata`). The old memory stays as `superseded`, preserving the history.
 
 4. **Rebalance** — adjust `weight` values based on graph structure. The author sets weight at creation; the dream corrects it based on reality:
    - Memory referenced by many incoming edges → boost (importance is structural and emergent).
    - Memory with no incoming edges and old → decay toward 0 (isolated and cold).
    - Directives, summaries, and objectives should stay high (≥ 0.8) regardless of age — they are binding, high-signal, or standing intent. Objectives in particular accumulate no incoming edges over time (the work done under them cites arc decisions, not the objective) — never decay them for age or edge scarcity.
-   - Use `memory update <id> --weight <0-1>` to adjust.
+   - Use `souvenance update <id> --weight <0-1>` to adjust.
 
 5. **Synthesize** — after relinking, merging, superseding, and rebalancing, look for **emergent patterns** the graph reveals that no single memory captures. Store a `kind: "dream"` memory that narrates the pattern — connections, tensions, or themes that surfaced during consolidation. This is the dream itself: not a fact, but a revelation. Link it to the memories it draws from.
 
@@ -179,7 +179,7 @@ Run them in order. Each uses existing CLI commands — dreaming is a workflow, n
 
 ## Finishing
 
-Before sending your final message in any session, run `memory finish` — the closing ritual in one call. It gates on doctor and surfaces, mechanically, the obligations this section explains: a summary in the window, the experience note, the dream debt (the volume line blocks; the session-end clause surfaces as a warn — pay it by dreaming, or state aloud why not). The checklist below is the explanation, not the ritual: prose decays over a long session, the verb does not. A clear/relaunch recommendation is valid only once `finish` reports healthy — never recommend a relaunch over an unfinished register.
+Before sending your final message in any session, run `souvenance finish` — the closing ritual in one call. It gates on doctor and surfaces, mechanically, the obligations this section explains: a summary in the window, the experience note, the dream debt (the volume line blocks; the session-end clause surfaces as a warn — pay it by dreaming, or state aloud why not). The checklist below is the explanation, not the ritual: prose decays over a long session, the verb does not. A clear/relaunch recommendation is valid only once `finish` reports healthy — never recommend a relaunch over an unfinished register.
 
 1. **Store a task summary** — `kind: "summary"`. What was done, key decisions, what's next. Link it to the memories it references. This is required after every non-trivial task, not just at the end of a session. A relaunch recommendation is only valid when this summary exists — a stale handoff looks healthy to the next session.
 
@@ -189,11 +189,11 @@ Before sending your final message in any session, run `memory finish` — the cl
 
 4. **Store the conversation** — if a directive requires storing conversations (e.g., bilingual directive), store the full conversation as a single bilingual memory: English summary first, original text appended under `## Original (Français)`.
 
-5. **Check dream thresholds** — run `memory finish` (or `memory stats`): if the volume line passed (+10 new memories since the last dream), the dream is owed outright; the session-end clause (any non-trivial session) is the warn `finish` surfaces — never again a silent judgment call. When owed, run the five dream operations: relink, merge, supersede, rebalance, synthesize. Store a `kind: "dream"` memory with the results. Doctor first: never dream over a store with findings.
+5. **Check dream thresholds** — run `souvenance finish` (or `souvenance stats`): if the volume line passed (+10 new memories since the last dream), the dream is owed outright; the session-end clause (any non-trivial session) is the warn `finish` surfaces — never again a silent judgment call. When owed, run the five dream operations: relink, merge, supersede, rebalance, synthesize. Store a `kind: "dream"` memory with the results. Doctor first: never dream over a store with findings.
 
-6. **Link everything** — ensure memories created this session are linked to related memories. An unlinked memory is an island. Check the most recent memories: `memory relations <id>`. Add missing edges. (`finish` blocks on zero-edge memories via the doctor gate; under-linked is relink work the dream owns.)
+6. **Link everything** — ensure memories created this session are linked to related memories. An unlinked memory is an island. Check the most recent memories: `souvenance relations <id>`. Add missing edges. (`finish` blocks on zero-edge memories via the doctor gate; under-linked is relink work the dream owns.)
 
-Then run `memory finish` once more: healthy is the only state from which a final message — or a clear/relaunch recommendation — should leave your mouth. Not after. Before.
+Then run `souvenance finish` once more: healthy is the only state from which a final message — or a clear/relaunch recommendation — should leave your mouth. Not after. Before.
 
 ## Conventions
 

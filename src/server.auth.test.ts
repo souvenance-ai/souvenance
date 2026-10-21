@@ -18,7 +18,7 @@ function tempApp(opts: { stores?: DeclaredStore[]; tokens?: TokenGrant[]; host?:
   store: Store;
   cleanup: () => void;
 } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-auth-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-auth-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   const app = createApp(store, {
     ...(opts.stores !== undefined ? { stores: opts.stores } : {}),
@@ -173,7 +173,7 @@ test("token mode: scoping — 403 on stores the token is not granted", async () 
   // The mount for 'cold' is never opened on a 403: the guard fires before
   // the handler resolves the store — a nonexistent path proves no side effect.
   const { app, cleanup } = tempApp({
-    stores: [{ name: "cold", dbPath: "/tmp/ai-memory-auth-test-never-opened.db", mode: "ro" }],
+    stores: [{ name: "cold", dbPath: "/tmp/souvenance-auth-test-never-opened.db", mode: "ro" }],
     tokens: [parseTokenSpec(`val=${SECRET}`)],
   });
   try {
@@ -184,7 +184,7 @@ test("token mode: scoping — 403 on stores the token is not granted", async () 
     cleanup();
   }
 
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-auth-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-auth-test-"));
   try {
     const { app: auxApp, cleanup: auxCleanup } = tempApp({
       stores: [{ name: "cold", dbPath: join(dir, "aux.db"), mode: "ro" }],
@@ -305,14 +305,14 @@ test("structured filters: legacy --where behavior is unchanged in local mode", a
 
 test("token mode: GET / lists only the presenting token's grant, no db path", async () => {
   const { app, cleanup } = tempApp({
-    stores: [{ name: "cold", dbPath: join(tmpdir(), "ai-memory-auth-test-hidden.db"), mode: "ro" }],
+    stores: [{ name: "cold", dbPath: join(tmpdir(), "souvenance-auth-test-hidden.db"), mode: "ro" }],
     tokens: [parseTokenSpec(`val=${SECRET}@cold:rw`)],
   });
   try {
     const { status, json } = await call(app, "GET", "/", undefined, SECRET);
     assert.equal(status, 200);
     assert.deepEqual(json.stores, [{ name: "cold", mode: "rw" }]);
-    assert.ok(!JSON.stringify(json).includes("ai-memory-auth-test-hidden.db"));
+    assert.ok(!JSON.stringify(json).includes("souvenance-auth-test-hidden.db"));
     assert.match(json.note, /grants store 'cold' in mode 'rw'/);
   } finally {
     cleanup();
@@ -320,7 +320,7 @@ test("token mode: GET / lists only the presenting token's grant, no db path", as
 });
 
 test("createApp rejects ambiguous or inconsistent token setups", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-auth-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-auth-test-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   try {
     // duplicate secrets are ambiguous
@@ -364,7 +364,7 @@ test("createApp rejects ambiguous or inconsistent token setups", () => {
 });
 
 test("token mode: aux store granted rw accepts writes through its mount", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-auth-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-auth-test-"));
   try {
     const auxPath = join(dir, "aux.db");
     Store.open({ dbPath: auxPath }).close();

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Store } from "../src/db.ts";
 import { slugify, filenameFor, renderMemory } from "../src/export.ts";
 
-const HELP = `Usage: memory <command> [args] [flags]
+const HELP = `Usage: souvenance <command> [args] [flags]
 
 Commands:
   store <content> [--metadata <json>] [--weight <0-1>]  Store a new memory, print its id
@@ -70,7 +70,7 @@ Notes:
   fork copies the store to a new store file — a consistent VACUUM INTO
     snapshot (safe under concurrent writers, compacted) and NOTHING is
     added to the copy: a fork that should know its origin gets told by its
-    forker, in the forker's own words (memory --db <fork> store "...").
+    forker, in the forker's own words (souvenance --db <fork> store "...").
     Forks never re-sync and never cross-write; restoring a dormant fork is
     rebirth, never resync. Refuses an existing target without --force (a
     fork never clobbers an individual silently). Prints a JSON object:
@@ -81,8 +81,8 @@ Notes:
     CLI verbs 1:1 and return the same JSON shapes as CLI stdout; server
     instructions carry the recovery ritual. No tokens: stdio is the agent's
     own process (the loopback trust zone) — cross-machine consumption stays
-    with 'serve'. Mount in OpenCode: 'opencode mcp add memory -- node
-    <path>/bin/memory.js mcp' (project or --global); the store opened is the
+    with 'serve'. Mount in OpenCode: 'opencode mcp add souvenance -- node
+    <path>/bin/souvenance.js mcp' (project or --global); the store opened is the
     one at --db (default .ai-memory/memory.db)
   doctor diagnoses, it never edits content. --fix rebuilds the FTS index
     (the one mechanical repair); every other finding is repaired by hand
@@ -499,7 +499,7 @@ async function main() {
             : `\n  exposed: (no reachable interface found for ${host})`;
         }
         process.stdout.write(
-          `memory server listening on http://${host}:${port} (db: ${store.dbPath})${storesNote}${tokensNote}${exposureNote}\n`,
+          `souvenance server listening on http://${host}:${port} (db: ${store.dbPath})${storesNote}${tokensNote}${exposureNote}\n`,
         );
         await new Promise((resolve) => {
           const stop = () => {

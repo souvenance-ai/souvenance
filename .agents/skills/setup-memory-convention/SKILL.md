@@ -12,7 +12,7 @@ This is a one-time setup skill. After it runs, the conventions live in `AGENTS.m
 ## Prerequisites
 
 - The `ai-memory` skill is installed in this repo (check for `.agents/skills/ai-memory/SKILL.md`).
-- `bin/memory.js` exists at the repo root.
+- `bin/souvenance.js` exists at the repo root.
 - An `AGENTS.md` or `CLAUDE.md` file exists (if neither exists, ask the user which to create).
 
 ## Process
@@ -20,7 +20,7 @@ This is a one-time setup skill. After it runs, the conventions live in `AGENTS.m
 ### 1. Check the memory CLI works
 
 ```bash
-node bin/memory.js --help
+node bin/souvenance.js --help
 ```
 
 If this fails, stop and tell the user the ai-memory skill doesn't appear to be installed.
@@ -57,7 +57,7 @@ Adapt the wording to match the voice of the surrounding sections, but keep these
 - [ ] The convention block is present in the file.
 - [ ] It sits under the `## Agent skills` heading (or equivalent).
 - [ ] No duplicate section was created.
-- [ ] The memory CLI (`node bin/memory.js --help`) works.
+- [ ] The memory CLI (`node bin/souvenance.js --help`) works.
 
 ### 6. Seed initial memory
 
@@ -87,10 +87,10 @@ The store is empty. Ask the user what kind of being they want the agent to be, a
 
 3. Link the seed memories together:
 ```bash
-memory link <id1> <id2> --kind references
+souvenance link <id1> <id2> --kind references
 ```
 
-4. Run `memory stats` and show the user the seeded store.
+4. Run `souvenance stats` and show the user the seeded store.
 
 ### 7. Done
 

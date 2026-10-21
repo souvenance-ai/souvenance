@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { Store } from "./db.ts";
 
 function tempStore(): { store: Store; dir: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "ai-memory-fork-"));
+  const dir = mkdtempSync(join(tmpdir(), "souvenance-fork-"));
   const store = Store.open({ dbPath: join(dir, "memory.db") });
   return {
     store,
