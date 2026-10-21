@@ -24,9 +24,9 @@ _Avoid_: link, edge, connection (use these informally; "relation" is the canonic
 The label on a relation describing how the source memory relates to the target (e.g. `references`, `extends`, `contradicts`). Free-form string, agent-defined.
 _Avoid_: type, label
 
-**Memory link**:
-A `memory://<uuid>` reference inside a memory's content. Machine-resolvable by the `get` operation. Distinct from a relation: a link is authored text; a relation is a searchable graph edge. A link may optionally be materialized into a relation.
-_Avoid_: pointer, reference (use "memory link" for the `memory://` scheme; "reference" is a relation _kind_)
+**Memory link** (legacy layer since 0.1.4):
+A `memory://<uuid>` reference inside a memory's content. The scheme stays valid and existing links keep meaning (addition-only — never rewritten), but nothing new cites with prose links: edges are the single relation surface, authored in one gesture (`--relation` on store/supersede) and projected at read (`get`'s relations block, `recover`'s summary edges). Distinct from a relation: a link is authored text; a relation is a typed, searchable graph edge.
+_Avoid_: pointer, reference (use "memory link" for the legacy `memory://` scheme; "reference" is a relation _kind_)
 
 **Search**:
 Keyword (FTS5) retrieval over memory content, ranked by relevance, combinable with metadata filters. The agent's primary tool for finding relevant memories without loading the whole database.

@@ -575,7 +575,7 @@ function storeOptions(body: Record<string, unknown>): StoreOptions {
 }
 
 const ENDPOINTS: Array<{ method: string; path: string; note: string }> = [
-  { method: "GET", path: "/recover", note: "recovery ritual: {directives, summaries, objectives, stats}, ?directives&summaries&objectives limits" },
+  { method: "GET", path: "/recover", note: "recovery ritual: {directives, summaries (each with its direct edges), objectives, stats}, ?directives&summaries&objectives limits" },
   { method: "POST", path: "/memories", note: "store {content, metadata?, weight?, relations?: [{to, kind}]} -> 201 {id}" },
   { method: "GET", path: "/memories", note: "list ?where|kind&tag&limit&offset&min-weight&all" },
   { method: "GET", path: "/memories/:id", note: "get (bumps access_count)" },
@@ -624,34 +624,25 @@ function registerStoreRoutes(app: MemoryApp, prefix: string, resolve: StoreResol
     app.use(`${prefix}/*`, readOnlyGuard(roName));
   }
 
-  // GET /recover — the recovery ritual as one resource (decision b79c09d4):
-  // directives + latest summaries + open objectives + store stats, composed
-  // of the SAME list() calls the CLI ritual runs (active memories, the
-  // ritual JSON1 kinds, created_at DESC), so HTTP and CLI recovery hands
-  // return the same set. Objectives carry the standing register (decision
-  // 635132ea): open commitments are PRESENTED every recovery, not left to
-  // be found — search rank rewards engagement, standing intent is the
-  // least engaging class in the store.
+  // GET /recover — the recovery ritual as ONE resource (decision b79c09d4),
+  // composed here by the lib's recover() — the deep-module home the MCP
+  // tool shares — so HTTP, MCP and CLI recovery hands return the same set.
+  // Each summary carries its direct edges (single-write-graph, ticket 02):
+  // a fresh session's frontier starts drilled-in, zero extra calls.
+  // Objectives carry the standing register (decision 635132ea): open
+  // commitments are PRESENTED every recovery, not left to be found.
   // GET-only: served by read-only stores too — the ritual for agents whose
   // only access to a store is the HTTP surface. The stats block sizes the
   // store at orientation time (the clear/continue judgment needs it).
   app.get(`${prefix}/recover`, (c) => {
-    const store = resolve();
-    return c.json({
-      directives: store.list({
-        where: "metadata->>'$.kind' = 'directive'",
-        limit: cappedLimitQuery(c.req.query("directives"), "directives") ?? 20,
-      }),
-      summaries: store.list({
-        where: "metadata->>'$.kind' = 'summary'",
-        limit: cappedLimitQuery(c.req.query("summaries"), "summaries") ?? 3,
-      }),
-      objectives: store.list({
-        where: "metadata->>'$.kind' = 'objective' AND metadata->>'$.state' = 'open'",
-        limit: cappedLimitQuery(c.req.query("objectives"), "objectives") ?? 10,
-      }),
-      stats: store.stats(),
-    });
+    const directives = cappedLimitQuery(c.req.query("directives"), "directives");
+    const summaries = cappedLimitQuery(c.req.query("summaries"), "summaries");
+    const objectives = cappedLimitQuery(c.req.query("objectives"), "objectives");
+    return c.json(resolve().recover({
+      ...(directives !== undefined ? { directivesLimit: directives } : {}),
+      ...(summaries !== undefined ? { summariesLimit: summaries } : {}),
+      ...(objectives !== undefined ? { objectivesLimit: objectives } : {}),
+    }));
   });
 
   app.post(`${prefix}/memories`, async (c) => {

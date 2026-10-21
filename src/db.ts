@@ -15,8 +15,11 @@ import type {
   ForkResult,
   Direction,
   Memory,
+  MemoryWithRelations,
   MemoryStatus,
   Relation,
+  RecoverOptions,
+  RecoverReport,
   RelationSpec,
   Stats,
   SearchResult,
@@ -49,10 +52,8 @@ function tightenPermissions(dbPath: string): void {
   }
 }
 
-/** memory:// links are authored text in content; the doctor validates each target. */
-const MEMORY_LINK_RE = /memory:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
-
-const DOCTOR_CHECK_COUNT = 11;
+/** The doctor's check count — the union it reports findings from. */
+const DOCTOR_CHECK_COUNT = 10;
 
 /** Closing-ritual window: when the session stored memories, a summary and an
  *  experience note must exist within this window. 24h covers every lived
@@ -640,7 +641,7 @@ export class Store {
     }
   }
 
-  get(id: string): Memory | null {
+  get(id: string): MemoryWithRelations | null {
     const row = this.db
       .prepare("SELECT id, content, metadata, created_at, status, weight, access_count FROM memories WHERE id = ?")
       .get(id) as unknown as MemoryRow | undefined;
@@ -652,7 +653,60 @@ export class Store {
           .run(id);
       });
     }
-    return parseMemoryRow(row);
+    return { ...parseMemoryRow(row), relations: this.relationsBlock(id) };
+  }
+
+  /**
+   * The read-side projection (single-write-graph, ticket 02): both edge
+   * directions of one memory, kind-labeled, raw — one indexed query per
+   * direction, negligible next to the content read. Cited content no
+   * longer needs inline prose links to be self-sufficient: the graph
+   * projects at read.
+   */
+  private relationsBlock(id: string): { out: Relation[]; in: Relation[] } {
+    const out = this.db
+      .prepare(
+        `SELECT from_id, to_id, kind, metadata, created_at FROM edges` +
+          ` WHERE from_id = ? ORDER BY created_at DESC`,
+      )
+      .all(id) as unknown as RelationRow[];
+    const inRows = this.db
+      .prepare(
+        `SELECT from_id, to_id, kind, metadata, created_at FROM edges` +
+          ` WHERE to_id = ? ORDER BY created_at DESC`,
+      )
+      .all(id) as unknown as RelationRow[];
+    return { out: out.map(parseRelationRow), in: inRows.map(parseRelationRow) };
+  }
+
+  /**
+   * The recovery ritual in one call — the deep-module home of the
+   * composition the HTTP GET /recover and the MCP recover tool both serve
+   * (decision b79c09d4 made it a resource; ticket 02 made it a lib method).
+   * Directives, latest summaries, open objectives (presented, never left
+   * to be found — objectives carry the standing register) and stats. Each
+   * summary carries its direct edges so a fresh session's frontier starts
+   * with zero drill-in calls; directives and objectives keep their caps
+   * unchanged (summaries are the handoff — the one block a new session
+   * follows immediately).
+   */
+  recover(opts: RecoverOptions = {}): RecoverReport {
+    const summaries = this.list({
+      where: "metadata->>'$.kind' = 'summary'",
+      limit: opts.summariesLimit ?? 3,
+    }).map((m) => ({ ...m, relations: this.relationsBlock(m.id) }));
+    return {
+      directives: this.list({
+        where: "metadata->>'$.kind' = 'directive'",
+        limit: opts.directivesLimit ?? 20,
+      }),
+      summaries,
+      objectives: this.list({
+        where: "metadata->>'$.kind' = 'objective' AND metadata->>'$.state' = 'open'",
+        limit: opts.objectivesLimit ?? 10,
+      }),
+      stats: this.stats(),
+    };
   }
 
   list(opts: ListOptions = {}): Memory[] {
@@ -879,8 +933,8 @@ export class Store {
       .all() as unknown as RelationRow[];
     const byId = new Map(mems.map((m) => [m.id, m]));
 
-    // Parse metadata once; broken_links/orphan checks need ids, kind/weight
-    // checks need parsed metadata, invalid-JSON needs the parse failure itself.
+    // Parse metadata once; the orphan check needs ids, kind/weight checks
+    // need parsed metadata, invalid-JSON needs the parse failure itself.
     const parsedMeta = new Map<string, Record<string, unknown> | null>();
     for (const m of mems) {
       if (m.metadata === null) {
@@ -891,19 +945,6 @@ export class Store {
         parsedMeta.set(m.id, JSON.parse(m.metadata) as Record<string, unknown>);
       } catch {
         parsedMeta.set(m.id, undefined as unknown as Record<string, unknown>);
-      }
-    }
-
-    for (const m of mems) {
-      for (const match of m.content.matchAll(MEMORY_LINK_RE)) {
-        if (!byId.has(match[1])) {
-          findings.push({
-            check: "broken_links",
-            id: m.id,
-            detail: `content references memory://${match[1]} which is not in the store`,
-            hint: "supersede with corrected content, or deprecate the source memory",
-          });
-        }
       }
     }
 

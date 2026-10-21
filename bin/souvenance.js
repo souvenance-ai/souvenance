@@ -8,6 +8,10 @@ import { resolveVersion } from "../src/version.ts";
 const HELP = `Usage: souvenance <command> [args] [flags]
 
 Commands:
+  recover [--directives N] [--summaries N] [--objectives N]
+      The recovery ritual in one call: binding directives, the latest
+      summaries (each enriched with its direct edges), the open
+      objectives and store stats — run this FIRST, before any work
   store <content> [--metadata <json>] [--weight <0-1>] [--relation <kind>:<uuid>]...
       Store a new memory, print its id
   supersede <old-id> --content <text> [--metadata <json>] [--weight <0-1>] [--relation <kind>:<uuid>]...
@@ -32,8 +36,8 @@ Commands:
       copy, nothing added. No scheduling, no transport: protecting the files
       is the installer's backup software's job; this is the copy primitive
       of the fork model only
-  doctor [--fix]                              Validate store integrity (links, edges, kinds, weights,
-      titles, FTS index); prints a JSON report, exit 1 when findings
+  doctor [--fix]                              Validate store integrity (edges, kinds, weights, titles,
+      FTS index); prints a JSON report, exit 1 when findings
   finish                                      Closing ritual in one call: the doctor as a hard gate plus
       the session obligations it cannot see (summary in the window,
       experience note, dream debt — volume line blocks, session-end
@@ -403,6 +407,17 @@ async function main() {
           process.stderr.write(`not found: ${rest[0]}\n`);
           process.exitCode = 1;
         }
+        break;
+      }
+      case "recover": {
+        const directivesLimit = num(flags["--directives"]);
+        const summariesLimit = num(flags["--summaries"]);
+        const objectivesLimit = num(flags["--objectives"]);
+        print(store.recover({
+          ...(directivesLimit !== undefined ? { directivesLimit } : {}),
+          ...(summariesLimit !== undefined ? { summariesLimit } : {}),
+          ...(objectivesLimit !== undefined ? { objectivesLimit } : {}),
+        }));
         break;
       }
       case "list": {

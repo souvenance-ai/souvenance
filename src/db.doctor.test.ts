@@ -50,7 +50,7 @@ test("doctor: a healthy pair has zero findings and coherent summary", () => {
     const report = store.doctor();
     assert.equal(report.healthy, true);
     assert.deepEqual(report.findings, []);
-    assert.equal(report.summary.checks, 11);
+    assert.equal(report.summary.checks, 10);
     assert.equal(report.summary.issues, 0);
     assert.equal(report.summary.memories, 2);
     assert.equal(report.summary.edges, 1);
@@ -74,20 +74,23 @@ test("doctor: an empty fresh store is healthy", () => {
   }
 });
 
-test("doctor: broken_links finds a content reference to a missing memory", () => {
+test("doctor: a dead memory:// prose link is history, not corruption (broken_links retired)", () => {
   const { store, cleanup } = tempStore();
   try {
     const { a } = healthyPair(store);
+    // A ghost citation — a link to a deleted/superseded-away id. Under the
+    // old doctor this was a finding; since the edges table became the
+    // single relation surface (single-write-graph, ticket 02), prose links
+    // are legacy-layer text: the store stays valid, no finding speaks.
     const ghost = "00000000-0000-4000-8000-000000000000";
     store.db
       .prepare("UPDATE memories SET content = content || ? WHERE id = ?")
       .run(`\n\nSee memory://${ghost}.`, a);
     const report = store.doctor();
-    assert.equal(report.findings.length, 1);
-    assert.equal(report.findings[0].check, "broken_links");
-    assert.equal(report.findings[0].id, a);
-    assert.match(report.findings[0].detail, new RegExp(ghost));
-    assert.ok(report.findings[0].hint.length > 0);
+    // The retired check name is gone from the lib's vocabulary — a dead
+    // prose link yields NO finding: findings stays the empty array.
+    assert.equal(report.healthy, true);
+    assert.deepEqual(report.findings, []);
   } finally {
     cleanup();
   }
