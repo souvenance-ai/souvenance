@@ -61,7 +61,7 @@ links existed is now gone).
 
 ## Additive compliance
 
-- No content rewritten anywhere (addition-only holds: errobai links are
+- No content rewritten anywhere (addition-only holds: dead links are
   data-of-the-past, not debt).
 - The scheme: a `memory://` in content stays readable text; `get` no
   longer promises resolution semantics beyond what it does today —
