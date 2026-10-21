@@ -1,0 +1,10 @@
+{
+  "$comment": "Publish-time build (decision 38e8b225, revision of c9fb7125): node type-stripping refuses files under node_modules, so the tarball ships COMPILED JS from dist/. The repo keeps the zero-build practice — this config never runs except via prepublishOnly. rootDir . keeps the src/ segment so dist/bin/souvenance.js's rewritten imports (../src/*.ts -> ../src/*.js) resolve against dist/src/.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "sourceMap": false
+  },
+  "include": ["src/**/*.ts"]
+}

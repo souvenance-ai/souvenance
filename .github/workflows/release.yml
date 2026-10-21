@@ -58,6 +58,30 @@ jobs:
       - name: publish to npm (OIDC — no token secret)
         run: npm publish --access public --provenance
 
+      # — directive 5de23653: 'published' is claimed ONLY from an install path —
+      #   repo gates are necessary, never sufficient. The registry CDN can lag
+      #   a couple of minutes behind a fresh publish (observed on 0.1.0's
+      #   first smoke), so poll this TAG'S version before the npx probe.
+      - name: install-path smoke (pinned to this tag)
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          ok=""
+          for i in $(seq 1 18); do
+            if npm view "@souvenance/cli@$ver" version >/dev/null 2>&1; then
+              echo "manifest visible (tentative $i)"
+              ok="yes"
+              break
+            fi
+            echo "propagation registry... ($i/18)"
+            sleep 10
+          done
+          if [ -z "$ok" ]; then
+            echo "manifest @$ver invisible après 3 min — publish présent mais smoke en échec" >&2
+            exit 1
+          fi
+          cd "$(mktemp -d)"
+          npx --yes "@souvenance/cli@$ver" --help
+
       - name: draft the release page
         run: gh release create "$GITHUB_REF_NAME" --generate-notes
         env:
