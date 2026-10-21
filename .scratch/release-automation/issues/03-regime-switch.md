@@ -42,3 +42,26 @@ generator (ticket 02) is superseded in-flight by the merge-discipline itself.
   pass; unscoped diff → pass.
 - Workflows parse-validate; `release-status.mjs` output unchanged in shape after the scope extraction.
 - Genesis proof: the PR self-describes (release-check must pass on it because IT carries the bump).
+
+## Comments
+
+Regime live and PROVEN 2026-10-21. Genesis PR #1 merged by Valentin (13:40, merge commit cae5259 — the
+transition one-off: rebase-only wasn't yet enforced at merge time). First merge→release cycle completed
+end-to-end AFTER two lived catches, both paid through the new discipline:
+1. **The lockfile class recurred** (the regime's first catch, PRE-merge this time): the PR checks failed
+   — yarn.lock still pinned `memory: dist/bin/souvenance.js` after the bin-drop commit; origin/main had
+   been red unnoticed since that push. Fix 060aa97: surgical one-line regen, `--immutable` verified
+   locally before push (the phase-4 lesson honored).
+2. **The trusted-publisher mismatch** (post-merge): release-tag tagged v0.1.2 then npm E404 — the OIDC
+   claim (decoded from the sigstore transparency log, rekor 3356882188) names
+   `release-publish.yml@refs/heads/main` while the npm config declared `release.yml`; the
+   callable-refactor changed the claim's file. Valentin redeclared the workflow in npm's UI.
+3. **The dispatch path had no permissions**: re-dispatch failed EUSAGE (id-token write) — the callable
+   now carries its own top-level permissions (PR #2, merged by the agent himself — first no-bump
+   autonomous merge, rebase, branch auto-deleted).
+
+Final state: `gh workflow run release-publish.yml -f tag=v0.1.2` GREEN (2m15); independent verification —
+npm view latest = 0.1.2, stranger-path npx store round-trip, **`--version` answered `0.1.2` from the
+registry** (first self-reporting release, ticket 01 live in production), release page v0.1.2 published.
+Ruleset 25550961 active: PR-only, no bypass, deletion/non-ff refused, rebase-only merge methods,
+required checks test+check.
