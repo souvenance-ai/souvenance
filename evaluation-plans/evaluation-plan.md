@@ -1,6 +1,6 @@
-# Evaluation Plan: ai-memory Skill
+# Evaluation Plan: souvenance Skill
 
-Instructions for an **evaluator agent** that tests whether a sub-agent can use the `/ai-memory` skill to maintain persistent memory across session boundaries.
+Instructions for an **evaluator agent** that tests whether a sub-agent can use the `/souvenance` skill to maintain persistent memory across session boundaries.
 
 ---
 
@@ -22,7 +22,7 @@ Each **scenario** follows this lifecycle:
 1. [Evaluator] Create a fresh temp DB directory.
 2. [Evaluator] Pre-seed the DB if the scenario requires it (optional).
 3. [Evaluator] Spawn sub-agent #1 with a task prompt and the --db path.
-4. [Sub-agent #1] Discovers and uses the /ai-memory skill to do the task.
+4. [Sub-agent #1] Discovers and uses the /souvenance skill to do the task.
 5. [Sub-agent #1] Finishes.
 6. [Evaluator] Optionally spawn sub-agent #2 (a "fresh session") with a follow-up task against the SAME --db path. Sub-agent #2 has NO knowledge of what #1 did — it must recover context from the store.
 7. [Sub-agent #2] Finishes.
@@ -35,7 +35,7 @@ Each **scenario** follows this lifecycle:
 
 - **Every sub-agent gets a clean conversation context.** Never carry over conversation history between sub-agents. Each one is a fresh `task` invocation.
 - **The only shared state is the SQLite file.** Sub-agents communicate through the store and nothing else.
-- **Do not leak the skill name in the task prompt.** Say "you have a tool for persistent memory" or similar; let the agent discover and load the `/ai-memory` skill itself. (If it fails to discover the skill, that is a FAIL for "skill discovery.")
+- **Do not leak the skill name in the task prompt.** Say "you have a tool for persistent memory" or similar; let the agent discover and load the `/souvenance` skill itself. (If it fails to discover the skill, that is a FAIL for "skill discovery.")
 - **Do not leak the assertion criteria.** The sub-agent must not know how it will be graded.
 
 ### Environment setup per scenario
@@ -96,7 +96,7 @@ Record the raw CLI output as evidence for each assertion.
 
 Read the sub-agent's final message and its tool-call trace. Check for:
 
-- **Skill discovery**: Did it load the `/ai-memory` skill (via the `skill` tool) before using memory commands?
+- **Skill discovery**: Did it load the `/souvenance` skill (via the `skill` tool) before using memory commands?
 - **Correct CLI usage**: Did it use correct command syntax? Did it pass `--db`? Did it parse JSON output correctly? Did it use the addition-only commands (`supersede`, `deprecate`, `merge`) when revising or removing memories, rather than the removed `update --content` or bare `delete`?
 - **Memory quality**: Are stored memories self-contained, one-concept-per-memory, with searchable keywords? (Per the "Writing good memories" guidance in SKILL.md.)
 - **Frontier loop** (where applicable): Did it use search → read → traverse, or did it try to dump the whole DB?
@@ -138,7 +138,7 @@ Use `--db <EVAL_DB>` for all memory commands.
 
 | # | Assertion | Evidence |
 |---|-----------|----------|
-| 1.5 | Sub-agent loaded the `/ai-memory` skill | `skill` tool call with name `ai-memory` |
+| 1.5 | Sub-agent loaded the `/souvenance` skill | `skill` tool call with name `souvenance` |
 | 1.6 | Sub-agent used `memory store` at least twice | bash calls to `memory store` |
 | 1.7 | Sub-agent used `memory link` | bash call to `memory link` |
 
@@ -165,7 +165,7 @@ Use `--db <EVAL_DB>` for all memory commands.
 
 | # | Assertion | Evidence |
 |---|-----------|----------|
-| 1.10 | Sub-agent loaded the `/ai-memory` skill | `skill` tool call |
+| 1.10 | Sub-agent loaded the `/souvenance` skill | `skill` tool call |
 | 1.11 | Sub-agent used `memory search` | bash call to `memory search` |
 | 1.12 | Sub-agent correctly reported the SQLite decision | final message mentions SQLite and node:sqlite |
 | 1.13 | Sub-agent correctly reported the rationale | final message mentions native deps / better-sqlite3 / CI |
@@ -385,7 +385,7 @@ You are working on a Node.js project. You've just spent this session doing the f
 2. You decided to use a shared in-memory database for the test suite, with a setup hook that copies the schema once.
 3. You documented the fix in the README.
 
-Before you finish this session, store a session summary in persistent memory. Follow the session-summary convention from the ai-memory skill: a kind=summary memory that recaps what was done, key decisions, and what's next. Also store the key findings and decisions as individual memories, and link the summary to them.
+Before you finish this session, store a session summary in persistent memory. Follow the session-summary convention from the souvenance skill: a kind=summary memory that recaps what was done, key decisions, and what's next. Also store the key findings and decisions as individual memories, and link the summary to them.
 
 Use `--db <EVAL_DB>` for all memory commands.
 ```
@@ -662,7 +662,7 @@ echo "IDs: rest=$rest_id webpack=$webpack_id redis1=$redis1_id redis2=$redis2_id
 
 | # | Assertion | Evidence |
 |---|-----------|----------|
-| 7.13 | Loaded the skill | `skill` tool call with name `ai-memory` |
+| 7.13 | Loaded the skill | `skill` tool call with name `souvenance` |
 | 7.14 | Used `memory supersede` to revise the REST decision | bash call to `memory supersede <id> --content "..."` |
 | 7.15 | Used `memory deprecate` to soft-delete the Webpack memory | bash call to `memory deprecate <id>` |
 | 7.16 | Used `memory merge` to combine the Redis memories | bash call to `memory merge <id1> <id2> --content "..."` |

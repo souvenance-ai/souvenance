@@ -1,11 +1,13 @@
 ---
-name: ai-memory
-description: Store, retrieve, and search persistent markdown memories in a per-project SQLite store. Use when the agent needs to remember something across a session boundary, recall what was decided or learned earlier, or explore a large memory graph without loading the whole DB.
+name: souvenance
+description: Persistent, searchable agent memory in a per-project SQLite store (markdown documents, typed graph, FTS5 search). Use when the agent needs to remember something across a session boundary, recall what was decided or learned earlier, or explore a large memory graph without loading the whole DB.
 ---
 
-# AI Memory
+# Souvenance
 
 A persistent, searchable memory for agents: markdown documents stored in a per-project SQLite database, connected by a typed directed graph.
+
+> First time in this project? Load the `souvenance-setup` skill — it installs the CLI, mounts the memory, and seeds the store. This skill is the daily practice once the memory exists.
 
 ## When to use this skill
 

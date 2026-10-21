@@ -1,17 +1,17 @@
 ---
 name: setup-memory-convention
-description: Add ai-memory usage conventions to AGENTS.md so all future sessions proactively use the ai-memory skill without being told. Run once per repo.
+description: Add souvenance usage conventions to AGENTS.md so all future sessions proactively use the souvenance skill without being told. Run once per repo.
 ---
 
 # Setup Memory Convention
 
-Add conventions to `AGENTS.md` (or `CLAUDE.md`) that make future agent sessions proactively use the `/ai-memory` skill — searching for context before starting work, storing decisions as they go, and writing session summaries before finishing.
+Add conventions to `AGENTS.md` (or `CLAUDE.md`) that make future agent sessions proactively use the `/souvenance` skill — searching for context before starting work, storing decisions as they go, and writing session summaries before finishing.
 
 This is a one-time setup skill. After it runs, the conventions live in `AGENTS.md` and every subsequent session reads and follows them automatically.
 
 ## Prerequisites
 
-- The `ai-memory` skill is installed in this repo (check for `.agents/skills/ai-memory/SKILL.md`).
+- The `souvenance` skill is installed in this repo (check for `.agents/skills/souvenance/SKILL.md`).
 - `bin/souvenance.js` exists at the repo root.
 - An `AGENTS.md` or `CLAUDE.md` file exists (if neither exists, ask the user which to create).
 
@@ -23,7 +23,7 @@ This is a one-time setup skill. After it runs, the conventions live in `AGENTS.m
 node bin/souvenance.js --help
 ```
 
-If this fails, stop and tell the user the ai-memory skill doesn't appear to be installed.
+If this fails, stop and tell the user the souvenance skill doesn't appear to be installed.
 
 ### 2. Pick the file to edit
 
@@ -42,7 +42,7 @@ Append this block under the existing `## Agent skills` heading (or create the he
 ```markdown
 ### Persistent memory
 
-Check directives first: `list --where "metadata->>'$.kind' = 'directive'"`. Directives are strict rules, constraints, and gotchas that must be respected before acting. Then search memory when you need context you don't have — before starting work, when asked a question, or when recalling a prior decision. Store decisions as you make them. Load the `/ai-memory` skill for the CLI reference. When you complete a non-trivial task, store a `kind: "summary"` memory before sending your final message.
+Check directives first: `list --where "metadata->>'$.kind' = 'directive'"`. Directives are strict rules, constraints, and gotchas that must be respected before acting. Then search memory when you need context you don't have — before starting work, when asked a question, or when recalling a prior decision. Store decisions as you make them. Load the `/souvenance` skill for the CLI reference. When you complete a non-trivial task, store a `kind: "summary"` memory before sending your final message.
 ```
 
 Adapt the wording to match the voice of the surrounding sections, but keep these four rules intact:
