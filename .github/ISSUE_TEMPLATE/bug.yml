@@ -22,7 +22,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: "`npm ls -g @souvenance/cli`, or paste the exact `npx @souvenance/cli@<version>` command you ran. (The CLI does not yet print a `--version`.)"
+      description: "`souvenance --version` — or `npm ls -g @souvenance/cli` on CLI ≤ 0.1.1, or paste the exact `npx @souvenance/cli@<version>` command you ran."
     validations:
       required: true
   - type: input

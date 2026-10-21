@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Store } from "../src/db.ts";
 import { slugify, filenameFor, renderMemory } from "../src/export.ts";
+import { resolveVersion } from "../src/version.ts";
 
 const HELP = `Usage: souvenance <command> [args] [flags]
 
@@ -49,6 +50,7 @@ Commands:
 Flags:
   --db <path>      Override the DB path (default: .souvenance/memory.db)
   --output <dir>   Export output directory (default: .souvenance/export/)
+  --version        Print the version alone (also: souvenance version)
   --help, -h       Show this help
 
 Output:
@@ -160,7 +162,7 @@ Notes:
     file_permissions reports any drift below owner-only.
 `;
 
-const BOOLEAN_FLAGS = new Set(["--all", "--force", "--resolved", "--fix"]);
+const BOOLEAN_FLAGS = new Set(["--all", "--force", "--resolved", "--fix", "--version"]);
 
 function parseArgs(argv) {
   const args = [];
@@ -225,6 +227,14 @@ function num(flag) {
 
 async function main() {
   const { args, flags } = parseArgs(process.argv.slice(2));
+
+  // --version (flag or subcommand form) is intercepted before usage rendering
+  // and before any store opens: reporting the version must not create a DB as
+  // a side effect, and it must never fall through to usage (spec cli-version-flag).
+  if (flags["--version"] || args[0] === "version") {
+    process.stdout.write(resolveVersion(import.meta.dirname) + "\n");
+    return;
+  }
 
   if (flags.help || args.length === 0) {
     process.stdout.write(HELP);

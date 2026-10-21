@@ -1,0 +1,31 @@
+# The release check (release regime, ticket 03): a PR that touches the
+# artifact scope (scripts/release-scope.mjs) must carry its own package.json
+# bump — a bump forgot means a release silently skipped, and this check
+# makes the omission a red gate instead. PRs without artifact-scope changes
+# pass without a bump (.scratch/docs/skills churn never publishes).
+# The merge→release leg itself is release-tag.yml (unchanged from the
+# original build, decision b6882bf2 leg 1).
+name: release-check
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # both SHAs for the git show / diff pair
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: release check (bump present when the artifact scope is touched)
+        run: node scripts/pr-check.mjs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
