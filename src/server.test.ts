@@ -156,6 +156,19 @@ test("server: one-gesture relations on POST /memories and /supersede; bad shape 
     assert.equal(newRels.json.length, 1);
     assert.equal(newRels.json[0].kind, "continues");
 
+    // A plain supersede (no relations) inherits the source's outgoing
+    // edges over HTTP too — the lib ruling shows through every surface.
+    // The head here (sup.json.id) carries the explicit `continues` claim.
+    const plainSup = await call(app, "POST", `/memories/${sup.json.id}/supersede`, {
+      content: "revised again, plain: edges inherited",
+    });
+    assert.equal(plainSup.status, 201);
+    const heldRels = await call(app, "GET", `/memories/${plainSup.json.id}/relations?direction=out`);
+    assert.deepEqual(
+      heldRels.json.map((r: { kind: string }) => r.kind).sort(),
+      ["continues"],
+    );
+
     // Refusals: wrong shape, missing kind, nonexistent target — all 400s
     // (the lib's precise existence error) and nothing silently ignored.
     const badShape = await call(app, "POST", "/memories", {

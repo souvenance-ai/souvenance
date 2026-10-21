@@ -581,7 +581,7 @@ const ENDPOINTS: Array<{ method: string; path: string; note: string }> = [
   { method: "GET", path: "/memories/:id", note: "get (bumps access_count)" },
   { method: "PATCH", path: "/memories/:id", note: "update {metadata?, weight?}" },
   { method: "DELETE", path: "/memories/:id", note: "hard delete, requires ?force=1 (prefer deprecate)" },
-  { method: "POST", path: "/memories/:id/supersede", note: "supersede {content, metadata?, weight?, relations?: [{to, kind}]} -> 201 {id}; relations attach to the NEW memory" },
+  { method: "POST", path: "/memories/:id/supersede", note: "supersede {content, metadata?, weight?, relations?: [{to, kind}]} -> 201 {id}; the head inherits the source's outgoing edges, explicit relations are used verbatim instead" },
   { method: "POST", path: "/memories/:id/deprecate", note: "soft-delete" },
   { method: "POST", path: "/memories/:id/link", note: "link {to, kind, metadata?} -> 201" },
   { method: "DELETE", path: "/memories/:id/link", note: "unlink {to, kind?} — removes the edge; kind required when the pair carries several (409 with the candidates)" },

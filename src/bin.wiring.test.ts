@@ -220,6 +220,21 @@ test("wiring: the real bin stores one-gesture relations — and refuses a malfor
     assert.ok(bridge, "the supersedes bridge is there");
     assert.equal(bridge.to_id, newId);
 
+    // A PLAIN supersede (no --relation) inherits the head's outgoing edges
+    // (ticket 03 ruling): the successor claims the source's claims.
+    const v2 = spawnSync(
+      process.execPath,
+      [bin, "--db", dbPath, "supersede", newId, "--content", "v2 plain, edges inherited"],
+      { encoding: "utf8" },
+    );
+    assert.equal(v2.status, 0);
+    const v3id = v2.stdout.trim();
+    const v3 = JSON.parse(
+      spawnSync(process.execPath, [bin, "--db", dbPath, "relations", v3id, "--direction", "out"], { encoding: "utf8" }).stdout,
+    );
+    assert.deepEqual(v3.map((r: { kind: string }) => r.kind).sort(), ["references"]);
+    assert.equal(v3[0].to_id, target);
+
     // Refuse-don't-hide: a truncated uuid is refused AT THE FLAG.
     const prefix = spawnSync(
       process.execPath,

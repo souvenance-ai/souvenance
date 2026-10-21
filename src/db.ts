@@ -270,6 +270,48 @@ export class Store {
             "INSERT INTO memories (id, content, metadata, created_at, weight) VALUES (?, ?, ?, ?, ?)",
           )
           .run(newId, content, metadata, created_at, weight);
+        // Edge inheritance (ticket 03, single-write-graph): the successor
+        // claims the source's outgoing edges — a revision corrects
+        // CONTENT, not the relation set. Inheritance mirrors the
+        // kind/tags precedent: no explicit relations → the set is copied
+        // verbatim, row by row (kind, metadata, created_at), the old
+        // memory KEEPS its edges as provenance (addition-only, nothing
+        // moves); explicit --relation skips the copy — verbatim wins
+        // over inheritance, the same way explicit --metadata overrides
+        // kind/tags.
+        if (!opts.relations?.length) {
+          const inherited = this.db
+            .prepare(
+              "SELECT to_id, kind, metadata, created_at FROM edges WHERE from_id = ?",
+            )
+            .all(oldId) as unknown as Array<{
+            to_id: string;
+            kind: string;
+            metadata: string | null;
+            created_at: string;
+          }>;
+          const existsStmt = this.db.prepare("SELECT 1 FROM memories WHERE id = ?");
+          const edgeStmt = this.db.prepare(
+            "INSERT OR IGNORE INTO edges" +
+              " (from_id, to_id, kind, metadata, created_at)" +
+              " VALUES (?, ?, ?, ?, ?)",
+          );
+          for (const e of inherited) {
+            // Pre-validated like insertRelations: refuse-don't-hide — a
+            // hand-corrupted orphan source edge names its missing target
+            // precisely instead of failing an FK message, and the
+            // ROLLBACK keeps the old memory active and unbridged.
+            if (!existsStmt.get(e.to_id)) {
+              throw new Error(`memory not found: ${e.to_id}`);
+            }
+            edgeStmt.run(newId, e.to_id, e.kind, e.metadata, e.created_at);
+          }
+        }
+        // The one-gesture relations are the NEW memory's outgoing edges —
+        // the ritual citation "link it right after storing" dies here.
+        if (opts.relations?.length) {
+          this.insertRelations(newId, opts.relations, created_at);
+        }
         this.db
           .prepare(
             "INSERT OR IGNORE INTO edges" +
@@ -277,11 +319,6 @@ export class Store {
               " VALUES (?, ?, ?, ?, ?)",
           )
           .run(oldId, newId, "supersedes", null, created_at);
-        // The one-gesture relations are the NEW memory's outgoing edges —
-        // the ritual citation "link it right after storing" dies here.
-        if (opts.relations?.length) {
-          this.insertRelations(newId, opts.relations, created_at);
-        }
         this.db
           .prepare("UPDATE memories SET status = 'superseded' WHERE id = ?")
           .run(oldId);

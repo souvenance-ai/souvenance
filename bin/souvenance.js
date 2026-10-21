@@ -80,6 +80,12 @@ Notes:
     (the terminal successor via the supersedes/merges bridges); raw rows unchanged
   supersede/merge without --metadata inherit kind and tags from the source
     memory(ies); explicit --metadata is used verbatim
+  supersede inherits the source's outgoing edges the same way: a revision
+    corrects content, not the relation set — the head claims what its
+    source claimed (rows copied verbatim; the old memory keeps its edges
+    as provenance). Explicit --relation REPLACES the inherited set,
+    verbatim; the old→new supersedes edge still happens either way
+    (merge does not inherit: its sources stay elders)
   export writes one .md file per memory (all statuses) with YAML frontmatter;
     memory:// links are rewritten to relative file links; idempotent
   fork copies the store to a new store file — a consistent VACUUM INTO

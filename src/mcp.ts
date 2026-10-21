@@ -218,7 +218,7 @@ export const TOOLS: McpTool[] = [
   {
     name: "supersede",
     description:
-      "Revise a decision: stores new content as an active memory, links the old one to it via supersedes and marks it superseded. Content is immutable — this is how decisions change. relations attach to the NEW memory. Returns {id}.",
+      "Revise a decision: stores new content as an active memory, links the old one to it via supersedes and marks it superseded. The head inherits the source's outgoing edges (a revision corrects content, not the relation set); explicit relations attach to the NEW memory and replace that inheritance verbatim — like explicit --metadata overrides kind/tags. Content is immutable — this is how decisions change. Returns {id}.",
     inputSchema: {
       type: "object",
       properties: {
