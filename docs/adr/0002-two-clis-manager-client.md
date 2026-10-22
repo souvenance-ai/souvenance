@@ -1,0 +1,3 @@
+# Two CLIs over one package: `souvenance` manages locally, `souv` consumes the API
+
+The manager CLI and the API client serve different audiences and trust domains. `souvenance` is the operator's tool for local state — server lifecycle, config, tokens, offline maintenance — and may open stores when no server owns them. `souv` is a thin client of the server API for agents and scripts; it never touches local state (no SQLite, no config writes), so it cannot bypass the server's single enforcement point. Both bins ship from the one `souvenance` package (same version, no skew; the fabrique dist rewrite preserves the `bin` map). Precedents: kubectl vs minikube for a local API server; `gh` as the thin client of the GitHub API.
