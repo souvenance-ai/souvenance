@@ -1054,9 +1054,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"fabrique@npm:2.0.21":
-  version: 2.0.21
-  resolution: "fabrique@npm:2.0.21"
+"fabrique@npm:2.0.23":
+  version: 2.0.23
+  resolution: "fabrique@npm:2.0.23"
   dependencies:
     "@inquirer/prompts": "npm:^8.7.4"
     chalk: "npm:^6.0.1"
@@ -1064,7 +1064,7 @@ __metadata:
     zod: "npm:^4.6.7"
   bin:
     fabrique: src/cli/cli.js
-  checksum: 10c0/3a41d42e427c2e7ca4886efb278d8b101606db7243efb4ef5c017f3ccd5ae7fe8fefe54ee6cc145a620e70b1b3589c7c03346fe5cccbe6ca4861a6df869ed9e5
+  checksum: 10c0/34d39e91bf40e1bcc18904bbf301f1c95430f5fe10560a2a60ca13ff6da5098a94587ebdd6601095b3cb79968c2b21ef8b4119809d1a48d0a3bf1841c8b382d8
   languageName: node
   linkType: hard
 
@@ -1577,7 +1577,7 @@ __metadata:
     "@vitest/coverage-istanbul": "npm:^5.0.5"
     chalk: "npm:^6.0.1"
     commander: "npm:^15.0.0"
-    fabrique: "npm:2.0.21"
+    fabrique: "npm:2.0.23"
     hono: "npm:^4.13.13"
     prettier: "npm:^3.9.10"
     prettier-plugin-organize-imports: "npm:^4.3.0"

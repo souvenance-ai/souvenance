@@ -37,3 +37,7 @@ jobs:
 
       - name: Check code quality
         run: yarn fb:check
+
+      - name: Run tests
+        if: ${{ hashFiles('src/**/*.test.ts', 'src/**/*.spec.ts') != '' }}
+        run: yarn fb:test
