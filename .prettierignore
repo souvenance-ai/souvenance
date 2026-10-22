@@ -1,0 +1,7 @@
+# Legacy v0.1.x corpus — reference for the port, not part of the package source
+legacy/
+
+# Agent workflow assets (installed skills, agent docs) — not product source,
+# reformatted wholesale on skill updates; exempt from the package's format check
+.agents/
+docs/agents/
