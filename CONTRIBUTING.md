@@ -1,40 +1,127 @@
-# Contributing to souvenance
+# Contributing
 
-Thanks for the interest. souvenance is small and opinionated — this guide gets you productive fast.
+This projet is open to everyone. Feel free to test the library, share it, improve it, and create merge requests.
 
-## Setup
+## Getting started
 
-- **Node.js 24+** (the built-in `node:sqlite` module is the database engine), **yarn 4** (`corepack enable`).
-- `yarn install`
-- `yarn typecheck` — `tsc --noEmit`, must stay clean.
-- `yarn test` — node's built-in test runner; tests are co-located as `src/*.test.ts` and run against temp stores.
+### Tools
 
-## Layout
+#### [nvm](https://github.com/nvm-sh/nvm)
 
-- `src/db.ts` — the deep module: the `Store` (open, WAL, migrate-on-open, busy-retry, all verbs). The CLI, HTTP server and MCP surface are thin over it.
-- `src/server.ts`, `src/mcp.ts` — the HTTP and MCP surfaces. Both mirror the CLI verbs 1:1 and return the same JSON shapes.
-- `bin/souvenance.js` — the CLI entry (the generic `memory` bin was dropped; `souvenance` is the only bin).
-- `CONTEXT.md` — the domain glossary. Use these words: **memory** (one document), **content**, **metadata**, **relation** (a typed graph edge — not "link"), **kind**, **store** (the whole database, never one memory), **frontier** (the explore loop), **individual** (one store = one agent = one person).
-- `docs/adr/` — architectural decisions (labeled property graph over a triple store; fork-never-sync). Structural changes add an ADR.
-- `.scratch/` — the working issue tracker: one directory per effort, a `spec.md`, numbered issue files.
+We recommend using [nvm](https://github.com/nvm-sh/nvm) to manage your Node.js versions.
 
-## Ground rules
+```shell
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+```
 
-- **Addition-only.** Memory content is immutable — corrections are `supersede`, `deprecate`, `merge`, never overwrites. Code that rewrites stored content silently is a design bug.
-- **No schema migrations by hand.** The store migrates on open; new migrations are additive and tested.
-- **Minimal dependencies** — currently `hono` for the HTTP surface, nothing else at runtime.
-- **Linear history** — PRs land by rebase merge, no merge commits.
-- **Repo gates are necessary, never sufficient.** Tests and typecheck do not prove an install works: release claims come only after the install-path smoke in `release.yml`.
+#### [Node](https://nodejs.org)
 
-## Pull requests
+```shell
+nvm use
 
-main is PR-only — direct pushes are refused by branch protection; history stays linear (rebase merges, no merge commits).
+# Verify the Node.js version:
+node -v
+```
 
-- **Every change lands from a branch through a pull request.** One concern per PR; keep arcs small.
-- **The release rides the PR.** A PR touching the artifact scope (`src/`, `bin/`, `package.json`, `README.md`, `LICENSE`, `scripts/build-bin.mjs`, `tsconfig.build.json`) must carry its own `package.json` bump — the `release-check` gate fails otherwise. Merging such a PR IS the release: the tag is pushed automatically and the publish flow (gate, OIDC trusted publishing, install-path smoke, release page) runs. Bump level is patch by default — adjust the version in the PR when the change deserves more.
-- **PRs outside the artifact scope** merge without a bump — `.scratch` tickets, docs and skills never publish.
-- `scripts/release-status.mjs` reports the release state at any moment (last tag, staged bump, pending artifact-scope commits, suggested version).
+#### [Yarn](https://yarnpkg.com)
 
-## Bugs and features
+```shell
+corepack enable yarn
 
-Open a GitHub issue — the [bug report form](https://github.com/souvenance-ai/souvenance/issues/new?template=bug.yml) asks for the surface, version and repro commands; run `souvenance doctor` first and paste its findings if any. Feature ideas are welcome as blank issues: describe the use case, not just the mechanism — increments here are demand-driven, so the lived need is the argument.
+# Verify Yarn version:
+yarn -v
+
+# Install the dependencies:
+yarn install
+```
+
+### Code
+
+- The source code is located in the `src` directory.
+- The projet uses [prettier](https://prettier.io/) to format the code. You'll want to enable and configure it in your IDE.
+- The tests run with [vitest](https://vitest.dev)
+
+### Commands
+
+- `fb:build`: builds the library.
+  - converts the typescript files into javascript files, copies the scss files, and assembles all the assets to create a package ready to be published.
+  - some files are handled differently:
+    - `*.protected.{ts,scss}` or `**/*.protected/**`: these files are exported under `package-name/protected`
+      - this is indented to expose parts of the code that should be restricted to advanced users only, or shared to other libraries requiring _internal_ control.
+    - `*.private.{ts,scss}` or `/*.private/**`: these files are **not** exported.
+      - this is indented to consume parts of the code internally, and not expose them publicly.
+- `fb:format`: formats the code using `prettier`.
+- `fb:test`: runs the tests using `vitest`.
+- `fb:test:coverage`: runs the tests with coverage.
+  - by default, 100% code coverage is required, to enforce good quality.
+- `fb:bench`: runs the bench tests.
+- `fb:typedoc`: generates the documentation.
+  - if the library exposes publicly only a few and/or simple parts, the documentation may be defined in the `README.md` instead.
+
+### To create a PR
+
+1. fork the repository
+1. add the feature/fix by modifying the code in the `src/` directory
+1. add/write some tests until 100% code coverage is reached (run the tests with `yarn fb:test:coverage`)
+1. format the code, using the command `yarn fb:format`
+1. commit and push your work following the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) convention
+1. create a PR from your repository to the upstream repository, explaining clearly what was added/fixed.
+
+## Release Workflow
+
+> The `release.yml` workflow runs on `pull_request` and `push` events on the `main` and `develop` branches.
+> It invokes the `yarn fb:ci:release` used to build and publish the package.
+> Note that the `publish` step runs only if the equivalent stable version (`x.y.z`) does not already exist on npm
+
+### 1. Pull Request to `main` or `develop`
+
+- The `dev` label is added to the PR
+- Impacted packages are published as: `x.y.z-dev.<timestamp>`
+- npm dist-tag: `dev`
+
+> Use the `dev` versions only if required.
+
+### 2. Push to `develop`
+
+- Impacted packages are published as: `x.y.z-rc.<timestamp>`
+- npm dist-tag: `rc`
+
+### 3. Push to `main`
+
+- Stable publication: `x.y.z`
+- npm dist-tag: `latest`
+
+### Graph
+
+```mermaid
+flowchart LR
+  EVENT("WORKFLOW TRIGGER")
+  HAS_DEV_TAG{"has &quotdev&quot tag ?"}
+  SKIP_BUILD(["skip build"])
+  BUILD_DEV_PACKAGES["build &quotdev&quot package"]
+  PUBLISH_DEV_PACKAGES["publish &quotdev&quot package"]
+  BUILD_RC_PACKAGES["build &quotrc&quot package"]
+  PUBLISH_RC_PACKAGES["publish &quotrc&quot package"]
+  BUILD_PROD_PACKAGES["build &quotprod&quot package"]
+  PUBLISH_PROD_PACKAGES["publish &quotprod&quot package"]
+  TARGET_BRANCH{"branch"}
+
+  EVENT -- "pull_request" --> HAS_DEV_TAG
+  HAS_DEV_TAG -- "no" --> SKIP_BUILD
+  HAS_DEV_TAG -- "yes" --> BUILD_DEV_PACKAGES
+  BUILD_DEV_PACKAGES --> PUBLISH_DEV_PACKAGES
+
+  EVENT -- "push" --> TARGET_BRANCH
+
+  TARGET_BRANCH -- "develop" --> BUILD_RC_PACKAGES
+  BUILD_RC_PACKAGES --> PUBLISH_RC_PACKAGES
+
+  TARGET_BRANCH -- "main" --> BUILD_PROD_PACKAGES
+  BUILD_PROD_PACKAGES --> PUBLISH_PROD_PACKAGES
+```
+
+## Important Rules
+
+- if an equivalent **stable** version already exists on npm: the release is skipped
+- the `package.json` file in the repo must keep stable versions (`x.y.z`)
+- `-dev` / `-rc` suffixes are generated in CI

@@ -1,37 +1,62 @@
 {
-  "name": "@souvenance/cli",
-  "version": "0.1.4",
-  "description": "Persistent, searchable agent memory in a per-project SQLite store",
-  "license": "MIT",
-  "files": [
-    "dist/",
-    "README.md",
-    "LICENSE"
-  ],
+  "name": "souvenance",
+  "version": "0.2.0",
   "type": "module",
-  "packageManager": "yarn@4.18.0",
-  "engines": {
-    "node": ">=24"
-  },
-  "bin": {
-    "souvenance": "dist/bin/souvenance.js"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts",
-    "build": "tsc -p tsconfig.build.json && node scripts/build-bin.mjs",
-    "prepublishOnly": "npm run build"
-  },
-  "devDependencies": {
-    "@types/node": "^26.2.0",
-    "typescript": "5.8.3"
-  },
+  "description": "AI memory",
+  "keywords": [],
+  "author": "Valentin Richard",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/souvenance-ai/souvenance.git"
   },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "yarn@4.18.1",
+  "main": "src/cli/cli.ts",
+  "bin": "src/cli/cli.ts",
+  "scripts": {
+    "=== FB: DEV ===": "",
+    "fb:run": "node src/cli/cli.ts",
+    "fb:link": "npm link",
+    "=== FB: BUILD ===": "",
+    "fb:build": "fabrique build",
+    "=== FB: TEST ===": "",
+    "fb:test": "vitest run",
+    "fb:test:coverage": "vitest run --coverage",
+    "fb:bench": "vitest bench",
+    "=== FB: CODE QUALITY ===": "",
+    "fb:format": "yarn fb:format:fix",
+    "fb:format:check": "prettier --check --ignore-unknown --config .prettierrc \"./**/*.{js,jsx,ts,tsx,html,css,scss,json,md}\"",
+    "fb:format:fix": "prettier --write --ignore-unknown --config .prettierrc \"./**/*.{js,jsx,ts,tsx,html,css,scss,json,md}\"",
+    "fb:check": "yarn fb:check:types && yarn fb:format:check",
+    "fb:check:types": "tsc -p tsconfig.json --noEmit",
+    "=== FB: RELEASE ===": "",
+    "fb:manual:release": "fabrique release",
+    "fb:ci:release": "fabrique ci release"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@vitest/coverage-istanbul": "^5.0.5",
+    "fabrique": "2.0.21",
+    "prettier": "^3.9.10",
+    "prettier-plugin-organize-imports": "^4.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
-    "hono": "^4.13.13"
+    "@inquirer/prompts": "^8.7.4",
+    "chalk": "^6.0.1",
+    "commander": "^15.0.0",
+    "hono": "^4.13.13",
+    "zod": "^4.6.7"
+  },
+  "access": "public",
+  "fabrique": {
+    "version": "2.0.21",
+    "type": "lib"
   }
 }

@@ -54,5 +54,5 @@
     "strictPropertyInitialization": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["src/**/*.ts", "bin/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }
