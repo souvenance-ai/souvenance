@@ -27,7 +27,10 @@
     "fb:check:types": "tsc -p tsconfig.json --noEmit",
     "=== FB: RELEASE ===": "",
     "fb:manual:release": "fabrique release",
-    "fb:ci:release": "fabrique ci release"
+    "fb:ci:release": "fabrique ci release",
+    "=== CUSTOM ===": "",
+    "run": "node src/cli/cli.ts",
+    "link": "npm link"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
