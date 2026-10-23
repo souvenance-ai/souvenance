@@ -26,17 +26,17 @@ function count(store: Store, sql: string, ...params: SQLInputValue[]): number {
   return row<{ c: number }>(store, sql, ...params).c;
 }
 
-function uuidRegex(s: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s);
+function uuidRegex(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 }
 
 interface RawMemory {
-  id: string;
-  content: string;
-  metadata: string | null;
-  created_at: string;
-  status: string;
-  hot: number;
+  readonly id: string;
+  readonly content: string;
+  readonly metadata: string | null;
+  readonly created_at: string;
+  readonly status: string;
+  readonly hot: number;
 }
 
 function memoryRow(store: Store, id: string): RawMemory {
@@ -44,11 +44,11 @@ function memoryRow(store: Store, id: string): RawMemory {
 }
 
 interface RawEdge {
-  from_id: string;
-  to_id: string;
-  kind: string;
-  metadata: string | null;
-  created_at: string;
+  readonly from_id: string;
+  readonly to_id: string;
+  readonly kind: string;
+  readonly metadata: string | null;
+  readonly created_at: string;
 }
 
 function edgesOf(store: Store, id: string): RawEdge[] {
@@ -65,12 +65,12 @@ test('store: inserts a memory with UUID id, metadata, born cold and active', () 
     const id = store.store('hello world', { metadata: { tags: ['a'] } });
     assert.ok(uuidRegex(id), `id should be a UUID v4, got: ${id}`);
 
-    const m = memoryRow(store, id);
-    assert.equal(m.id, id);
-    assert.equal(m.content, 'hello world');
-    assert.deepEqual(JSON.parse(m.metadata!), { tags: ['a'] });
-    assert.equal(m.status, 'active');
-    assert.equal(m.hot, 0, 'a memory is born cold — the flag is earned via setHot');
+    const memory = memoryRow(store, id);
+    assert.equal(memory.id, id);
+    assert.equal(memory.content, 'hello world');
+    assert.deepEqual(JSON.parse(memory.metadata!), { tags: ['a'] });
+    assert.equal(memory.status, 'active');
+    assert.equal(memory.hot, 0, 'a memory is born cold — the flag is earned via setHot');
   } finally {
     cleanup();
   }
@@ -80,9 +80,9 @@ test('store: works without metadata', () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store('no metadata here');
-    const m = memoryRow(store, id);
-    assert.equal(m.content, 'no metadata here');
-    assert.equal(m.metadata, null);
+    const memory = memoryRow(store, id);
+    assert.equal(memory.content, 'no metadata here');
+    assert.equal(memory.metadata, null);
   } finally {
     cleanup();
   }
@@ -125,7 +125,7 @@ test('store: relations create the outgoing edges in the same call', () => {
     });
     const edges = edgesOf(store, id);
     assert.deepEqual(
-      edges.map((e) => `${e.kind}->${e.to_id}`),
+      edges.map((edge) => `${edge.kind}->${edge.to_id}`),
       [`extends->${target}`, `references->${target}`],
     );
     // The target's incoming side sees the edges too.
@@ -197,11 +197,11 @@ test('link: creates a typed directed edge', () => {
     const b = store.store('memory b');
     store.link(a, b, 'references');
 
-    const e = row<RawEdge>(store, 'SELECT * FROM edges');
-    assert.equal(e.from_id, a);
-    assert.equal(e.to_id, b);
-    assert.equal(e.kind, 'references');
-    assert.equal(e.metadata, null);
+    const edge = row<RawEdge>(store, 'SELECT * FROM edges');
+    assert.equal(edge.from_id, a);
+    assert.equal(edge.to_id, b);
+    assert.equal(edge.kind, 'references');
+    assert.equal(edge.metadata, null);
   } finally {
     cleanup();
   }
@@ -214,8 +214,8 @@ test('link: stores metadata as JSON', () => {
     const b = store.store('memory b');
     store.link(a, b, 'references', { metadata: { note: 0.9 } });
 
-    const e = row<{ metadata: string | null }>(store, 'SELECT metadata FROM edges');
-    assert.deepEqual(JSON.parse(e.metadata!), { note: 0.9 });
+    const edge = row<{ metadata: string | null }>(store, 'SELECT metadata FROM edges');
+    assert.deepEqual(JSON.parse(edge.metadata!), { note: 0.9 });
   } finally {
     cleanup();
   }
@@ -305,7 +305,7 @@ test('unlink: explicit kind removes exactly that edge among several', () => {
     store.unlink(a, b, 'extends');
     const kinds = (
       store.db.prepare('SELECT kind FROM edges ORDER BY kind').all() as { kind: string }[]
-    ).map((e) => e.kind);
+    ).map((edge) => edge.kind);
     assert.deepEqual(kinds, ['references']);
   } finally {
     cleanup();
@@ -428,12 +428,12 @@ test('supersede: stores new memory, links old, marks old as superseded', () => {
 
     assert.ok(uuidRegex(newId), 'new id should be a UUID');
 
-    const oldMem = memoryRow(store, oldId);
-    assert.equal(oldMem.status, 'superseded');
+    const oldMemory = memoryRow(store, oldId);
+    assert.equal(oldMemory.status, 'superseded');
 
-    const newMem = memoryRow(store, newId);
-    assert.equal(newMem.content, 'hello universe');
-    assert.equal(newMem.status, 'active');
+    const newMemory = memoryRow(store, newId);
+    assert.equal(newMemory.content, 'hello universe');
+    assert.equal(newMemory.status, 'active');
 
     const bridge = row<{ from_id: string; to_id: string; kind: string }>(
       store,
@@ -602,14 +602,14 @@ test('supersede: relations attach to the NEW memory, supersedes edge still lands
     });
     const out = edgesOf(store, newId);
     assert.deepEqual(
-      out.map((e) => `${e.kind}->${e.to_id}`),
+      out.map((edge) => `${edge.kind}->${edge.to_id}`),
       [`references->${other}`],
     );
     // The old memory keeps exactly its supersedes bridge — the bridge
     // leaves the OLD memory; the head carries only its authored claims.
     const bridge = edgesOf(store, oldId);
     assert.deepEqual(
-      bridge.map((e) => `${e.kind}->${e.to_id}`),
+      bridge.map((edge) => `${edge.kind}->${edge.to_id}`),
       [`supersedes->${newId}`],
     );
     assert.equal(memoryRow(store, oldId).status, 'superseded');
@@ -652,23 +652,25 @@ test('supersede: the head inherits the source outgoing edges verbatim', () => {
       ],
     });
     const newId = store.supersede(oldId, '# Decision: v2 (content)');
-    const inherited = edgesOf(store, newId).filter((e) => e.kind !== 'supersedes');
+    const inherited = edgesOf(store, newId).filter((edge) => edge.kind !== 'supersedes');
     // The two authored claims carried over, ROW VERBATIM (kind, metadata,
     // created_at) — the head claims what v1 claimed.
-    assert.deepEqual(inherited.map((e) => [e.kind, e.to_id]).sort(), [
+    assert.deepEqual(inherited.map((edge) => [edge.kind, edge.to_id]).sort(), [
       ['extends', targetB],
       ['references', targetA],
     ]);
-    const sourceRows = edgesOf(store, oldId).filter((e) => e.kind !== 'supersedes');
+    const sourceRows = edgesOf(store, oldId).filter((edge) => edge.kind !== 'supersedes');
     for (const copy of inherited) {
-      const src = sourceRows.find((r) => r.kind === copy.kind && r.to_id === copy.to_id);
-      assert.ok(src, 'each copied edge has a source row');
+      const source = sourceRows.find(
+        (sourceRow) => sourceRow.kind === copy.kind && sourceRow.to_id === copy.to_id,
+      );
+      assert.ok(source, 'each copied edge has a source row');
       assert.equal(
         copy.created_at,
-        src!.created_at,
+        source!.created_at,
         'verbatim copy carries the original timestamp',
       );
-      assert.equal(copy.metadata, src!.metadata);
+      assert.equal(copy.metadata, source!.metadata);
     }
     // Addition-only: the old memory KEEPS its edges (provenance), plus the
     // new supersedes bridge. The head is not isolated — the edge set is
@@ -692,11 +694,11 @@ test('supersede: explicit relations REPLACE the inherited set verbatim', () => {
     const newId = store.supersede(oldId, '# Decision: v2 — claims corrected', {
       relations: [{ to: targetC, kind: 'references' }],
     });
-    const out = edgesOf(store, newId).filter((e) => e.kind !== 'supersedes');
+    const out = edgesOf(store, newId).filter((edge) => edge.kind !== 'supersedes');
     // Verbatim wins over inheritance, the way explicit metadata
     // overrides kind/tags inheritance.
     assert.deepEqual(
-      out.map((e) => `${e.kind}->${e.to_id}`),
+      out.map((edge) => `${edge.kind}->${edge.to_id}`),
       [`references->${targetC}`],
     );
     // The old memory keeps its authored claims AND the bridge.
@@ -788,7 +790,7 @@ test('merge: combines memories, marks originals as merged, bridges them', () => 
     assert.equal(memoryRow(store, b).status, 'merged');
 
     const bridges = edgesOf(store, a).concat(edgesOf(store, b));
-    assert.deepEqual(bridges.map((e) => `${e.kind}->${e.to_id}`).sort(), [
+    assert.deepEqual(bridges.map((edge) => `${edge.kind}->${edge.to_id}`).sort(), [
       `merges->${mergedId}`,
       `merges->${mergedId}`,
     ]);

@@ -20,47 +20,47 @@ import { Store } from './store.ts';
 const STORE_TS = fileURLToPath(new URL('./store.ts', import.meta.url));
 
 const CHILD_SCRIPT = `
-  const [modPath, dbPath, op, ...rest] = process.argv.slice(1);
-  const mod = await import(modPath);
+  const [modulePath, dbPath, operation, ...rest] = process.argv.slice(1);
+  const storeModule = await import(modulePath);
   let store;
-  if (op === 'count') {
-    store = mod.Store.open({ dbPath, readOnly: true });
-    const r = store.db.prepare('SELECT count(*) AS c FROM memories').get();
-    process.stdout.write(String(r.c));
+  if (operation === 'count') {
+    store = storeModule.Store.open({ dbPath, readOnly: true });
+    const row = store.db.prepare('SELECT count(*) AS c FROM memories').get();
+    process.stdout.write(String(row.c));
     store.close();
   } else {
-    store = mod.Store.open({ dbPath });
-    if (op === 'gated-store') {
+    store = storeModule.Store.open({ dbPath });
+    if (operation === 'gated-store') {
       const gate = Number.parseInt(rest[0], 10);
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, gate - Date.now())));
       process.stdout.write(store.store(rest[1]));
-    } else if (op === 'store') {
+    } else if (operation === 'store') {
       process.stdout.write(store.store(rest[0]));
-    } else if (op === 'link') {
+    } else if (operation === 'link') {
       store.link(rest[0], rest[1], rest[2]);
-    } else if (op === 'supersede') {
+    } else if (operation === 'supersede') {
       process.stdout.write(store.supersede(rest[0], rest[1]));
-    } else if (op === 'merge') {
+    } else if (operation === 'merge') {
       process.stdout.write(store.merge([rest[0], rest[1]], rest[2]));
-    } else if (op === 'deprecate') {
+    } else if (operation === 'deprecate') {
       store.deprecate(rest[0]);
     } else {
-      throw new Error('unknown op: ' + op);
+      throw new Error('unknown operation: ' + operation);
     }
     store.close();
   }
 `;
 
 interface ChildResult {
-  status: number;
-  stdout: string;
-  stderr: string;
+  readonly status: number;
+  readonly stdout: string;
+  readonly stderr: string;
 }
 
-function child(dbPath: string, op: string, ...args: string[]): ChildResult {
+function spawnChild(dbPath: string, operation: string, ...rest: string[]): ChildResult {
   const result = spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', CHILD_SCRIPT, STORE_TS, dbPath, op, ...args],
+    ['--input-type=module', '-e', CHILD_SCRIPT, STORE_TS, dbPath, operation, ...rest],
     { encoding: 'utf-8', timeout: 30000 },
   );
   return {
@@ -78,20 +78,22 @@ test('concurrency: many concurrent stores all persist', { timeout: 120_000 }, ()
   const dir = tempDir();
   const dbPath = join(dir, 'memory.db');
   try {
-    const N = 20;
-    const children = Array.from({ length: N }, (_, i) =>
-      child(dbPath, 'store', `concurrent memory ${i}`),
+    const storeCount = 20;
+    const children = Array.from({ length: storeCount }, (_, index) =>
+      spawnChild(dbPath, 'store', `concurrent memory ${index}`),
     );
 
-    for (const c of children) {
-      assert.equal(c.status, 0, `store should succeed, stderr: ${c.stderr}`);
-      assert.ok(c.stdout.length > 0, 'store should print an id');
+    for (const child of children) {
+      assert.equal(child.status, 0, `store should succeed, stderr: ${child.stderr}`);
+      assert.ok(child.stdout.length > 0, 'store should print an id');
     }
 
     const store = Store.open({ dbPath });
     try {
-      const total = store.db.prepare('SELECT count(*) AS c FROM memories').get() as { c: number };
-      assert.equal(total.c, N, `all ${N} memories should be persisted`);
+      const total = store.db.prepare('SELECT count(*) AS c FROM memories').get() as {
+        c: number;
+      };
+      assert.equal(total.c, storeCount, `all ${storeCount} memories should be persisted`);
     } finally {
       store.close();
     }
@@ -108,14 +110,16 @@ test(
     const dbPath = join(dir, 'memory.db');
     try {
       // Seed two memories that everyone will link
-      const a = child(dbPath, 'store', 'source memory').stdout;
-      const b = child(dbPath, 'store', 'target memory').stdout;
+      const source = spawnChild(dbPath, 'store', 'source memory').stdout;
+      const target = spawnChild(dbPath, 'store', 'target memory').stdout;
 
-      const N = 10;
-      const children = Array.from({ length: N }, () => child(dbPath, 'link', a, b, 'references'));
+      const linkCount = 10;
+      const children = Array.from({ length: linkCount }, () =>
+        spawnChild(dbPath, 'link', source, target, 'references'),
+      );
 
-      for (const c of children) {
-        assert.equal(c.status, 0, `link should succeed, stderr: ${c.stderr}`);
+      for (const child of children) {
+        assert.equal(child.status, 0, `link should succeed, stderr: ${child.stderr}`);
       }
 
       // Edges are idempotent (INSERT OR IGNORE on from/to/kind),
@@ -137,14 +141,14 @@ test('concurrency: concurrent links with different kinds all persist', { timeout
   const dir = tempDir();
   const dbPath = join(dir, 'memory.db');
   try {
-    const a = child(dbPath, 'store', 'source memory').stdout;
-    const b = child(dbPath, 'store', 'target memory').stdout;
+    const source = spawnChild(dbPath, 'store', 'source memory').stdout;
+    const target = spawnChild(dbPath, 'store', 'target memory').stdout;
 
     const kinds = ['references', 'constrained-by', 'related', 'documents', 'extends'];
-    const children = kinds.map((kind) => child(dbPath, 'link', a, b, kind));
+    const children = kinds.map((kind) => spawnChild(dbPath, 'link', source, target, kind));
 
-    for (const c of children) {
-      assert.equal(c.status, 0, `link should succeed, stderr: ${c.stderr}`);
+    for (const child of children) {
+      assert.equal(child.status, 0, `link should succeed, stderr: ${child.stderr}`);
     }
 
     const store = Store.open({ dbPath });
@@ -166,16 +170,16 @@ test(
     const dir = tempDir();
     const dbPath = join(dir, 'memory.db');
     try {
-      const original = child(dbPath, 'store', 'original to supersede').stdout;
+      const original = spawnChild(dbPath, 'store', 'original to supersede').stdout;
 
-      const N = 5;
-      const children = Array.from({ length: N }, (_, i) =>
-        child(dbPath, 'supersede', original, `replacement ${i}`),
+      const attemptCount = 5;
+      const children = Array.from({ length: attemptCount }, (_, index) =>
+        spawnChild(dbPath, 'supersede', original, `replacement ${index}`),
       );
 
       let successes = 0;
-      for (const c of children) {
-        if (c.status === 0) successes++;
+      for (const child of children) {
+        if (child.status === 0) successes++;
       }
 
       // The check (active) and the write land in ONE transaction: after the
@@ -186,10 +190,10 @@ test(
       // Verify original is superseded and only 1 replacement exists
       const store = Store.open({ dbPath });
       try {
-        const orig = store.db.prepare('SELECT status FROM memories WHERE id = ?').get(original) as {
-          status: string;
-        };
-        assert.equal(orig.status, 'superseded', 'original should be superseded');
+        const originalRow = store.db
+          .prepare('SELECT status FROM memories WHERE id = ?')
+          .get(original) as { status: string };
+        assert.equal(originalRow.status, 'superseded', 'original should be superseded');
 
         const replacements = store.db
           .prepare(
@@ -213,17 +217,17 @@ test(
     const dir = tempDir();
     const dbPath = join(dir, 'memory.db');
     try {
-      const a = child(dbPath, 'store', 'merge candidate A').stdout;
-      const b = child(dbPath, 'store', 'merge candidate B').stdout;
+      const candidateA = spawnChild(dbPath, 'store', 'merge candidate A').stdout;
+      const candidateB = spawnChild(dbPath, 'store', 'merge candidate B').stdout;
 
-      const N = 5;
-      const children = Array.from({ length: N }, (_, i) =>
-        child(dbPath, 'merge', a, b, `merged result ${i}`),
+      const attemptCount = 5;
+      const children = Array.from({ length: attemptCount }, (_, index) =>
+        spawnChild(dbPath, 'merge', candidateA, candidateB, `merged result ${index}`),
       );
 
       let successes = 0;
-      for (const c of children) {
-        if (c.status === 0) successes++;
+      for (const child of children) {
+        if (child.status === 0) successes++;
       }
 
       assert.equal(successes, 1, `exactly 1 merge should succeed, got ${successes}`);
@@ -236,8 +240,8 @@ test(
               status: string;
             }
           ).status;
-        assert.equal(statusOf(a), 'merged', 'a should be merged');
-        assert.equal(statusOf(b), 'merged', 'b should be merged');
+        assert.equal(statusOf(candidateA), 'merged', 'a should be merged');
+        assert.equal(statusOf(candidateB), 'merged', 'b should be merged');
 
         const merged = store.db
           .prepare(
@@ -261,14 +265,16 @@ test(
     const dir = tempDir();
     const dbPath = join(dir, 'memory.db');
     try {
-      const a = child(dbPath, 'store', 'to be deprecated').stdout;
+      const target = spawnChild(dbPath, 'store', 'to be deprecated').stdout;
 
-      const N = 5;
-      const children = Array.from({ length: N }, () => child(dbPath, 'deprecate', a));
+      const attemptCount = 5;
+      const children = Array.from({ length: attemptCount }, () =>
+        spawnChild(dbPath, 'deprecate', target),
+      );
 
       let successes = 0;
-      for (const c of children) {
-        if (c.status === 0) successes++;
+      for (const child of children) {
+        if (child.status === 0) successes++;
       }
 
       // assertActive and the UPDATE share one transaction: the rest fail on
@@ -288,32 +294,32 @@ test(
     const dbPath = join(dir, 'memory.db');
     try {
       // Seed initial data
-      child(dbPath, 'store', 'initial memory zero');
+      spawnChild(dbPath, 'store', 'initial memory zero');
 
-      const N_WRITERS = 10;
-      const N_READERS = 10;
+      const writerCount = 10;
+      const readerCount = 10;
 
       // Writers and readers race; readers open read-only and raw-count.
-      const writers = Array.from({ length: N_WRITERS }, (_, i) =>
-        child(dbPath, 'store', `write ${i}`),
+      const writers = Array.from({ length: writerCount }, (_, index) =>
+        spawnChild(dbPath, 'store', `write ${index}`),
       );
-      const readers = Array.from({ length: N_READERS }, () => child(dbPath, 'count'));
+      const readers = Array.from({ length: readerCount }, () => spawnChild(dbPath, 'count'));
 
-      for (const w of writers) {
-        assert.equal(w.status, 0, `writer should succeed, stderr: ${w.stderr}`);
+      for (const writer of writers) {
+        assert.equal(writer.status, 0, `writer should succeed, stderr: ${writer.stderr}`);
       }
-      for (const r of readers) {
-        assert.equal(r.status, 0, `reader should succeed, stderr: ${r.stderr}`);
-        const seen = Number.parseInt(r.stdout, 10);
+      for (const reader of readers) {
+        assert.equal(reader.status, 0, `reader should succeed, stderr: ${reader.stderr}`);
+        const visibleCount = Number.parseInt(reader.stdout, 10);
         // Readers should see at least 1 memory (the initial one)
-        assert.ok(seen >= 1, `reader should see at least 1 memory, saw ${seen}`);
+        assert.ok(visibleCount >= 1, `reader should see at least 1 memory, saw ${visibleCount}`);
       }
 
       // After all writers complete, total should be exact
       const store = Store.open({ dbPath });
       try {
         const total = store.db.prepare('SELECT count(*) AS c FROM memories').get() as { c: number };
-        assert.equal(total.c, N_WRITERS + 1, 'all writes should persist');
+        assert.equal(total.c, writerCount + 1, 'all writes should persist');
       } finally {
         store.close();
       }
@@ -327,22 +333,26 @@ test('concurrency: concurrent store + link to the same target', { timeout: 120_0
   const dir = tempDir();
   const dbPath = join(dir, 'memory.db');
   try {
-    const target = child(dbPath, 'store', 'target for links').stdout;
+    const target = spawnChild(dbPath, 'store', 'target for links').stdout;
 
-    const N = 10;
-    const children = Array.from({ length: N }, (_, i) => child(dbPath, 'store', `source ${i}`));
+    const sourceCount = 10;
+    const children = Array.from({ length: sourceCount }, (_, index) =>
+      spawnChild(dbPath, 'store', `source ${index}`),
+    );
 
     // All stores succeeded, collect their ids
-    const sourceIds = children.map((c) => {
-      assert.equal(c.status, 0, `store should succeed, stderr: ${c.stderr}`);
-      return c.stdout;
+    const sourceIds = children.map((child) => {
+      assert.equal(child.status, 0, `store should succeed, stderr: ${child.stderr}`);
+      return child.stdout;
     });
 
     // Now link all sources to the target concurrently
-    const linkChildren = sourceIds.map((id) => child(dbPath, 'link', id, target, 'references'));
+    const linkChildren = sourceIds.map((id) =>
+      spawnChild(dbPath, 'link', id, target, 'references'),
+    );
 
-    for (const c of linkChildren) {
-      assert.equal(c.status, 0, `link should succeed, stderr: ${c.stderr}`);
+    for (const child of linkChildren) {
+      assert.equal(child.status, 0, `link should succeed, stderr: ${child.stderr}`);
     }
 
     const store = Store.open({ dbPath });
@@ -350,7 +360,7 @@ test('concurrency: concurrent store + link to the same target', { timeout: 120_0
       const incoming = store.db
         .prepare('SELECT count(*) AS c FROM edges WHERE to_id = ?')
         .get(target) as { c: number };
-      assert.equal(incoming.c, N, `target should have ${N} incoming edges`);
+      assert.equal(incoming.c, sourceCount, `target should have ${sourceCount} incoming edges`);
     } finally {
       store.close();
     }
@@ -365,24 +375,26 @@ test(
   () => {
     const dir = tempDir();
     const dbPath = join(dir, 'memory.db');
-    const N = 4;
+    const racerCount = 4;
     const gate = Date.now() + 400;
     try {
-      const outs = Array.from({ length: N }, (_, i) =>
-        child(dbPath, 'gated-store', String(gate), `race ${i}`),
+      const racerResults = Array.from({ length: racerCount }, (_, index) =>
+        spawnChild(dbPath, 'gated-store', String(gate), `race ${index}`),
       );
-      for (const out of outs) {
+      for (const result of racerResults) {
         assert.equal(
-          out.status,
+          result.status,
           0,
-          `an open lost the fresh-store race (exit ${out.status}): ${out.stderr}`,
+          `an open lost the fresh-store race (exit ${result.status}): ${result.stderr}`,
         );
-        assert.ok(out.stdout.length > 0, 'each racer should have stored its memory');
+        assert.ok(result.stdout.length > 0, 'each racer should have stored its memory');
       }
       const store = Store.open({ dbPath });
       try {
-        const total = store.db.prepare('SELECT count(*) AS c FROM memories').get() as { c: number };
-        assert.equal(total.c, N, `expected all ${N} racers to persist`);
+        const total = store.db.prepare('SELECT count(*) AS c FROM memories').get() as {
+          c: number;
+        };
+        assert.equal(total.c, racerCount, `expected all ${racerCount} racers to persist`);
       } finally {
         store.close();
       }
