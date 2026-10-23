@@ -13,6 +13,15 @@ User preferences for TypeScript code organization — apply them to new code and
 - No barrel files: do not create `index.ts` re-export modules.
 - No default exports: use named exports only.
 
+## Code style
+
+User preferences for TypeScript naming and typing — apply them to new code and preserve them when touching existing code:
+
+- No abbreviations in variable names — spell names out. The only exceptions are universally standard ones (`for (let i = ...)`).
+- No `private` keyword on methods or properties: use private fields (`#myMethod`) instead.
+- Every TypeScript generic follows the pattern `G` + PascalCase name (`GResult`), never single letters.
+- Use `readonly` as much as possible in types and interfaces.
+
 ## Agent skills
 
 ### Issue tracker
