@@ -15,12 +15,12 @@ export type MemoryStatus = 'active' | 'superseded' | 'deprecated' | 'merged';
  * only on an active memory.
  */
 export interface Memory {
-  id: UUID;
-  content: string;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
-  status: MemoryStatus;
-  hot: boolean;
+  readonly id: UUID;
+  readonly content: string;
+  readonly metadata: Record<string, unknown> | null;
+  readonly created_at: string;
+  readonly status: MemoryStatus;
+  readonly hot: boolean;
 }
 
 /**
@@ -28,11 +28,11 @@ export interface Memory {
  * is the single relation surface; reading surfaces project it (#12).
  */
 export interface Relation {
-  from_id: UUID;
-  to_id: UUID;
-  kind: string;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
+  readonly from_id: UUID;
+  readonly to_id: UUID;
+  readonly kind: string;
+  readonly metadata: Record<string, unknown> | null;
+  readonly created_at: string;
 }
 
 /**
@@ -42,22 +42,22 @@ export interface Relation {
  * cross-memory repairs.
  */
 export interface RelationSpec {
-  to: UUID;
-  kind: string;
+  readonly to: UUID;
+  readonly kind: string;
 }
 
 export interface StoreOptions {
-  metadata?: Record<string, unknown>;
+  readonly metadata?: Record<string, unknown>;
   /**
    * Outgoing edges created in the same call (store: to the new memory;
    * supersede: to the NEW memory — the old→new supersedes edge still
    * happens). Per-edge validation identical to link.
    */
-  relations?: RelationSpec[];
+  readonly relations?: readonly RelationSpec[];
 }
 
 export interface LinkOptions {
-  metadata?: Record<string, unknown>;
+  readonly metadata?: Record<string, unknown>;
 }
 
 export interface OpenOptions {
@@ -65,13 +65,13 @@ export interface OpenOptions {
    * Where the store lives. Required — the path is policy (config, manager),
    * never a silent default the library guesses.
    */
-  dbPath: string;
+  readonly dbPath: string;
   /**
    * Open for reading only: a missing file is refused (nothing is created),
    * migration is skipped (an out-of-date store is refused — open it
    * read-write once to migrate), and every write verb throws.
    */
-  readOnly?: boolean;
+  readonly readOnly?: boolean;
 }
 
 /**
@@ -84,9 +84,9 @@ export interface OpenOptions {
  */
 function tightenPermissions(dbPath: string): void {
   if (process.platform === 'win32') return;
-  for (const p of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+  for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     try {
-      if (existsSync(p)) chmodSync(p, 0o600);
+      if (existsSync(path)) chmodSync(path, 0o600);
     } catch {
       // best effort — the doctor reports drift
     }
@@ -113,15 +113,17 @@ export class Store {
    *  skipped. */
   readonly readOnly: boolean;
 
+  // The one `private` the code style allows: `#` cannot prefix a
+  // constructor, and hiding it is what makes `open` the only way in.
   private constructor(db: DatabaseSync, dbPath: string, readOnly: boolean) {
     this.db = db;
     this.dbPath = dbPath;
     this.readOnly = readOnly;
   }
 
-  static open(opts: OpenOptions): Store {
-    const dbPath = resolve(opts.dbPath);
-    if (opts.readOnly === true) {
+  static open(options: OpenOptions): Store {
+    const dbPath = resolve(options.dbPath);
+    if (options.readOnly === true) {
       // A read-only open creates nothing and migrates nothing: the store is
       // served exactly as its owner left it, and refused if it is missing
       // or speaks an older schema than this library.
@@ -150,11 +152,11 @@ export class Store {
   }
 
   /**
-   * Write verbs refuse on a read-only store. NOT enforced inside run():
-   * run() also carries legitimate non-write uses (the doctor's VACUUM INTO
+   * Write verbs refuse on a read-only store. NOT enforced inside #run():
+   * #run() also carries legitimate non-write uses (the doctor's VACUUM INTO
    * snapshot lands there in #13).
    */
-  private assertWritable(): void {
+  #assertWritable(): void {
     if (this.readOnly) {
       throw new Error('store is read-only (opened with readOnly: true); writes are refused');
     }
@@ -166,7 +168,7 @@ export class Store {
    * touch the living. Returns the memory's hot flag: supersede transfers
    * it to the head, merge unions it across sources.
    */
-  private requireActive(id: string, verb: string): boolean {
+  #requireActive(id: string, verb: string): boolean {
     const row = this.db.prepare('SELECT status, hot FROM memories WHERE id = ?').get(id) as
       { status: string; hot: number } | undefined;
     if (!row) throw new Error(`memory not found: ${id}`);
@@ -182,20 +184,20 @@ export class Store {
    * relations land in the same transaction: the memory and its edges
    * arrive together or not at all.
    */
-  store(content: string, opts: StoreOptions = {}): string {
-    this.assertWritable();
+  store(content: string, options: StoreOptions = {}): string {
+    this.#assertWritable();
     if (!content) throw new Error('content must be non-empty');
     const id = randomUUID();
-    const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
+    const metadata = options.metadata ? JSON.stringify(options.metadata) : null;
     const created_at = new Date().toISOString();
-    this.run(() => {
+    this.#run(() => {
       this.db.exec('BEGIN');
       try {
         this.db
           .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
           .run(id, content, metadata, created_at);
-        if (opts.relations?.length) {
-          this.insertRelations(id, opts.relations, created_at);
+        if (options.relations?.length) {
+          this.#insertRelations(id, options.relations, created_at);
         }
         this.db.exec('COMMIT');
       } catch (err) {
@@ -218,24 +220,24 @@ export class Store {
    * marked superseded, and its hot flag TRANSFERS to the head — the
    * revision replaces what recover would have served.
    */
-  supersede(oldId: string, content: string, opts: StoreOptions = {}): string {
-    this.assertWritable();
+  supersede(oldId: string, content: string, options: StoreOptions = {}): string {
+    this.#assertWritable();
     if (!content) throw new Error('content must be non-empty');
     const newId = randomUUID();
     const created_at = new Date().toISOString();
-    this.run(() => {
+    this.#run(() => {
       this.db.exec('BEGIN');
       try {
-        const hot = this.requireActive(oldId, 'supersede');
-        const inherited = opts.metadata ?? this.structuralInherit([this.readMeta(oldId)]);
+        const hot = this.#requireActive(oldId, 'supersede');
+        const inherited = options.metadata ?? this.#structuralInherit([this.#readMeta(oldId)]);
         const metadata = inherited ? JSON.stringify(inherited) : null;
         this.db
           .prepare(
             'INSERT INTO memories (id, content, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?)',
           )
           .run(newId, content, metadata, created_at, hot ? 1 : 0);
-        if (!opts.relations?.length) {
-          const inherited = this.db
+        if (!options.relations?.length) {
+          const inheritedEdges = this.db
             .prepare('SELECT to_id, kind, metadata, created_at FROM edges WHERE from_id = ?')
             .all(oldId) as unknown as Array<{
             to_id: string;
@@ -243,27 +245,27 @@ export class Store {
             metadata: string | null;
             created_at: string;
           }>;
-          const existsStmt = this.db.prepare('SELECT 1 FROM memories WHERE id = ?');
-          const edgeStmt = this.db.prepare(
+          const memoryExists = this.db.prepare('SELECT 1 FROM memories WHERE id = ?');
+          const insertEdge = this.db.prepare(
             'INSERT OR IGNORE INTO edges' +
               ' (from_id, to_id, kind, metadata, created_at)' +
               ' VALUES (?, ?, ?, ?, ?)',
           );
-          for (const e of inherited) {
-            // Pre-validated like insertRelations: refuse-don't-hide — a
+          for (const edge of inheritedEdges) {
+            // Pre-validated like #insertRelations: refuse-don't-hide — a
             // hand-corrupted orphan source edge names its missing target
             // precisely instead of failing an FK message, and the
             // ROLLBACK keeps the old memory active and unbridged.
-            if (!existsStmt.get(e.to_id)) {
-              throw new Error(`memory not found: ${e.to_id}`);
+            if (!memoryExists.get(edge.to_id)) {
+              throw new Error(`memory not found: ${edge.to_id}`);
             }
-            edgeStmt.run(newId, e.to_id, e.kind, e.metadata, e.created_at);
+            insertEdge.run(newId, edge.to_id, edge.kind, edge.metadata, edge.created_at);
           }
         }
         // The one-gesture relations are the NEW memory's outgoing edges —
         // the ritual citation "link it right after storing" dies here.
-        if (opts.relations?.length) {
-          this.insertRelations(newId, opts.relations, created_at);
+        if (options.relations?.length) {
+          this.#insertRelations(newId, options.relations, created_at);
         }
         this.db
           .prepare(
@@ -292,8 +294,8 @@ export class Store {
    * recover, the fusion is. Sources cool: the flag lives only on active
    * memories.
    */
-  merge(ids: string[], content: string, opts: StoreOptions = {}): string {
-    this.assertWritable();
+  merge(ids: readonly string[], content: string, options: StoreOptions = {}): string {
+    this.#assertWritable();
     if (ids.length < 2) throw new Error('merge requires at least 2 memories');
     if (!content) throw new Error('content must be non-empty');
     const seen = new Set<string>();
@@ -303,16 +305,16 @@ export class Store {
     }
     const newId = randomUUID();
     const created_at = new Date().toISOString();
-    this.run(() => {
+    this.#run(() => {
       this.db.exec('BEGIN');
       try {
-        const metas: Array<Record<string, unknown> | null> = [];
+        const metadataList: Array<Record<string, unknown> | null> = [];
         let hot = false;
         for (const id of ids) {
-          if (this.requireActive(id, 'merge')) hot = true;
-          metas.push(this.readMeta(id));
+          if (this.#requireActive(id, 'merge')) hot = true;
+          metadataList.push(this.#readMeta(id));
         }
-        const inherited = opts.metadata ?? this.structuralInherit(metas);
+        const inherited = options.metadata ?? this.#structuralInherit(metadataList);
         const metadata = inherited ? JSON.stringify(inherited) : null;
         this.db
           .prepare(
@@ -344,9 +346,9 @@ export class Store {
    * is no delete — persistent memory obliges.
    */
   deprecate(id: string): void {
-    this.assertWritable();
-    this.run(() => {
-      this.requireActive(id, 'deprecate');
+    this.#assertWritable();
+    this.#run(() => {
+      this.#requireActive(id, 'deprecate');
       this.db.prepare("UPDATE memories SET status = 'deprecated', hot = 0 WHERE id = ?").run(id);
     });
   }
@@ -358,8 +360,8 @@ export class Store {
    * Status transitions cool the memory; this is the only way back.
    */
   setHot(id: string, hot: boolean): void {
-    this.assertWritable();
-    this.run(() => {
+    this.#assertWritable();
+    this.#run(() => {
       const row = this.db.prepare('SELECT status FROM memories WHERE id = ?').get(id) as
         { status: string } | undefined;
       if (!row) throw new Error(`memory not found: ${id}`);
@@ -375,21 +377,21 @@ export class Store {
    * cross-memory repair gesture (one-gesture writes use StoreOptions
    * relations). Idempotent per (from, to, kind).
    */
-  link(fromId: string, toId: string, kind: string, opts: LinkOptions = {}): void {
-    this.assertWritable();
+  link(fromId: string, toId: string, kind: string, options: LinkOptions = {}): void {
+    this.#assertWritable();
     if (!kind) throw new Error('kind must be non-empty');
-    const fromExists = this.run(() =>
+    const fromExists = this.#run(() =>
       this.db.prepare('SELECT 1 FROM memories WHERE id = ?').get(fromId),
     );
     if (!fromExists) throw new Error(`memory not found: ${fromId}`);
-    const toExists = this.run(() =>
+    const toExists = this.#run(() =>
       this.db.prepare('SELECT 1 FROM memories WHERE id = ?').get(toId),
     );
     if (!toExists) throw new Error(`memory not found: ${toId}`);
 
-    const metadata = opts.metadata ? JSON.stringify(opts.metadata) : null;
+    const metadata = options.metadata ? JSON.stringify(options.metadata) : null;
     const created_at = new Date().toISOString();
-    this.run(() => {
+    this.#run(() => {
       this.db
         .prepare(
           'INSERT OR IGNORE INTO edges' +
@@ -413,13 +415,13 @@ export class Store {
    * no cascade, no update; a wrong edge is recreated right, never edited.
    */
   unlink(fromId: string, toId: string, kind?: string): void {
-    this.assertWritable();
+    this.#assertWritable();
     // Endpoint existence first: a missing memory can hold no edge, and the
     // transposed-id mistake (the lived failure behind this verb) reads as a
     // precise endpoint error instead of a bare "edge not found".
-    const fromStatus = this.readStatus(fromId);
+    const fromStatus = this.#readStatus(fromId);
     if (!fromStatus) throw new Error(`memory not found: ${fromId}`);
-    const toStatus = this.readStatus(toId);
+    const toStatus = this.#readStatus(toId);
     if (!toStatus) throw new Error(`memory not found: ${toId}`);
     if (fromStatus !== 'active') {
       throw new Error(`cannot unlink a memory with status '${fromStatus}'`);
@@ -430,7 +432,7 @@ export class Store {
 
     if (kind !== undefined) {
       if (!kind) throw new Error('kind must be non-empty');
-      const result = this.run(() =>
+      const result = this.#run(() =>
         this.db
           .prepare('DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?')
           .run(fromId, toId, kind),
@@ -441,13 +443,13 @@ export class Store {
       return;
     }
 
-    const directed = this.run(() =>
+    const directed = this.#run(() =>
       this.db
         .prepare('SELECT kind FROM edges WHERE from_id = ? AND to_id = ? ORDER BY kind')
         .all(fromId, toId),
     ) as Array<{ kind: string }>;
     if (directed.length === 1) {
-      this.run(() =>
+      this.#run(() =>
         this.db
           .prepare('DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?')
           .run(fromId, toId, directed[0]!.kind),
@@ -455,27 +457,27 @@ export class Store {
       return;
     }
     if (directed.length === 0) {
-      const reverse = this.run(() =>
+      const reverse = this.#run(() =>
         this.db
           .prepare('SELECT kind FROM edges WHERE from_id = ? AND to_id = ? ORDER BY kind')
           .all(toId, fromId),
       ) as Array<{ kind: string }>;
       if (reverse.length > 0) {
-        const list = reverse.map((e) => `${toId} -> ${fromId} (${e.kind})`).join(', ');
+        const list = reverse.map((edge) => `${toId} -> ${fromId} (${edge.kind})`).join(', ');
         throw new Error(
           `edge not found: ${fromId} -> ${toId}; edges exist in the reverse direction: ${list}`,
         );
       }
       throw new Error(`edge not found: ${fromId} -> ${toId}`);
     }
-    const kinds = directed.map((e) => e.kind).join(', ');
+    const kinds = directed.map((edge) => edge.kind).join(', ');
     throw new Error(
       `ambiguous: ${directed.length} edges between ${fromId} and ${toId}, pass --kind: ${kinds}`,
     );
   }
 
   /** The status of one memory, or undefined when absent. */
-  private readStatus(id: string): string | undefined {
+  #readStatus(id: string): string | undefined {
     const row = this.db.prepare('SELECT status FROM memories WHERE id = ?').get(id) as
       { status: string } | undefined;
     return row?.status;
@@ -490,18 +492,18 @@ export class Store {
    * INSIDE the caller's transaction, so the memory and its edges land
    * atomically or not at all.
    */
-  private insertRelations(fromId: string, relations: RelationSpec[], createdAt: string): void {
-    for (const rel of relations) {
-      if (!rel.kind) throw new Error('kind must be non-empty');
-      if (!rel.to) throw new Error('to must be a memory id');
-      const toExists = this.db.prepare('SELECT 1 FROM memories WHERE id = ?').get(rel.to);
-      if (!toExists) throw new Error(`memory not found: ${rel.to}`);
+  #insertRelations(fromId: string, relations: readonly RelationSpec[], createdAt: string): void {
+    for (const relation of relations) {
+      if (!relation.kind) throw new Error('kind must be non-empty');
+      if (!relation.to) throw new Error('to must be a memory id');
+      const targetExists = this.db.prepare('SELECT 1 FROM memories WHERE id = ?').get(relation.to);
+      if (!targetExists) throw new Error(`memory not found: ${relation.to}`);
     }
-    const stmt = this.db.prepare(
+    const insertEdge = this.db.prepare(
       'INSERT OR IGNORE INTO edges (from_id, to_id, kind, metadata, created_at) VALUES (?, ?, ?, NULL, ?)',
     );
-    for (const rel of relations) {
-      stmt.run(fromId, rel.to, rel.kind, createdAt);
+    for (const relation of relations) {
+      insertEdge.run(fromId, relation.to, relation.kind, createdAt);
     }
   }
 
@@ -510,7 +512,7 @@ export class Store {
    * column is null. Internal helper for successor construction — never
    * surfaces to callers.
    */
-  private readMeta(id: string): Record<string, unknown> | null {
+  #readMeta(id: string): Record<string, unknown> | null {
     const row = this.db.prepare('SELECT metadata FROM memories WHERE id = ?').get(id) as
       { metadata: string | null } | undefined;
     if (row === undefined || row.metadata === null) return null;
@@ -524,33 +526,33 @@ export class Store {
   /**
    * Structural metadata for a supersede/merge successor built from source
    * metadata: kind carries only when every source agrees, tags union across
-   * sources. Explicit opts.metadata wins verbatim — inherit happens only when
-   * the caller passed no metadata at all. Rationale: kind is what the CLI's
-   * read filters select on; a kind-less successor silently drops out of those
-   * filters (observed defect October 2026, caught by the cold-reader re-test).
-   * Contextual metadata is never copied — the successor's content describes
-   * new state.
+   * sources. Explicit options.metadata wins verbatim — inherit happens only
+   * when the caller passed no metadata at all. Rationale: kind is what the
+   * CLI's read filters select on; a kind-less successor silently drops out
+   * of those filters (observed defect October 2026, caught by the
+   * cold-reader re-test). Contextual metadata is never copied — the
+   * successor's content describes new state.
    */
-  private structuralInherit(
-    metas: Array<Record<string, unknown> | null>,
+  #structuralInherit(
+    metadataList: Array<Record<string, unknown> | null>,
   ): Record<string, unknown> | null {
     const kinds = new Set<unknown>();
     const tags: unknown[] = [];
-    for (const meta of metas) {
-      if (!meta) continue;
-      if ('kind' in meta && meta['kind'] !== undefined) kinds.add(meta['kind']);
-      if (Array.isArray(meta['tags'])) {
-        for (const t of meta['tags'] as unknown[]) {
-          if (!tags.some((x) => JSON.stringify(x) === JSON.stringify(t))) {
-            tags.push(t);
+    for (const metadata of metadataList) {
+      if (!metadata) continue;
+      if ('kind' in metadata && metadata['kind'] !== undefined) kinds.add(metadata['kind']);
+      if (Array.isArray(metadata['tags'])) {
+        for (const tag of metadata['tags'] as unknown[]) {
+          if (!tags.some((existing) => JSON.stringify(existing) === JSON.stringify(tag))) {
+            tags.push(tag);
           }
         }
       }
     }
-    const out: Record<string, unknown> = {};
-    if (kinds.size === 1) out['kind'] = [...kinds][0];
-    if (tags.length > 0) out['tags'] = tags;
-    return Object.keys(out).length > 0 ? out : null;
+    const structural: Record<string, unknown> = {};
+    if (kinds.size === 1) structural['kind'] = [...kinds][0];
+    if (tags.length > 0) structural['tags'] = tags;
+    return Object.keys(structural).length > 0 ? structural : null;
   }
 
   close(): void {
@@ -561,24 +563,24 @@ export class Store {
    * Run a write that may hit SQLITE_BUSY under concurrent WAL access.
    * Retries with a short delay until `BUSY_RETRIES` is exhausted.
    */
-  run<T>(fn: () => T): T {
-    let lastErr: unknown;
+  #run<GOutput>(operation: () => GOutput): GOutput {
+    let lastError: unknown;
     for (let attempt = 0; attempt < BUSY_RETRIES; attempt++) {
       try {
-        return fn();
+        return operation();
       } catch (err) {
         if (
           err instanceof Error &&
           'errcode' in err &&
           (err as { errcode: number }).errcode === SQLITE_BUSY
         ) {
-          lastErr = err;
+          lastError = err;
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, BUSY_DELAY_MS);
           continue;
         }
         throw err;
       }
     }
-    throw lastErr;
+    throw lastError;
   }
 }

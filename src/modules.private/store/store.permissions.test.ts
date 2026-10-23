@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'vitest';
 import { Store } from './store.ts';
 
-const SKIP_WIN = process.platform === 'win32';
+const SKIP_WINDOWS = process.platform === 'win32';
 
 function tempStorePath(name = 'memory.db'): { dbPath: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'souvenance-perms-test-'));
@@ -17,7 +17,7 @@ function tempStorePath(name = 'memory.db'): { dbPath: string; cleanup: () => voi
 
 const mode = (path: string): number => statSync(path).mode & 0o777;
 
-test('permissions: a rw open tightens the store file to owner-only', { skip: SKIP_WIN }, () => {
+test('permissions: a rw open tightens the store file to owner-only', { skip: SKIP_WINDOWS }, () => {
   const { dbPath, cleanup } = tempStorePath();
   try {
     const store = Store.open({ dbPath });
@@ -34,16 +34,16 @@ test('permissions: a rw open tightens the store file to owner-only', { skip: SKI
 
 test(
   'permissions: WAL sidecars are tightened alongside the store while writes run',
-  { skip: SKIP_WIN },
+  { skip: SKIP_WINDOWS },
   () => {
     const { dbPath, cleanup } = tempStorePath();
     try {
       const store = Store.open({ dbPath });
       try {
         store.store('a write to force the WAL');
-        for (const p of [`${dbPath}-wal`, `${dbPath}-shm`]) {
-          if (existsSync(p)) {
-            assert.equal(mode(p), 0o600, `sidecar ${p} tightened`);
+        for (const sidecar of [`${dbPath}-wal`, `${dbPath}-shm`]) {
+          if (existsSync(sidecar)) {
+            assert.equal(mode(sidecar), 0o600, `sidecar ${sidecar} tightened`);
           }
         }
       } finally {
@@ -55,20 +55,24 @@ test(
   },
 );
 
-test('permissions: a reopened store loosened to 0644 is tightened back', { skip: SKIP_WIN }, () => {
-  const { dbPath, cleanup } = tempStorePath();
-  try {
-    const first = Store.open({ dbPath });
-    first.close();
-    chmodSync(dbPath, 0o644);
-    assert.equal(mode(dbPath), 0o644, 'precondition: loosened while closed');
-    const second = Store.open({ dbPath });
+test(
+  'permissions: a reopened store loosened to 0644 is tightened back',
+  { skip: SKIP_WINDOWS },
+  () => {
+    const { dbPath, cleanup } = tempStorePath();
     try {
-      assert.equal(mode(dbPath), 0o600, 'reopening rw re-tightens');
+      const first = Store.open({ dbPath });
+      first.close();
+      chmodSync(dbPath, 0o644);
+      assert.equal(mode(dbPath), 0o644, 'precondition: loosened while closed');
+      const second = Store.open({ dbPath });
+      try {
+        assert.equal(mode(dbPath), 0o600, 'reopening rw re-tightens');
+      } finally {
+        second.close();
+      }
     } finally {
-      second.close();
+      cleanup();
     }
-  } finally {
-    cleanup();
-  }
-});
+  },
+);

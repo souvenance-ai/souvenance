@@ -35,7 +35,7 @@ test('open creates all tables on a fresh store', () => {
     const tables = store.db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all() as { name: string }[];
-    const names = tables.map((t) => t.name);
+    const names = tables.map((table) => table.name);
     assert.ok(names.includes('memories'));
     assert.ok(names.includes('edges'));
     assert.ok(names.includes('schema_version'));
@@ -48,13 +48,15 @@ test('open creates all tables on a fresh store', () => {
 test('the fresh store is at SCHEMA_VERSION, with the v6 column set', () => {
   const { store, cleanup } = tempStore();
   try {
-    const version = store.db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as {
-      v: number;
+    const version = store.db
+      .prepare('SELECT MAX(version) AS max_version FROM schema_version')
+      .get() as {
+      max_version: number;
     };
-    assert.equal(version.v, SCHEMA_VERSION);
+    assert.equal(version.max_version, SCHEMA_VERSION);
     const columns = (
       store.db.prepare('PRAGMA table_info(memories)').all() as { name: string }[]
-    ).map((c) => c.name);
+    ).map((column) => column.name);
     assert.ok(columns.includes('hot'), 'the v6 curation flag exists');
     assert.ok(!columns.includes('weight'), 'weight was dropped by the refonte');
     assert.ok(!columns.includes('access_count'), 'the read-signal column was dropped');
@@ -67,13 +69,17 @@ test('reopening is a no-op (schema_version unchanged)', () => {
   const dir = tempDir();
   const path = join(dir, 'memory.db');
   try {
-    const s1 = Store.open({ dbPath: path });
-    const v1 = s1.db.prepare('SELECT version FROM schema_version').get() as { version: number };
-    s1.close();
-    const s2 = Store.open({ dbPath: path });
-    const v2 = s2.db.prepare('SELECT version FROM schema_version').get() as { version: number };
-    assert.equal(v2.version, v1.version);
-    s2.close();
+    const first = Store.open({ dbPath: path });
+    const firstVersion = first.db.prepare('SELECT version FROM schema_version').get() as {
+      version: number;
+    };
+    first.close();
+    const second = Store.open({ dbPath: path });
+    const secondVersion = second.db.prepare('SELECT version FROM schema_version').get() as {
+      version: number;
+    };
+    assert.equal(secondVersion.version, firstVersion.version);
+    second.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -84,8 +90,10 @@ test('WAL and FK pragmas are set', () => {
   try {
     const journal = store.db.prepare('PRAGMA journal_mode').get() as { journal_mode: string };
     assert.equal(journal.journal_mode, 'wal');
-    const fk = store.db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number };
-    assert.equal(fk.foreign_keys, 1);
+    const foreignKeys = store.db.prepare('PRAGMA foreign_keys').get() as {
+      foreign_keys: number;
+    };
+    assert.equal(foreignKeys.foreign_keys, 1);
   } finally {
     cleanup();
   }
@@ -207,7 +215,7 @@ test('v6 migration: the legacy recover basket arrives hot, dead columns dropped'
               id: string;
               hot: number;
             }[]
-          ).map((r) => [r.id, r.hot]),
+          ).map((memory) => [memory.id, memory.hot]),
         );
       const hot = hotById();
       assert.equal(hot[directive], 1, 'an active directive arrives hot');
@@ -219,7 +227,7 @@ test('v6 migration: the legacy recover basket arrives hot, dead columns dropped'
 
       const columns = (
         migrated.db.prepare('PRAGMA table_info(memories)').all() as { name: string }[]
-      ).map((c) => c.name);
+      ).map((column) => column.name);
       assert.ok(!columns.includes('weight'));
       assert.ok(!columns.includes('access_count'));
 
@@ -307,21 +315,21 @@ test('every write verb refuses on a read-only store', () => {
   const dir = tempDir();
   const path = join(dir, 'memory.db');
   try {
-    const rw = Store.open({ dbPath: path });
-    const a = rw.store('memory a');
-    const b = rw.store('memory b');
-    rw.close();
-    const ro = Store.open({ dbPath: path, readOnly: true });
+    const readWrite = Store.open({ dbPath: path });
+    const a = readWrite.store('memory a');
+    const b = readWrite.store('memory b');
+    readWrite.close();
+    const readOnlyStore = Store.open({ dbPath: path, readOnly: true });
     try {
-      assert.throws(() => ro.store('new content'), /read-only/);
-      assert.throws(() => ro.link(a, b, 'references'), /read-only/);
-      assert.throws(() => ro.unlink(a, b), /read-only/);
-      assert.throws(() => ro.deprecate(a), /read-only/);
-      assert.throws(() => ro.supersede(a, 'next'), /read-only/);
-      assert.throws(() => ro.merge([a, b], 'merged'), /read-only/);
-      assert.throws(() => ro.setHot(a, true), /read-only/);
+      assert.throws(() => readOnlyStore.store('new content'), /read-only/);
+      assert.throws(() => readOnlyStore.link(a, b, 'references'), /read-only/);
+      assert.throws(() => readOnlyStore.unlink(a, b), /read-only/);
+      assert.throws(() => readOnlyStore.deprecate(a), /read-only/);
+      assert.throws(() => readOnlyStore.supersede(a, 'next'), /read-only/);
+      assert.throws(() => readOnlyStore.merge([a, b], 'merged'), /read-only/);
+      assert.throws(() => readOnlyStore.setHot(a, true), /read-only/);
     } finally {
-      ro.close();
+      readOnlyStore.close();
       rmSync(dir, { recursive: true, force: true });
     }
   } finally {

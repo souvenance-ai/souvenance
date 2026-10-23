@@ -119,14 +119,14 @@ export function schemaVersion(db: DatabaseSync): number {
 
 export function migrate(db: DatabaseSync): void {
   const current = ensureVersionTable(db);
-  for (let v = current + 1; v <= SCHEMA_VERSION; v++) {
-    const sql = migrations[v];
-    if (!sql) throw new Error(`No migration for schema version ${v}`);
+  for (let version = current + 1; version <= SCHEMA_VERSION; version++) {
+    const migration = migrations[version];
+    if (!migration) throw new Error(`No migration for schema version ${version}`);
     db.exec('BEGIN');
     try {
-      db.exec(sql);
+      db.exec(migration);
       db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(
-        v,
+        version,
         new Date().toISOString(),
       );
       db.exec('COMMIT');
