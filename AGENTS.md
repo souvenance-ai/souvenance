@@ -3,6 +3,16 @@
 - Work, think, and produce only English content: PRs, commits, files, code, docs, issues.
 - Converse with the user in the user's language.
 
+## Code layout
+
+User preferences for TypeScript code organization — apply them to new code and preserve them when touching existing code:
+
+- One `.ts` file per folder. Name the folder after its file: `serve/serve.ts` + `serve/serve.test.ts`.
+- Colocate tests with the code they cover: the test file sits next to its source file.
+- Each file exposes, when possible, a single public export (one function or class). Related types may be exported alongside the function/class they describe.
+- No barrel files: do not create `index.ts` re-export modules.
+- No default exports: use named exports only.
+
 ## Agent skills
 
 ### Issue tracker
