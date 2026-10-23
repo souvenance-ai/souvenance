@@ -19,8 +19,12 @@ The human who runs the manager and owns the host — the only audience of `souve
 _Avoid_: user, admin
 
 **Memory**:
-One record in a store: content, metadata, weight, access count, and a status (active, superseded, deprecated, merged).
+One record in a store: content, metadata, a status (active, superseded, deprecated, merged), and the hot flag.
 _Avoid_: note, fact, recollection
+
+**Hot**:
+The curation flag of an active memory: what recover serves a fresh session. Only an active memory can be hot; supersede transfers it to the head, merge unions it, every termination cools it.
+_Avoid_: pinned, starred, important
 
 **Relation**:
 A directed edge between two memories (from → to, with a kind). The graph is the single relation surface; reading surfaces project it.
@@ -83,7 +87,7 @@ _Avoid_: admin cap, root token
 ### The rituals
 
 **Recover**:
-The session-start ritual: directives, summaries, and open objectives in one call.
+The session-start ritual: the hot memories (with their relations) and the store's stats in one call.
 _Avoid_: boot, restore
 
 **Finish**:
