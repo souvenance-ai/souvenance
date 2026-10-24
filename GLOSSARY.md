@@ -95,5 +95,9 @@ The session-start ritual: the hot memories (with their relations) and the store'
 _Avoid_: boot, restore
 
 **Checkout**:
-The session-end verdict: the store reports its corruption and consolidation debts in one call; the light goes green only when every debt is paid. Payable with the raw verbs (or SQL for hand-introduced corruption).
-_Avoid_: finish, doctor, close
+The agent's session-end verdict: the store reports its consolidation debts — the register's curation and its islands — in one call; the light goes green only when every debt is paid, each payable with the raw verbs. Corruption is not the gate's business.
+_Avoid_: finish, close
+
+**Doctor**:
+The corruption audit of a store, for the operator: the states the write surface cannot produce (hand SQL, external tools), every finding payable in SQL. The checkout's complement — the agent's gate, the operator's audit.
+_Avoid_: diagnose, verify, integrity check
