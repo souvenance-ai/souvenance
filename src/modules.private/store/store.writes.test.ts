@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SQLInputValue } from 'node:sqlite';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { test } from 'vitest';
 import { Store } from './store.ts';
 
@@ -18,8 +18,25 @@ function tempStore(): { store: Store; cleanup: () => void } {
   };
 }
 
+/**
+ * A raw probe: a SECOND connection on the store's file — the store's own
+ * connection is `#db`-private by design (no in-process raw access), and a
+ * raw reader is exactly the outside-the-library vantage the store must
+ * survive.
+ */
+function probe(store: Store): DatabaseSync {
+  const db = new DatabaseSync(store.dbPath);
+  db.exec('PRAGMA busy_timeout = 5000');
+  return db;
+}
+
 function row<T>(store: Store, sql: string, ...params: SQLInputValue[]): T {
-  return store.db.prepare(sql).get(...params) as T;
+  const db = probe(store);
+  try {
+    return db.prepare(sql).get(...params) as T;
+  } finally {
+    db.close();
+  }
 }
 
 function count(store: Store, sql: string, ...params: SQLInputValue[]): number {
@@ -53,9 +70,14 @@ interface RawEdge {
 }
 
 function edgesOf(store: Store, id: string): RawEdge[] {
-  return store.db
-    .prepare('SELECT * FROM edges WHERE from_id = ? ORDER BY kind')
-    .all(id) as unknown as RawEdge[];
+  const db = probe(store);
+  try {
+    return db
+      .prepare('SELECT * FROM edges WHERE from_id = ? ORDER BY kind')
+      .all(id) as unknown as RawEdge[];
+  } finally {
+    db.close();
+  }
 }
 
 // --- store -----------------------------------------------------------------
@@ -170,21 +192,23 @@ test('store: an empty relation kind is refused', () => {
   }
 });
 
-test('store: a self-edge through the one-gesture path is a construction impossibility', () => {
+test('link: a self-edge is refused — corrections name two different memories', () => {
   const { store, cleanup } = tempStore();
   try {
-    // The relations target must exist BEFORE the call (validated per edge),
-    // and the new memory's id is generated inside it — a store-executed
-    // self-edge cannot exist. The only self-edge path is the link verb's,
-    // covered by the doctor's self_edges check (#13). Asserted here as
-    // speaker for the invariant: a missing target is refused, not smuggled in.
-    const ghost = '00000000-0000-4000-8000-000000000007';
-    assert.throws(
-      () => store.store('self-edge attempt', { relations: [{ to: ghost, kind: 'references' }] }),
-      /memory not found/,
-    );
-    assert.equal(count(store, 'SELECT count(*) as c FROM memories'), 0);
+    // The one-gesture paths are a construction impossibility: the new
+    // memory's id is generated inside the call, so relations cannot point
+    // at it. link() is the only self-edge door, and it refuses at the gate
+    // (refuse-don't-hide): an edge from a memory to itself names no
+    // relationship, so the store never lets one land.
+    const id = store.store('the only candidate self-source');
+    assert.throws(() => store.link(id, id, 'references'), /self-edge refused/);
     assert.equal(count(store, 'SELECT count(*) as c FROM edges'), 0);
+
+    // The refusal is not destructive: the memory still exists and accepts
+    // a real edge to another memory.
+    const other = store.store('another memory');
+    store.link(id, other, 'references');
+    assert.equal(count(store, 'SELECT count(*) as c FROM edges'), 1);
   } finally {
     cleanup();
   }
@@ -305,10 +329,8 @@ test('unlink: explicit kind removes exactly that edge among several', () => {
     store.link(a, b, 'references');
     store.link(a, b, 'extends');
     store.unlink(a, b, 'extends');
-    const kinds = (
-      store.db.prepare('SELECT kind FROM edges ORDER BY kind').all() as { kind: string }[]
-    ).map((edge) => edge.kind);
-    assert.deepEqual(kinds, ['references']);
+    // The unlink is a real edge removal — the kind ledger reflects it.
+    assert.deepEqual(store.stats().edges_by_kind, { references: 1 });
   } finally {
     cleanup();
   }
@@ -730,13 +752,16 @@ test('supersede: a corrupted orphan SOURCE edge refuses the revision precisely',
   try {
     const oldId = store.store('# Decision: v1', { metadata: { kind: 'decision' } });
     const ghost = '00000000-0000-4000-8000-000000000003';
-    store.db.exec('PRAGMA foreign_keys = OFF');
-    store.db
+    // Corruption via a second raw connection — the outside-the-library
+    // vantage: FKs off, the orphan lands, the connection goes away.
+    const raw = probe(store);
+    raw.exec('PRAGMA foreign_keys = OFF');
+    raw
       .prepare(
         'INSERT INTO edges (from_id, to_id, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
       )
       .run(oldId, ghost, 'references', null, new Date().toISOString());
-    store.db.exec('PRAGMA foreign_keys = ON');
+    raw.close();
     // Refuse-don't-hide: the missing target is named precisely, and the
     // ROLLBACK keeps the old memory active and unbridged.
     assert.throws(

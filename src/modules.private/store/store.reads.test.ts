@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'vitest';
 import { Store } from './store.ts';
 
@@ -99,7 +100,11 @@ test('get: restores corrupted metadata JSON as null metadata', () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store('hand-corrupted metadata');
-    store.db.prepare('UPDATE memories SET metadata = ? WHERE id = ?').run('{not json', id);
+    // Corruption via a second raw connection — the outside-the-library
+    // vantage: the store's own connection is #db-private.
+    const raw = new DatabaseSync(store.dbPath);
+    raw.prepare('UPDATE memories SET metadata = ? WHERE id = ?').run('{not json', id);
+    raw.close();
     const memory = store.get(id);
     assert.equal(memory!.metadata, null);
   } finally {

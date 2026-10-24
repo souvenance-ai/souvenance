@@ -25,8 +25,7 @@ const CHILD_SCRIPT = `
   let store;
   if (operation === 'count') {
     store = storeModule.Store.open({ dbPath, readOnly: true });
-    const row = store.db.prepare('SELECT count(*) AS c FROM memories').get();
-    process.stdout.write(String(row.c));
+    process.stdout.write(String(store.stats().memories));
     store.close();
   } else {
     store = storeModule.Store.open({ dbPath });
@@ -98,10 +97,11 @@ test('concurrency: many concurrent stores all persist', { timeout: 120_000 }, ()
 
     const store = Store.open({ dbPath });
     try {
-      const total = store.db.prepare('SELECT count(*) AS c FROM memories').get() as {
-        c: number;
-      };
-      assert.equal(total.c, storeCount, `all ${storeCount} memories should be persisted`);
+      assert.equal(
+        store.stats().memories,
+        storeCount,
+        `all ${storeCount} memories should be persisted`,
+      );
     } finally {
       store.close();
     }
@@ -134,8 +134,7 @@ test(
       // so N concurrent identical links should produce exactly 1 edge.
       const store = Store.open({ dbPath });
       try {
-        const edges = store.db.prepare('SELECT count(*) AS c FROM edges').get() as { c: number };
-        assert.equal(edges.c, 1, 'idempotent links should produce 1 edge');
+        assert.equal(store.stats().edges, 1, 'idempotent links should produce 1 edge');
       } finally {
         store.close();
       }
@@ -161,8 +160,7 @@ test('concurrency: concurrent links with different kinds all persist', { timeout
 
     const store = Store.open({ dbPath });
     try {
-      const edges = store.db.prepare('SELECT count(*) AS c FROM edges').get() as { c: number };
-      assert.equal(edges.c, kinds.length, 'different kinds should all persist');
+      assert.equal(store.stats().edges, kinds.length, 'different kinds should all persist');
     } finally {
       store.close();
     }
@@ -198,17 +196,12 @@ test(
       // Verify original is superseded and only 1 replacement exists
       const store = Store.open({ dbPath });
       try {
-        const originalRow = store.db
-          .prepare('SELECT status FROM memories WHERE id = ?')
-          .get(original) as { status: string };
-        assert.equal(originalRow.status, 'superseded', 'original should be superseded');
-
-        const replacements = store.db
-          .prepare(
-            "SELECT count(*) AS c FROM memories WHERE content LIKE 'replacement %' AND status = 'active'",
-          )
-          .get() as { c: number };
-        assert.equal(replacements.c, 1, 'exactly 1 replacement should be active');
+        assert.equal(store.get(original)!.status, 'superseded', 'original should be superseded');
+        const replacements = store.list({
+          includeLegacy: true,
+          where: "content LIKE 'replacement %' AND status = 'active'",
+        });
+        assert.equal(replacements.length, 1, 'exactly 1 replacement should be active');
       } finally {
         store.close();
       }
@@ -242,21 +235,15 @@ test(
 
       const store = Store.open({ dbPath });
       try {
-        const statusOf = (id: string): string =>
-          (
-            store.db.prepare('SELECT status FROM memories WHERE id = ?').get(id) as {
-              status: string;
-            }
-          ).status;
+        const statusOf = (id: string): string => store.get(id)!.status;
         assert.equal(statusOf(candidateA), 'merged', 'a should be merged');
         assert.equal(statusOf(candidateB), 'merged', 'b should be merged');
 
-        const merged = store.db
-          .prepare(
-            "SELECT count(*) AS c FROM memories WHERE content LIKE 'merged result %' AND status = 'active'",
-          )
-          .get() as { c: number };
-        assert.equal(merged.c, 1, 'exactly 1 merged result should be active');
+        const merged = store.list({
+          includeLegacy: true,
+          where: "content LIKE 'merged result %' AND status = 'active'",
+        });
+        assert.equal(merged.length, 1, 'exactly 1 merged result should be active');
       } finally {
         store.close();
       }
@@ -326,8 +313,7 @@ test(
       // After all writers complete, total should be exact
       const store = Store.open({ dbPath });
       try {
-        const total = store.db.prepare('SELECT count(*) AS c FROM memories').get() as { c: number };
-        assert.equal(total.c, writerCount + 1, 'all writes should persist');
+        assert.equal(store.stats().memories, writerCount + 1, 'all writes should persist');
       } finally {
         store.close();
       }
@@ -365,10 +351,12 @@ test('concurrency: concurrent store + link to the same target', { timeout: 120_0
 
     const store = Store.open({ dbPath });
     try {
-      const incoming = store.db
-        .prepare('SELECT count(*) AS c FROM edges WHERE to_id = ?')
-        .get(target) as { c: number };
-      assert.equal(incoming.c, sourceCount, `target should have ${sourceCount} incoming edges`);
+      const targetNode = store.get(target)!;
+      assert.equal(
+        targetNode.relations.in.length,
+        sourceCount,
+        `target should have ${sourceCount} incoming edges`,
+      );
     } finally {
       store.close();
     }
@@ -399,10 +387,11 @@ test(
       }
       const store = Store.open({ dbPath });
       try {
-        const total = store.db.prepare('SELECT count(*) AS c FROM memories').get() as {
-          c: number;
-        };
-        assert.equal(total.c, racerCount, `expected all ${racerCount} racers to persist`);
+        assert.equal(
+          store.stats().memories,
+          racerCount,
+          `expected all ${racerCount} racers to persist`,
+        );
       } finally {
         store.close();
       }
@@ -454,26 +443,19 @@ test('concurrency: unlink racing a supersede never severs the bridge', { timeout
       // Invariant 1: the bridge survives every interleaving — unlink's
       // check and delete share one transaction, so a bridge can never be
       // severed between the check and the write.
-      const bridge = store.db
-        .prepare("SELECT count(*) AS c FROM edges WHERE from_id = ? AND kind = 'supersedes'")
-        .get(source) as { c: number };
-      assert.equal(bridge.c, 1, 'the supersedes bridge must survive the race');
+      const bridge = store.get(source)!.relations.out.filter((edge) => edge.kind === 'supersedes');
+      assert.equal(bridge.length, 1, 'the supersedes bridge must survive the race');
 
       // Invariant 2: the outcome is consistent. Either the correction
       // landed BEFORE the revision (the head inherits nothing) or the
       // unlink was refused (the head keeps the inherited claim).
-      const sourceRow = store.db
-        .prepare('SELECT status FROM memories WHERE id = ?')
-        .get(source) as { status: string };
-      assert.equal(sourceRow.status, 'superseded');
+      assert.equal(store.get(source)!.status, 'superseded');
 
-      const inherited = store.db
-        .prepare("SELECT count(*) AS c FROM edges WHERE from_id = ? AND kind = 'references'")
-        .get(head) as { c: number };
+      const inherited = store.get(head)!.relations.out.filter((edge) => edge.kind === 'references');
       if (unlinkChild.status === 0) {
-        assert.equal(inherited.c, 0, 'the correction landed before the revision');
+        assert.equal(inherited.length, 0, 'the correction landed before the revision');
       } else {
-        assert.equal(inherited.c, 1, 'the unlink was refused after the revision');
+        assert.equal(inherited.length, 1, 'the unlink was refused after the revision');
       }
     } finally {
       store.close();

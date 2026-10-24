@@ -94,6 +94,6 @@ _Avoid_: admin cap, root token
 The session-start ritual: the hot memories (with their relations) and the store's stats in one call.
 _Avoid_: boot, restore
 
-**Finish**:
-The session-end ritual: the session's obligations checked and debts reported before leaving.
-_Avoid_: close, commit
+**Checkout**:
+The session-end verdict: the store reports its corruption and consolidation debts in one call; the light goes green only when every debt is paid. Payable with the raw verbs (or SQL for hand-introduced corruption).
+_Avoid_: finish, doctor, close
