@@ -23,15 +23,15 @@ test('get: returns a memory by id — content, parsed metadata, hot as boolean',
   const { store, cleanup } = tempStore();
   try {
     const id = store.store('hello world', { metadata: { tags: ['a'] } });
-    const m = store.get(id);
-    assert.ok(m);
-    assert.equal(m!.id, id);
-    assert.equal(m!.content, 'hello world');
-    assert.deepEqual(m!.metadata, { tags: ['a'] });
-    assert.ok(typeof m!.created_at === 'string');
-    assert.equal(m!.hot, false);
-    assert.equal(m!.summary, null);
-    assert.equal(m!.status, 'active');
+    const memory = store.get(id);
+    assert.ok(memory);
+    assert.equal(memory!.id, id);
+    assert.equal(memory!.content, 'hello world');
+    assert.deepEqual(memory!.metadata, { tags: ['a'] });
+    assert.ok(typeof memory!.created_at === 'string');
+    assert.equal(memory!.hot, false);
+    assert.equal(memory!.summary, null);
+    assert.equal(memory!.status, 'active');
   } finally {
     cleanup();
   }
@@ -42,8 +42,8 @@ test('get: returns the authored summary and null metadata as null', () => {
   try {
     const long = 'x'.repeat(401);
     const id = store.store(long, { summary: 'condensed' });
-    const m = store.get(id);
-    assert.equal(m!.summary, 'condensed');
+    const memory = store.get(id);
+    assert.equal(memory!.summary, 'condensed');
 
     const bare = store.store('no metadata');
     assert.equal(store.get(bare)!.metadata, null);
@@ -70,15 +70,15 @@ test('get: projects the graph — relations { out, in }, raw rows at depth 1', (
     store.link(a, b, 'references'); // b: an incoming edge
     store.link(b, c, 'extends'); // b: an outgoing edge
 
-    const m = store.get(b)!;
-    assert.equal(m.relations.out.length, 1);
-    assert.equal(m.relations.out[0]!.kind, 'extends');
-    assert.equal(m.relations.out[0]!.to_id, c);
-    assert.equal(m.relations.out[0]!.target, null, 'raw rows by default');
-    assert.equal(m.relations.in.length, 1);
-    assert.equal(m.relations.in[0]!.kind, 'references');
-    assert.equal(m.relations.in[0]!.from_id, a);
-    assert.equal('target' in m.relations.in[0]!, false, 'in edges never expand');
+    const memory = store.get(b)!;
+    assert.equal(memory.relations.out.length, 1);
+    assert.equal(memory.relations.out[0]!.kind, 'extends');
+    assert.equal(memory.relations.out[0]!.to_id, c);
+    assert.equal(memory.relations.out[0]!.target, null, 'raw rows by default');
+    assert.equal(memory.relations.in.length, 1);
+    assert.equal(memory.relations.in[0]!.kind, 'references');
+    assert.equal(memory.relations.in[0]!.from_id, a);
+    assert.equal('target' in memory.relations.in[0]!, false, 'in edges never expand');
   } finally {
     cleanup();
   }
@@ -88,8 +88,8 @@ test('get: an unlinked memory carries empty relations arrays', () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store('an island', { metadata: { kind: 'note' } });
-    const m = store.get(id)!;
-    assert.deepEqual(m.relations, { out: [], in: [] });
+    const memory = store.get(id)!;
+    assert.deepEqual(memory.relations, { out: [], in: [] });
   } finally {
     cleanup();
   }
@@ -100,14 +100,14 @@ test('get: restores corrupted metadata JSON as null metadata', () => {
   try {
     const id = store.store('hand-corrupted metadata');
     store.db.prepare('UPDATE memories SET metadata = ? WHERE id = ?').run('{not json', id);
-    const m = store.get(id);
-    assert.equal(m!.metadata, null);
+    const memory = store.get(id);
+    assert.equal(memory!.metadata, null);
   } finally {
     cleanup();
   }
 });
 
-/** The store's created_at has millisecond precision — back-to-back store()
+/** The store'report created_at has millisecond precision — back-to-back store()
  * calls can land in the same ms and make created_at DESC ties undefined
  * (caught live on a fast CI runner by the legacy port). Seeding spins to
  * the next millisecond between writes whose order the tests pin. */
@@ -181,8 +181,8 @@ test('list: applies the where filter on metadata', () => {
     seed(store);
     const results = store.list({ where: `metadata->>'$.kind' = 'note'` });
     assert.equal(results.length, 2);
-    for (const r of results) {
-      assert.equal(r.metadata?.['kind'], 'note');
+    for (const result of results) {
+      assert.equal(result.metadata?.['kind'], 'note');
     }
   } finally {
     cleanup();
@@ -200,7 +200,7 @@ test('list: defaults to active memories only — includeLegacy widens', () => {
 
     const all = store.list({ includeLegacy: true });
     assert.equal(all.length, 2);
-    assert.deepEqual(all.map((m) => m.status).sort(), ['active', 'deprecated']);
+    assert.deepEqual(all.map((memory) => memory.status).sort(), ['active', 'deprecated']);
   } finally {
     cleanup();
   }
@@ -212,7 +212,7 @@ test('list: projects relations at depth 1 — nodes, not bare rows', () => {
     seed(store);
     const results = store.list();
     assert.equal(results.length, 3);
-    const edges = results.flatMap((m) => m.relations.out);
+    const edges = results.flatMap((memory) => memory.relations.out);
     assert.equal(edges.length, 2);
     assert.equal(edges[0]!.target, null, 'depth 1 stays raw');
   } finally {
@@ -249,16 +249,16 @@ test('search: returns ranked FTS5 results', () => {
     seed(store);
     const results = store.search('fox');
     assert.ok(results.length >= 2);
-    for (const r of results) {
-      assert.ok('id' in r);
-      assert.ok('content' in r);
-      assert.ok('summary' in r);
-      assert.ok('metadata' in r);
-      assert.ok('created_at' in r);
-      assert.ok('status' in r);
-      assert.ok('rank' in r);
-      assert.ok(typeof r.rank === 'number');
-      assert.ok('relations' in r, 'hits are projected nodes');
+    for (const result of results) {
+      assert.ok('id' in result);
+      assert.ok('content' in result);
+      assert.ok('summary' in result);
+      assert.ok('metadata' in result);
+      assert.ok('created_at' in result);
+      assert.ok('status' in result);
+      assert.ok('rank' in result);
+      assert.ok(typeof result.rank === 'number');
+      assert.ok('relations' in result, 'hits are projected nodes');
     }
   } finally {
     cleanup();
@@ -331,9 +331,9 @@ test('search: deserializes metadata JSON — null stays null', () => {
     store.store('more searchable text');
     const results = store.search('searchable');
     assert.equal(results.length, 2);
-    const tagged = results.find((r) => r.metadata !== null)!;
+    const tagged = results.find((result) => result.metadata !== null)!;
     assert.deepEqual(tagged.metadata, { tags: ['x'] });
-    const bare = results.find((r) => r.metadata === null)!;
+    const bare = results.find((result) => result.metadata === null)!;
     assert.equal(bare.metadata, null);
   } finally {
     cleanup();
@@ -351,7 +351,7 @@ test('search: defaults to active memories only — includeLegacy widens', () => 
 
     const all = store.search('fox', { includeLegacy: true });
     assert.equal(all.length, 2);
-    assert.deepEqual(all.map((r) => r.status).sort(), ['active', 'superseded']);
+    assert.deepEqual(all.map((result) => result.status).sort(), ['active', 'superseded']);
   } finally {
     cleanup();
   }
@@ -367,7 +367,7 @@ test('search: sanitizes FTS5 syntax errors as a fallback', () => {
     const dotted = store.search('0.9 vs 0.5');
     assert.ok(dotted.length >= 1, 'dotted numerics should be sanitized into searchable tokens');
     assert.ok(
-      dotted.some((r) => r.content.includes('0.9 vs 0.5')),
+      dotted.some((result) => result.content.includes('0.9 vs 0.5')),
       'should hit the weight memory',
     );
 
@@ -375,7 +375,7 @@ test('search: sanitizes FTS5 syntax errors as a fallback', () => {
     const hyphen = store.search('better-sqlite3');
     assert.ok(hyphen.length >= 1, 'hyphenated tokens should be split and matched');
     assert.ok(
-      hyphen.some((r) => r.content.includes('better-sqlite3')),
+      hyphen.some((result) => result.content.includes('better-sqlite3')),
       'should hit the glue memory',
     );
 
@@ -400,11 +400,11 @@ test('stats: totals and edges_by_kind breakdown', () => {
   const { store, cleanup } = tempStore();
   try {
     seed(store);
-    const s = store.stats();
-    assert.equal(s.memories, 3);
-    assert.equal(s.edges, 2);
-    assert.equal(s.edges_by_kind['references'], 1);
-    assert.equal(s.edges_by_kind['extends'], 1);
+    const report = store.stats();
+    assert.equal(report.memories, 3);
+    assert.equal(report.edges, 2);
+    assert.equal(report.edges_by_kind['references'], 1);
+    assert.equal(report.edges_by_kind['extends'], 1);
   } finally {
     cleanup();
   }
@@ -413,13 +413,13 @@ test('stats: totals and edges_by_kind breakdown', () => {
 test('stats: zeros on a fresh store', () => {
   const { store, cleanup } = tempStore();
   try {
-    const s = store.stats();
-    assert.equal(s.memories, 0);
-    assert.equal(s.hot_memories, 0);
-    assert.equal(s.edges, 0);
-    assert.deepEqual(s.memories_by_status, {});
-    assert.deepEqual(s.memories_by_kind, {});
-    assert.deepEqual(s.edges_by_kind, {});
+    const report = store.stats();
+    assert.equal(report.memories, 0);
+    assert.equal(report.hot_memories, 0);
+    assert.equal(report.edges, 0);
+    assert.deepEqual(report.memories_by_status, {});
+    assert.deepEqual(report.memories_by_kind, {});
+    assert.deepEqual(report.edges_by_kind, {});
   } finally {
     cleanup();
   }
@@ -436,15 +436,15 @@ test('stats: memories_by_status, hot_memories and memories_by_kind', () => {
     store.supersede(b, 'memory b replacement');
     store.setHot(c, true);
 
-    const s = store.stats();
-    assert.equal(s.memories, 5);
-    assert.equal(s.hot_memories, 1);
-    assert.deepEqual(s.memories_by_status, {
+    const report = store.stats();
+    assert.equal(report.memories, 5);
+    assert.equal(report.hot_memories, 1);
+    assert.deepEqual(report.memories_by_status, {
       active: 3,
       deprecated: 1,
       superseded: 1,
     });
-    assert.deepEqual(s.memories_by_kind, { log: 2, note: 2 });
+    assert.deepEqual(report.memories_by_kind, { log: 2, note: 2 });
   } finally {
     cleanup();
   }
@@ -504,7 +504,7 @@ test('read-only: every read verb serves the store as its owner left it', () => {
       assert.ok(got);
       assert.equal(got!.summary, 'alpha condensed');
       assert.equal(got!.relations.out[0]!.kind, 'references');
-      const beta = store.list().find((m) => m.content === 'beta note')!.id;
+      const beta = store.list().find((memory) => memory.content === 'beta note')!.id;
       assert.equal(got!.relations.out[0]!.to_id, beta, 'the raw edge is served, target-less');
       assert.equal(got!.relations.out[0]!.target, null);
 
