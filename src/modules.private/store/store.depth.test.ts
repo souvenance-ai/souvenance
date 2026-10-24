@@ -83,6 +83,7 @@ test('get: out expands while in stays a raw list at every depth', () => {
     const d = store.store('watcher');
     store.link(a, b, 'references');
     store.link(b, c, 'extends');
+    advanceMs();
     store.link(d, c, 'cites'); // c's incoming edge never expands
 
     const node = store.get(a, { depth: 5 })!;
