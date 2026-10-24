@@ -422,6 +422,21 @@ test('unlink: the supersedes bridge is untouchable by construction', () => {
 
 // --- supersede -------------------------------------------------------------
 
+test('unlink: the merges bridge is untouchable like the supersedes one', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const sourceA = store.store('memory a');
+    const sourceB = store.store('memory b');
+    const fusion = store.merge([sourceA, sourceB], 'the fusion');
+    assert.throws(
+      () => store.unlink(sourceA, fusion),
+      /cannot unlink a memory with status 'merged'/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
 test('supersede: stores new memory, links old, marks old as superseded', () => {
   const { store, cleanup } = tempStore();
   try {

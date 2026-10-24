@@ -3,9 +3,9 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { test } from 'vitest';
+import { expectTypeOf, test } from 'vitest';
 import { SCHEMA_VERSION } from './migration/migration.ts';
-import { Store } from './store.ts';
+import { type OpenOptions, Store } from './store.ts';
 
 function tempStore(): { store: Store; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'souvenance-test-'));
@@ -24,9 +24,10 @@ function tempDir(): string {
 }
 
 test('open requires a dbPath — the library never guesses a location', () => {
-  // Type-level guarantee: OpenOptions.dbPath is non-optional. Pinned at
-  // runtime by the shape of every other call in this suite.
-  assert.ok(true);
+  // Compile-time pin: OpenOptions.dbPath is REQUIRED. If someone relaxes
+  // the interface, OpenOptions stops extending { dbPath: string } and the
+  // typecheck fails here.
+  expectTypeOf<OpenOptions>().toExtend<{ dbPath: string }>();
 });
 
 test('open creates all tables on a fresh store', () => {

@@ -17,20 +17,24 @@ function tempStorePath(name = 'memory.db'): { dbPath: string; cleanup: () => voi
 
 const mode = (path: string): number => statSync(path).mode & 0o777;
 
-test('permissions: a rw open tightens the store file to owner-only', { skip: SKIP_WINDOWS }, () => {
-  const { dbPath, cleanup } = tempStorePath();
-  try {
-    const store = Store.open({ dbPath });
+test(
+  'permissions: a read-write open tightens the store file to owner-only',
+  { skip: SKIP_WINDOWS },
+  () => {
+    const { dbPath, cleanup } = tempStorePath();
     try {
-      store.store('the identity lives here');
-      assert.equal(mode(dbPath), 0o600, 'a fresh store is 0600 at open');
+      const store = Store.open({ dbPath });
+      try {
+        store.store('the identity lives here');
+        assert.equal(mode(dbPath), 0o600, 'a fresh store is 0600 at open');
+      } finally {
+        store.close();
+      }
     } finally {
-      store.close();
+      cleanup();
     }
-  } finally {
-    cleanup();
-  }
-});
+  },
+);
 
 test(
   'permissions: WAL sidecars are tightened alongside the store while writes run',
@@ -67,7 +71,7 @@ test(
       assert.equal(mode(dbPath), 0o644, 'precondition: loosened while closed');
       const second = Store.open({ dbPath });
       try {
-        assert.equal(mode(dbPath), 0o600, 'reopening rw re-tightens');
+        assert.equal(mode(dbPath), 0o600, 'reopening read-write re-tightens');
       } finally {
         second.close();
       }
