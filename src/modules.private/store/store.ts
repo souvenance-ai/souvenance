@@ -19,13 +19,19 @@ export type MemoryStatus = 'active' | 'superseded' | 'deprecated' | 'merged';
 export const MAX_SUMMARY_LENGTH = 400;
 
 /**
- * The checkout's check count — the union it reports findings from. The
- * corruption family (orphan_edges, invalid_metadata_json,
+ * The doctor's check count — the corruption family the audit reports
+ * findings from (orphan_edges, invalid_metadata_json,
  * status_without_bridge, hot_without_active, fts_integrity,
- * file_permissions) plus the consolidation gate (no_hot, isolated_active,
- * duplicate_titles). Tests pin it as part of the report shape.
+ * file_permissions). Tests pin it as part of the report shape.
  */
-export const CHECKOUT_CHECK_COUNT = 9;
+export const DOCTOR_CHECK_COUNT = 6;
+
+/**
+ * The checkout's check count — the consolidation gate the verdict reports
+ * findings from (no_hot, isolated_active, duplicate_titles). Tests pin it
+ * as part of the report shape.
+ */
+export const CHECKOUT_CHECK_COUNT = 3;
 
 /**
  * The one-line FTS rebuild — the repair route outside the library (the
@@ -215,29 +221,62 @@ export interface RecoverReport {
 }
 
 /**
- * The checkout's finding-producing checks — the verdict vocabulary, two
- * families: corruption (states impossible through the write surface —
- * hand SQL, external tools) and consolidation (the closure gate's debts,
- * payable with the raw verbs). No check depends on a `kind` or a window:
- * kinds stay free metadata tags, the verdict is timeless store state.
+ * The doctor's finding-producing checks — the corruption family: states
+ * the write surface cannot produce (hand SQL on a second connection,
+ * external tools). The legacy kind-based checks (active_without_kind,
+ * stale_handoff, weight_bounds) are not in the vocabulary: kinds stay
+ * free metadata tags and the weight column is gone.
  */
-export type CheckoutCheck =
+export type DoctorCheck =
   | 'orphan_edges'
   | 'invalid_metadata_json'
   | 'status_without_bridge'
   | 'hot_without_active'
   | 'fts_integrity'
-  | 'file_permissions'
-  | 'no_hot'
-  | 'isolated_active'
-  | 'duplicate_titles';
+  | 'file_permissions';
+
+/**
+ * One problem the doctor reports. `id` carries the implicated memory
+ * where one exists (edge findings name both endpoints in the detail).
+ * The hint names the SQL — the doctor diagnoses, the operator repairs.
+ */
+export interface DoctorFinding {
+  readonly check: DoctorCheck;
+  readonly id?: UUID;
+  readonly detail: string;
+  readonly hint: string;
+}
+
+/**
+ * The corruption audit's report: the store's drift, findings ordered by
+ * check. Read-only — the operator runs it (the manager CLI's offline
+ * verb, fog); the agent's closure gate is checkout, deliberately
+ * separate.
+ */
+export interface DoctorReport {
+  readonly healthy: boolean;
+  readonly findings: readonly DoctorFinding[];
+  readonly summary: {
+    readonly checks: number;
+    readonly issues: number;
+    readonly memories: number;
+    readonly edges: number;
+    readonly edges_by_kind: Readonly<Record<string, number>>;
+  };
+}
+
+/**
+ * The checkout's finding-producing checks — the consolidation gate: the
+ * closure debts an agent pays with the raw verbs. No check depends on a
+ * `kind` or a window: kinds stay free metadata tags, the verdict is
+ * timeless store state.
+ */
+export type CheckoutCheck = 'no_hot' | 'isolated_active' | 'duplicate_titles';
 
 /**
  * One problem the checkout returns. All-or-nothing: no severity — a debt
  * either blocks the green light or the store is healthy. `id` carries the
- * implicated memory where one exists (edge findings name both endpoints in
- * the detail). The hint names the payable path: a raw verb where the state
- * is agent-owned, SQL where corruption entered from outside the library.
+ * implicated memory where one exists; the hint names the payable verb.
  */
 export interface CheckoutFinding {
   readonly check: CheckoutCheck;
@@ -247,10 +286,10 @@ export interface CheckoutFinding {
 }
 
 /**
- * The store's verdict: the corruption report and the consolidation gate in
- * one call. `healthy` is the green light to end a session — earned, never
- * granted: zero findings. Read-only — it verifies the store and never
- * repairs it; the hints tell the agent (verbs) or the operator (SQL) how.
+ * The agent's closure gate's report: the consolidation debts, corruption
+ * excluded (doctor's business). `healthy` is the green light to end a
+ * session — earned, never granted: zero findings, all payable with the
+ * raw verbs.
  */
 export interface CheckoutReport {
   readonly healthy: boolean;
@@ -260,8 +299,6 @@ export interface CheckoutReport {
     readonly issues: number;
     readonly memories: number;
     readonly hot_memories: number;
-    readonly edges: number;
-    readonly edges_by_kind: Readonly<Record<string, number>>;
   };
 }
 
@@ -1064,21 +1101,22 @@ export class Store {
     return row.c;
   }
 
-  // --- the verdict (#13) : checkout ----------------------------------------
+  // --- the verdicts (#13) : doctor (corruption) + checkout (consolidation) --
 
   /**
-   * The store's verdict — one call for both families: the corruption
-   * report (states impossible through the write surface, entered by hand
-   * SQL or external tools) and the consolidation gate (the closure debts,
-   * payable with the raw verbs). The fused successor of the legacy doctor
-   * and finish: the agent consolidates, pays what the findings name, and
-   * the light goes green — healthy, zero findings — only when nothing is
-   * left. Purely diagnostic: no option, no write (the VACUUM INTO snapshot
-   * of #checkFts lands in a temp dir, never in the store), and it runs
-   * read-only against a read-only open. Findings come ordered by check,
-   * corruption first.
+   * The corruption audit — the operator's matter. Reports the states the
+   * write surface cannot produce: hand SQL on a second connection and
+   * external tools are their only producers (FK enforcement and the
+   * write-time checks close every library door). Every finding is payable
+   * in SQL — the audit diagnoses, it never repairs. Read-only — it takes
+   * no write lock on a store agents write to concurrently, and runs
+   * read-only against a read-only open; the VACUUM INTO snapshot of
+   * #checkFts lands in a temp dir, never in the store. The checkout's
+   * complement: the agent's closure gate (checkout) reports the debts its
+   * verbs can pay; this audit reports the drift only the operator can.
+   * Findings come ordered by check.
    */
-  checkout(): CheckoutReport {
+  doctor(): DoctorReport {
     const memories = this.#db
       .prepare('SELECT id, content, summary, metadata, created_at, status, hot FROM memories')
       .all() as unknown as MemoryRow[];
@@ -1086,14 +1124,14 @@ export class Store {
       .prepare('SELECT from_id, to_id, kind, metadata, created_at FROM edges')
       .all() as unknown as RelationRow[];
     const byId = new Map(memories.map((memory) => [memory.id, memory]));
-    const findings: CheckoutFinding[] = [];
+    const findings: DoctorFinding[] = [];
 
-    // Corruption: metadata parse probed ONCE — no check reads metadata
-    // content (kinds stay free tags, the refonte keeps it that way), so
-    // the only fact worth keeping is the set of ids whose column is not
-    // valid JSON: invalid_metadata_json is where the corruption speaks,
-    // one finding per root cause (reads collapse invalid JSON into null
-    // metadata, silently).
+    // Metadata parse probed ONCE — no check reads metadata content (kinds
+    // stay free tags, the refonte keeps it that way), so the only fact
+    // worth keeping is the set of ids whose column is not valid JSON:
+    // invalid_metadata_json is where the corruption speaks, one finding
+    // per root cause (reads collapse invalid JSON into null metadata,
+    // silently).
     const invalidMetadataIds = new Set<string>();
     for (const memory of memories) {
       if (memory.metadata === null) continue;
@@ -1104,8 +1142,8 @@ export class Store {
       }
     }
 
-    // Corruption: an edge naming a missing memory — FK enforcement makes
-    // it impossible through the verbs; hand SQL is the only producer.
+    // An edge naming a missing memory — FK enforcement makes it impossible
+    // through the verbs; hand SQL is the only producer.
     for (const edge of edges) {
       if (!byId.has(edge.from_id) || !byId.has(edge.to_id)) {
         findings.push({
@@ -1116,10 +1154,10 @@ export class Store {
       }
     }
 
-    // Corruption: invalid metadata JSON — the write surface cannot produce
-    // it (the verbs take a typed object and serialize; metadata is
-    // immutable after store), and reads collapse it into null, so the
-    // verdict is where the corruption speaks.
+    // Invalid metadata JSON — the write surface cannot produce it (the
+    // verbs take a typed object and serialize; metadata is immutable after
+    // store), and reads collapse it into null, so the audit is where the
+    // corruption speaks.
     for (const memory of memories) {
       if (invalidMetadataIds.has(memory.id)) {
         findings.push({
@@ -1131,9 +1169,9 @@ export class Store {
       }
     }
 
-    // Corruption: a superseded/merged status with no supersedes/merges
-    // bridge — supersede and merge always bridge in the same transaction,
-    // so only a hand-edited status lands without one.
+    // A superseded/merged status with no supersedes/merges bridge —
+    // supersede and merge always bridge in the same transaction, so only a
+    // hand-edited status lands without one.
     for (const memory of memories) {
       if (memory.status !== 'superseded' && memory.status !== 'merged') continue;
       const bridged = edges.some(
@@ -1150,8 +1188,8 @@ export class Store {
       }
     }
 
-    // Corruption: the v6 invariant — hot = 1 only while status = 'active'.
-    // Every status transition cools in the same UPDATE and setHot refuses
+    // The v6 invariant — hot = 1 only while status = 'active'. Every
+    // status transition cools in the same UPDATE and setHot refuses
     // non-active memories, so only hand SQL can heat a terminated one.
     for (const memory of memories) {
       if (memory.hot && memory.status !== 'active') {
@@ -1166,10 +1204,10 @@ export class Store {
 
     findings.push(...this.#checkFts());
 
-    // Corruption: the store file carries the agent's whole identity — a
-    // group/world-readable store voids the boundary the ownership lock
-    // enforces elsewhere. tightenPermissions is best-effort; this is the
-    // mechanical report for anything it could not reach.
+    // The store file carries the agent's whole identity — a group/world-
+    // readable store voids the boundary the ownership lock enforces
+    // elsewhere. tightenPermissions is best-effort; this is the mechanical
+    // report for anything it could not reach.
     if (process.platform !== 'win32') {
       try {
         const mode = statSync(this.dbPath).mode;
@@ -1186,10 +1224,47 @@ export class Store {
       }
     }
 
-    // The consolidation gate: a register nobody curated is a ghost — the
-    // next recover serves an empty hot block and a fresh session reads
-    // nothing. Silent when there is nothing to serve (no memories, no
-    // actives).
+    const edges_by_kind: Record<string, number> = {};
+    for (const edge of edges) {
+      edges_by_kind[edge.kind] = (edges_by_kind[edge.kind] ?? 0) + 1;
+    }
+    return {
+      healthy: findings.length === 0,
+      findings,
+      summary: {
+        checks: DOCTOR_CHECK_COUNT,
+        issues: findings.length,
+        memories: memories.length,
+        edges: edges.length,
+        edges_by_kind,
+      },
+    };
+  }
+
+  /**
+   * The agent's closure gate — the session-exit ritual (Recover's pair).
+   * Reports the consolidation debts ONLY: a register nobody curated is a
+   * ghost, islands mark memories a session stored without exploring the
+   * graph, duplicate titles mark candidates a session never fused. Every
+   * finding is payable with the raw verbs, so the green light — healthy,
+   * zero findings — is always reachable. All-or-nothing: no severity, no
+   * window, no check reads a kind. The corruption audit is doctor's
+   * business, deliberately NOT composed here: a corruption finding would
+   * be a debt no verb can pay, and the gate would never go green on a
+   * hand-corrupted store.
+   */
+  checkout(): CheckoutReport {
+    const memories = this.#db
+      .prepare('SELECT id, content, summary, metadata, created_at, status, hot FROM memories')
+      .all() as unknown as MemoryRow[];
+    const edges = this.#db
+      .prepare('SELECT from_id, to_id, kind, metadata, created_at FROM edges')
+      .all() as unknown as RelationRow[];
+    const findings: CheckoutFinding[] = [];
+
+    // A register nobody curated is a ghost — the next recover serves an
+    // empty hot block and a fresh session reads nothing. Silent when there
+    // is nothing to serve (no memories, no actives).
     const activeCount = memories.filter((memory) => memory.status === 'active').length;
     const hotCount = memories.filter((memory) => memory.hot && memory.status === 'active').length;
     if (activeCount > 0 && hotCount === 0) {
@@ -1200,10 +1275,9 @@ export class Store {
       });
     }
 
-    // The consolidation gate: edge-less actives while other actives exist
-    // to relate to — the session-end nudge to explore the memory before
-    // closing. One finding, ids aggregated; a one-memory store is an atom,
-    // not an island.
+    // Edge-less actives while other actives exist to relate to — the
+    // session-end nudge to explore the memory before closing. One finding,
+    // ids aggregated; a one-memory store is an atom, not an island.
     const isolated = memories.filter(
       (memory) =>
         memory.status === 'active' &&
@@ -1218,9 +1292,9 @@ export class Store {
       });
     }
 
-    // The consolidation nudge: two active memories sharing the exact
-    // first-line markdown heading are candidates to merge — text-level,
-    // self-contained, no kind. Heading-less memories never group.
+    // Two active memories sharing the exact first-line markdown heading
+    // are candidates to merge — text-level, self-contained, no kind.
+    // Heading-less memories never group.
     const titleGroups = new Map<string, string[]>();
     for (const memory of memories) {
       if (memory.status !== 'active') continue;
@@ -1240,10 +1314,6 @@ export class Store {
       }
     }
 
-    const edges_by_kind: Record<string, number> = {};
-    for (const edge of edges) {
-      edges_by_kind[edge.kind] = (edges_by_kind[edge.kind] ?? 0) + 1;
-    }
     return {
       healthy: findings.length === 0,
       findings,
@@ -1252,8 +1322,6 @@ export class Store {
         issues: findings.length,
         memories: memories.length,
         hot_memories: hotCount,
-        edges: edges.length,
-        edges_by_kind,
       },
     };
   }
@@ -1308,8 +1376,8 @@ export class Store {
    * structure verification. The repair is NOT a store verb: the hint names
    * the SQL line, executed outside the library (the store is #db-private).
    */
-  #checkFts(): CheckoutFinding[] {
-    const findings: CheckoutFinding[] = [];
+  #checkFts(): DoctorFinding[] {
+    const findings: DoctorFinding[] = [];
     const snapshotDir = mkdtempSync(join(tmpdir(), 'souvenance-checkout-'));
     try {
       const snapshotPath = join(snapshotDir, 'snapshot.db').replace(/'/g, "''");
