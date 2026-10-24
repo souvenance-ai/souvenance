@@ -103,7 +103,7 @@ test('checkout: no_hot — an active register with nothing curated is a debt', (
 test('checkout: no_hot stays silent when there is nothing to serve', () => {
   const { store, cleanup } = tempStore();
   try {
-    // A store of corpses only: actives 0, so nothing is owed to recover.
+    // A store of corpses only: actives 0, so nothing is owed to checkin.
     const doomed = store.store('born to die', { metadata: { kind: 'note' } });
     store.deprecate(doomed);
     let report = store.checkout();

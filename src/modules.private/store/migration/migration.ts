@@ -64,8 +64,8 @@ ALTER TABLE memories RENAME COLUMN read_count TO access_count;
  * The refonte: `weight` and `access_count` are dropped (agents never leaned
  * on them) and `hot` takes over curation. The exact basket the legacy
  * recover served — active directives, summaries, and OPEN objectives —
- * arrives hot, so an existing individual recovers the same memories it
- * always did, now by explicit flag instead of kind convention. `summary`
+ * arrives hot, so an existing individual checks in with the same memories
+ * it always did, now by explicit flag instead of kind convention. `summary`
  * joins as the authored condensation of long content (null on migrated
  * rows — the obligation starts with the refonte's writes).
  */

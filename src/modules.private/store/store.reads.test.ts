@@ -524,7 +524,7 @@ test('read-only: every read verb serves the store as its owner left it', () => {
       assert.equal(got!.relations.out[0]!.to_id, beta, 'the raw edge is served, target-less');
       assert.equal(got!.relations.out[0]!.target, null);
 
-      const report = store.recover();
+      const report = store.checkin();
       assert.equal(report.hot.length, 1);
       assert.equal(report.hot[0]!.id, found[0]!.id, 'the hot block serves through ro too');
 
