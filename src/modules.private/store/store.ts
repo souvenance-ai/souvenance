@@ -196,12 +196,33 @@ export class Store {
    */
   #requireActive(id: string, verb: string): boolean {
     const row = this.db.prepare('SELECT status, hot FROM memories WHERE id = ?').get(id) as
-      { status: string; hot: number } | undefined;
+      { status: MemoryStatus; hot: number } | undefined;
     if (!row) throw new Error(`memory not found: ${id}`);
     if (row.status !== 'active') {
       throw new Error(`cannot ${verb} a memory with status '${row.status}'`);
     }
     return row.hot === 1;
+  }
+
+  /**
+   * Run a multi-statement write as ONE transaction, under the BUSY retry:
+   * a fresh BEGIN each attempt, COMMIT on success, ROLLBACK + rethrow
+   * otherwise. Every check-then-write verb goes through here — the check
+   * and the write land atomically, so exactly one concurrent winner
+   * exists.
+   */
+  #transaction<GOutput>(operation: () => GOutput): GOutput {
+    return this.#run(() => {
+      this.db.exec('BEGIN');
+      try {
+        const result = operation();
+        this.db.exec('COMMIT');
+        return result;
+      } catch (err) {
+        this.db.exec('ROLLBACK');
+        throw err;
+      }
+    });
   }
 
   /**
@@ -236,21 +257,14 @@ export class Store {
     const summary = options.summary ?? null;
     const metadata = options.metadata ? JSON.stringify(options.metadata) : null;
     const created_at = new Date().toISOString();
-    this.#run(() => {
-      this.db.exec('BEGIN');
-      try {
-        this.db
-          .prepare(
-            'INSERT INTO memories (id, content, summary, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
-          )
-          .run(id, content, summary, metadata, created_at);
-        if (options.relations?.length) {
-          this.#insertRelations(id, options.relations, created_at);
-        }
-        this.db.exec('COMMIT');
-      } catch (err) {
-        this.db.exec('ROLLBACK');
-        throw err;
+    this.#transaction(() => {
+      this.db
+        .prepare(
+          'INSERT INTO memories (id, content, summary, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(id, content, summary, metadata, created_at);
+      if (options.relations?.length) {
+        this.#insertRelations(id, options.relations, created_at);
       }
     });
     return id;
@@ -274,63 +288,54 @@ export class Store {
     this.#checkSummary(content, options.summary ?? null);
     const newId = randomUUID();
     const created_at = new Date().toISOString();
-    this.#run(() => {
-      this.db.exec('BEGIN');
-      try {
-        const hot = this.#requireActive(oldId, 'supersede');
-        const inherited = options.metadata ?? this.#structuralInherit([this.#readMeta(oldId)]);
-        const metadata = inherited ? JSON.stringify(inherited) : null;
-        this.db
-          .prepare(
-            'INSERT INTO memories (id, content, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?)',
-          )
-          .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
-        if (!options.relations?.length) {
-          const inheritedEdges = this.db
-            .prepare('SELECT to_id, kind, metadata, created_at FROM edges WHERE from_id = ?')
-            .all(oldId) as unknown as Array<{
-            to_id: string;
-            kind: string;
-            metadata: string | null;
-            created_at: string;
-          }>;
-          const memoryExists = this.db.prepare('SELECT 1 FROM memories WHERE id = ?');
-          const insertEdge = this.db.prepare(
-            'INSERT OR IGNORE INTO edges' +
-              ' (from_id, to_id, kind, metadata, created_at)' +
-              ' VALUES (?, ?, ?, ?, ?)',
-          );
-          for (const edge of inheritedEdges) {
-            // Pre-validated like #insertRelations: refuse-don't-hide — a
-            // hand-corrupted orphan source edge names its missing target
-            // precisely instead of failing an FK message, and the
-            // ROLLBACK keeps the old memory active and unbridged.
-            if (!memoryExists.get(edge.to_id)) {
-              throw new Error(`memory not found: ${edge.to_id}`);
-            }
-            insertEdge.run(newId, edge.to_id, edge.kind, edge.metadata, edge.created_at);
+    this.#transaction(() => {
+      const hot = this.#requireActive(oldId, 'supersede');
+      const inherited = options.metadata ?? this.#structuralInherit([this.#readMeta(oldId)]);
+      const metadata = inherited ? JSON.stringify(inherited) : null;
+      this.db
+        .prepare(
+          'INSERT INTO memories (id, content, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
+      if (!options.relations?.length) {
+        const inheritedEdges = this.db
+          .prepare('SELECT to_id, kind, metadata, created_at FROM edges WHERE from_id = ?')
+          .all(oldId) as unknown as Array<{
+          to_id: string;
+          kind: string;
+          metadata: string | null;
+          created_at: string;
+        }>;
+        const memoryExists = this.db.prepare('SELECT 1 FROM memories WHERE id = ?');
+        const insertEdge = this.db.prepare(
+          'INSERT OR IGNORE INTO edges' +
+            ' (from_id, to_id, kind, metadata, created_at)' +
+            ' VALUES (?, ?, ?, ?, ?)',
+        );
+        for (const edge of inheritedEdges) {
+          // Pre-validated like #insertRelations: refuse-don't-hide — a
+          // hand-corrupted orphan source edge names its missing target
+          // precisely instead of failing an FK message, and the
+          // ROLLBACK keeps the old memory active and unbridged.
+          if (!memoryExists.get(edge.to_id)) {
+            throw new Error(`memory not found: ${edge.to_id}`);
           }
+          insertEdge.run(newId, edge.to_id, edge.kind, edge.metadata, edge.created_at);
         }
-        // The one-gesture relations are the NEW memory's outgoing edges —
-        // the ritual citation "link it right after storing" dies here.
-        if (options.relations?.length) {
-          this.#insertRelations(newId, options.relations, created_at);
-        }
-        this.db
-          .prepare(
-            'INSERT OR IGNORE INTO edges' +
-              ' (from_id, to_id, kind, metadata, created_at)' +
-              ' VALUES (?, ?, ?, ?, ?)',
-          )
-          .run(oldId, newId, 'supersedes', null, created_at);
-        this.db
-          .prepare("UPDATE memories SET status = 'superseded', hot = 0 WHERE id = ?")
-          .run(oldId);
-        this.db.exec('COMMIT');
-      } catch (err) {
-        this.db.exec('ROLLBACK');
-        throw err;
       }
+      // The one-gesture relations are the NEW memory's outgoing edges —
+      // the ritual citation "link it right after storing" dies here.
+      if (options.relations?.length) {
+        this.#insertRelations(newId, options.relations, created_at);
+      }
+      this.db
+        .prepare(
+          'INSERT OR IGNORE INTO edges' +
+            ' (from_id, to_id, kind, metadata, created_at)' +
+            ' VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(oldId, newId, 'supersedes', null, created_at);
+      this.db.prepare("UPDATE memories SET status = 'superseded', hot = 0 WHERE id = ?").run(oldId);
     });
     return newId;
   }
@@ -355,36 +360,29 @@ export class Store {
     }
     const newId = randomUUID();
     const created_at = new Date().toISOString();
-    this.#run(() => {
-      this.db.exec('BEGIN');
-      try {
-        const metadataList: Array<Record<string, unknown> | null> = [];
-        let hot = false;
-        for (const id of ids) {
-          if (this.#requireActive(id, 'merge')) hot = true;
-          metadataList.push(this.#readMeta(id));
-        }
-        const inherited = options.metadata ?? this.#structuralInherit(metadataList);
-        const metadata = inherited ? JSON.stringify(inherited) : null;
+    this.#transaction(() => {
+      const metadataList: Array<Record<string, unknown> | null> = [];
+      let hot = false;
+      for (const id of ids) {
+        if (this.#requireActive(id, 'merge')) hot = true;
+        metadataList.push(this.#readMeta(id));
+      }
+      const inherited = options.metadata ?? this.#structuralInherit(metadataList);
+      const metadata = inherited ? JSON.stringify(inherited) : null;
+      this.db
+        .prepare(
+          'INSERT INTO memories (id, content, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
+      for (const id of ids) {
         this.db
           .prepare(
-            'INSERT INTO memories (id, content, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT OR IGNORE INTO edges' +
+              ' (from_id, to_id, kind, metadata, created_at)' +
+              ' VALUES (?, ?, ?, ?, ?)',
           )
-          .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
-        for (const id of ids) {
-          this.db
-            .prepare(
-              'INSERT OR IGNORE INTO edges' +
-                ' (from_id, to_id, kind, metadata, created_at)' +
-                ' VALUES (?, ?, ?, ?, ?)',
-            )
-            .run(id, newId, 'merges', null, created_at);
-          this.db.prepare("UPDATE memories SET status = 'merged', hot = 0 WHERE id = ?").run(id);
-        }
-        this.db.exec('COMMIT');
-      } catch (err) {
-        this.db.exec('ROLLBACK');
-        throw err;
+          .run(id, newId, 'merges', null, created_at);
+        this.db.prepare("UPDATE memories SET status = 'merged', hot = 0 WHERE id = ?").run(id);
       }
     });
     return newId;
@@ -393,11 +391,12 @@ export class Store {
   /**
    * End a memory deliberately: deprecated stays in the store (history is
    * never rewritten), cools, and refuses any further write gesture. There
-   * is no delete — persistent memory obliges.
+   * is no delete — persistent memory obliges. The check and the update
+   * share the transaction: under concurrency, exactly one deprecate wins.
    */
   deprecate(id: string): void {
     this.#assertWritable();
-    this.#run(() => {
+    this.#transaction(() => {
       this.#requireActive(id, 'deprecate');
       this.db.prepare("UPDATE memories SET status = 'deprecated', hot = 0 WHERE id = ?").run(id);
     });
@@ -407,16 +406,17 @@ export class Store {
    * The one non-graph mutation: curation. Only an ACTIVE memory can be
    * hot — the flag hands the memory to the recover ritual (#12), and a
    * superseded/deprecated/merged memory must not resurface through it.
-   * Status transitions cool the memory; this is the only way back.
+   * Status transitions cool the memory; this is the only way back. The
+   * check and the write share the transaction: a racing supersede and the
+   * curation resolve to exactly one winner.
    */
   setHot(id: string, hot: boolean): void {
     this.#assertWritable();
-    this.#run(() => {
-      const row = this.db.prepare('SELECT status FROM memories WHERE id = ?').get(id) as
-        { status: string } | undefined;
+    this.#transaction(() => {
+      const row = this.#readStatus(id);
       if (!row) throw new Error(`memory not found: ${id}`);
-      if (row.status !== 'active') {
-        throw new Error(`cannot hot a memory with status '${row.status}'`);
+      if (row !== 'active') {
+        throw new Error(`cannot hot a memory with status '${row}'`);
       }
       this.db.prepare('UPDATE memories SET hot = ? WHERE id = ?').run(hot ? 1 : 0, id);
     });
@@ -526,10 +526,15 @@ export class Store {
     );
   }
 
-  /** The status of one memory, or undefined when absent. */
-  #readStatus(id: string): string | undefined {
-    const row = this.db.prepare('SELECT status FROM memories WHERE id = ?').get(id) as
-      { status: string } | undefined;
+  /**
+   * The status of one memory, or undefined when absent. BUSY-retried:
+   * callers run it outside a transaction (unlink's pre-checks) or inside
+   * one where the retry stays a plain read (setHot).
+   */
+  #readStatus(id: string): MemoryStatus | undefined {
+    const row = this.#run(() =>
+      this.db.prepare('SELECT status FROM memories WHERE id = ?').get(id),
+    ) as { status: MemoryStatus } | undefined;
     return row?.status;
   }
 
