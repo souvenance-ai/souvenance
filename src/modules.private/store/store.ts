@@ -1116,8 +1116,10 @@ export class Store {
       }
     }
 
-    // Corruption: invalid metadata JSON — reads collapse it into null, so
-    // the verdict is where the corruption speaks.
+    // Corruption: invalid metadata JSON — the write surface cannot produce
+    // it (the verbs take a typed object and serialize; metadata is
+    // immutable after store), and reads collapse it into null, so the
+    // verdict is where the corruption speaks.
     for (const memory of memories) {
       if (invalidMetadataIds.has(memory.id)) {
         findings.push({
