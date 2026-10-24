@@ -12,7 +12,7 @@ export type MemoryStatus = 'active' | 'superseded' | 'deprecated' | 'merged';
 /**
  * The condensation ceiling: a memory longer than this owes its summary at
  * write time, and no summary may exceed it either. Characters, not bytes —
- * ~100 tokens, so a recover serving twenty hot memories costs ~2K tokens
+ * ~100 tokens, so a checkin serving twenty hot memories costs ~2K tokens
  * of content while the full text stays one `get` away. Fixed by the store,
  * not configurable — the contract is the contract.
  */
@@ -43,9 +43,9 @@ const FTS_REBUILD_HINT =
 
 /**
  * One record in a store: content, its authored summary (the condensation
- * that lets recover and search serve more memories per call — owed when
+ * that lets checkin and search serve more memories per call — owed when
  * the content runs past the ceiling), metadata, a status, and the hot
- * flag — the curation mark that hands the memory to the recover ritual
+ * flag — the curation mark that hands the memory to the checkin ritual
  * (#12). `hot` is earned after the fact (setHot), never at birth, and
  * survives only on an active memory.
  */
@@ -126,7 +126,7 @@ export interface OpenOptions {
 
 /**
  * The graph projection of one memory: the shape every node-returning read
- * (get, list, search, recover) serves. Out-edges expand into target nodes
+ * (get, list, search, checkin) serves. Out-edges expand into target nodes
  * when depth asks for it; in-edges always stay raw rows — *out expands,
  * in informs*. Both directions carry the edges' `created_at DESC` order.
  */
@@ -193,9 +193,9 @@ export interface SearchOptions {
   readonly where?: string;
 }
 
-export interface RecoverOptions {
+export interface CheckinOptions {
   /**
-   * The hot block's cap. Absent: no cap — recover serves the whole set;
+   * The hot block's cap. Absent: no cap — checkin serves the whole set;
    * order guides attention, nothing drops.
    */
   readonly limit?: number;
@@ -211,10 +211,10 @@ export interface Stats {
 }
 
 /**
- * The recovery ritual's report: the curated hot block plus the store's
+ * The checkin ritual's report: the curated hot block plus the store's
  * shape. The block an agent's fresh session reads in one call.
  */
-export interface RecoverReport {
+export interface CheckinReport {
   /** Active + hot memories, newest first, relations included. */
   readonly hot: readonly MemoryWithRelations[];
   readonly stats: Stats;
@@ -440,8 +440,8 @@ function normaliseDepth(depth: number | undefined): number {
 }
 
 /**
- * Limit validation shared by list/search/recover: absent means the verb's
- * own default (recover: no cap), anything else must be an integer >= 1.
+ * Limit validation shared by list/search/checkin: absent means the verb's
+ * own default (checkin: no cap), anything else must be an integer >= 1.
  */
 function normaliseLimit(limit: number | undefined, fallback: number): number {
   if (limit === undefined) return fallback;
@@ -657,7 +657,7 @@ export class Store {
    * inheritance, the same way explicit metadata overrides structural
    * inheritance. The supersedes bridge lands old→new, the old memory is
    * marked superseded, and its hot flag TRANSFERS to the head — the
-   * revision replaces what recover would have served.
+   * revision replaces what checkin would have served.
    */
   supersede(oldId: string, content: string, options: StoreOptions = {}): string {
     this.#assertWritable();
@@ -713,7 +713,7 @@ export class Store {
    * metadata (kind only when every source agrees, tags unioned); each
    * source keeps a `merges` bridge as provenance and is marked merged.
    * The hot flag UNIONS across sources — if any source was headed for
-   * recover, the fusion is. Sources cool: the flag lives only on active
+   * checkin, the fusion is. Sources cool: the flag lives only on active
    * memories.
    */
   merge(ids: readonly string[], content: string, options: MergeOptions = {}): string {
@@ -766,7 +766,7 @@ export class Store {
 
   /**
    * The one non-graph mutation: curation. Only an ACTIVE memory can be
-   * hot — the flag hands the memory to the recover ritual (#12), and a
+   * hot — the flag hands the memory to the checkin ritual (#12), and a
    * superseded/deprecated/merged memory must not resurface through it.
    * Status transitions cool the memory; this is the only way back. The
    * check and the write share the transaction: a racing supersede and the
@@ -1000,14 +1000,14 @@ export class Store {
   }
 
   /**
-   * The recovery ritual in one call — the deep-module home the HTTP
-   * /recover endpoint and the MCP recover tool will both serve. The hot
+   * The checkin ritual in one call — the deep-module home the HTTP
+   * /checkin endpoint and the MCP checkin tool will both serve. The hot
    * block replaces the legacy kind blocks: active + hot memories served
    * as projected nodes, relations included (zero drill-in), newest first.
    * No cap by default — the limit opt guides attention without ever
    * dropping anything silently. Reads stay reads.
    */
-  recover(options: RecoverOptions = {}): RecoverReport {
+  checkin(options: CheckinOptions = {}): CheckinReport {
     // LIMIT -1 is SQLite's no-cap form: the hot set serves whole.
     const limit = normaliseLimit(options.limit, -1);
     const rows = this.#db
@@ -1242,7 +1242,7 @@ export class Store {
   }
 
   /**
-   * The agent's closure gate — the session-exit ritual (Recover's pair).
+   * The agent's closure gate — the session-exit ritual (Checkin's pair).
    * Reports the consolidation debts ONLY: a register nobody curated is a
    * ghost, islands mark memories a session stored without exploring the
    * graph, duplicate titles mark candidates a session never fused. Every
@@ -1262,7 +1262,7 @@ export class Store {
       .all() as unknown as RelationRow[];
     const findings: CheckoutFinding[] = [];
 
-    // A register nobody curated is a ghost — the next recover serves an
+    // A register nobody curated is a ghost — the next checkin serves an
     // empty hot block and a fresh session reads nothing. Silent when there
     // is nothing to serve (no memories, no actives).
     const activeCount = memories.filter((memory) => memory.status === 'active').length;
@@ -1270,7 +1270,7 @@ export class Store {
     if (activeCount > 0 && hotCount === 0) {
       findings.push({
         check: 'no_hot',
-        detail: `${activeCount} active memories and none hot — the next recover serves an empty block`,
+        detail: `${activeCount} active memories and none hot — the next checkin serves an empty block`,
         hint: 'setHot the memories a fresh session must read — the register owes curation',
       });
     }

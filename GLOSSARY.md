@@ -23,11 +23,11 @@ One record in a store: content, its authored summary, metadata, a status (active
 _Avoid_: note, fact, recollection
 
 **Summary**:
-The authored condensation of a memory's content — what recover and search serve to hand a fresh session more memories per call. Owed at write time when the content runs past the ceiling; condensed always; revised by supersede, never in place.
+The authored condensation of a memory's content — what checkin and search serve to hand a fresh session more memories per call. Owed at write time when the content runs past the ceiling; condensed always; revised by supersede, never in place.
 _Avoid_: abstract, digest, tldr
 
 **Hot**:
-The curation flag of an active memory: what recover serves a fresh session. Only an active memory can be hot; supersede transfers it to the head, merge unions it, every termination cools it.
+The curation flag of an active memory: what checkin serves a fresh session. Only an active memory can be hot; supersede transfers it to the head, merge unions it, every termination cools it.
 _Avoid_: pinned, starred, important
 
 **Relation**:
@@ -90,9 +90,9 @@ _Avoid_: admin cap, root token
 
 ### The rituals
 
-**Recover**:
+**Checkin**:
 The session-start ritual: the hot memories (with their relations) and the store's stats in one call.
-_Avoid_: boot, restore
+_Avoid_: recover, boot, restore
 
 **Checkout**:
 The agent's session-end verdict: the store reports its consolidation debts — the register's curation and its islands — in one call; the light goes green only when every debt is paid, each payable with the raw verbs. Corruption is not the gate's business.
