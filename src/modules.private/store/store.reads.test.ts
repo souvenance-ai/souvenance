@@ -6,6 +6,18 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'vitest';
 import { Store } from './store.ts';
 
+/**
+ * A raw probe connection — the hand-SQL vantage. The store's own
+ * connection is `#db`-private by design: corruption enters the file the
+ * way it would in reality, from outside the library, on a second raw
+ * connection.
+ */
+function probe(store: Store): DatabaseSync {
+  const db = new DatabaseSync(store.dbPath);
+  db.exec('PRAGMA busy_timeout = 5000');
+  return db;
+}
+
 function tempStore(): { store: Store; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'souvenance-test-'));
   const store = Store.open({ dbPath: join(dir, 'memory.db') });
@@ -100,9 +112,8 @@ test('get: restores corrupted metadata JSON as null metadata', () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store('hand-corrupted metadata');
-    // Corruption via a second raw connection — the outside-the-library
-    // vantage: the store's own connection is #db-private.
-    const raw = new DatabaseSync(store.dbPath);
+    // Corruption via the raw probe — the outside-the-library vantage.
+    const raw = probe(store);
     raw.prepare('UPDATE memories SET metadata = ? WHERE id = ?').run('{not json', id);
     raw.close();
     const memory = store.get(id);

@@ -24,13 +24,13 @@ function tempDir(): string {
 }
 
 /**
- * A raw connection on the store's file — the schema-inspection vantage. The
- * store's own connection is `#db`-private (no in-process raw access), and
- * the facts these probes read (tables, schema rows, the WAL journal mode)
- * are file state any second connection sees — the hand-SQL scenario the
- * store must survive.
+ * A raw probe on a store file — the schema-inspection vantage. The store's
+ * own connection is `#db`-private (no in-process raw access), and the
+ * facts these probes read (tables, schema rows, the WAL journal mode) are
+ * file state any second connection sees — the hand-SQL scenario the store
+ * must survive.
  */
-function rawConnection(dbPath: string): DatabaseSync {
+function probe(dbPath: string): DatabaseSync {
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA busy_timeout = 5000');
   return db;
@@ -46,7 +46,7 @@ test('open requires a dbPath — the library never guesses a location', () => {
 test('open creates all tables on a fresh store', () => {
   const { store, cleanup } = tempStore();
   try {
-    const db = rawConnection(store.dbPath);
+    const db = probe(store.dbPath);
     try {
       const tables = db
         .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -67,7 +67,7 @@ test('open creates all tables on a fresh store', () => {
 test('the fresh store is at SCHEMA_VERSION, with the v6 column set', () => {
   const { store, cleanup } = tempStore();
   try {
-    const db = rawConnection(store.dbPath);
+    const db = probe(store.dbPath);
     try {
       const version = db
         .prepare('SELECT MAX(version) AS max_version FROM schema_version')
@@ -98,7 +98,7 @@ test('reopening is a no-op (schema_version unchanged)', () => {
     first.close();
     let firstVersion: number;
     {
-      const db = rawConnection(path);
+      const db = probe(path);
       try {
         firstVersion = (
           db.prepare('SELECT version FROM schema_version').get() as {
@@ -113,7 +113,7 @@ test('reopening is a no-op (schema_version unchanged)', () => {
     second.close();
     let secondVersion: number;
     {
-      const db = rawConnection(path);
+      const db = probe(path);
       try {
         secondVersion = (
           db.prepare('SELECT version FROM schema_version').get() as {
@@ -133,7 +133,7 @@ test('reopening is a no-op (schema_version unchanged)', () => {
 test('the store file speaks WAL — a second connection sees the journal mode', () => {
   const { store, cleanup } = tempStore();
   try {
-    const db = rawConnection(store.dbPath);
+    const db = probe(store.dbPath);
     try {
       // journal_mode is a FILE property once WAL: any connection reads it.
       const journal = db.prepare('PRAGMA journal_mode').get() as { journal_mode: string };
@@ -155,7 +155,7 @@ test('FTS5 stays in sync: insert, update, delete', () => {
   try {
     // The triggers are schema-level: ANY writer on the file — here a raw
     // second connection, the hand-SQL vantage — stays indexed.
-    const raw = rawConnection(store.dbPath);
+    const raw = probe(store.dbPath);
     try {
       raw
         .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
@@ -198,7 +198,7 @@ test('FTS5 stays in sync: insert, update, delete', () => {
 test('FK cascade: deleting a memory removes its edges', () => {
   const { store, cleanup } = tempStore();
   try {
-    const raw = rawConnection(store.dbPath);
+    const raw = probe(store.dbPath);
     try {
       const now = new Date().toISOString();
       raw
@@ -268,7 +268,7 @@ test('v6 migration: the legacy recover basket arrives hot, dead columns dropped'
     }
 
     // The migration's effect is file state — a raw connection reads it.
-    const db = rawConnection(path);
+    const db = probe(path);
     try {
       const hot = Object.fromEntries(
         (
