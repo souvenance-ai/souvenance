@@ -101,6 +101,102 @@ export interface OpenOptions {
 }
 
 /**
+ * The graph projection of one memory: the shape every node-returning read
+ * (get, list, search, recover) serves. Out-edges expand into target nodes
+ * when depth asks for it; in-edges always stay raw rows — *out expands,
+ * in informs*. Both directions carry the edges' `created_at DESC` order.
+ */
+export interface RelationsBlock {
+  readonly out: readonly OutEdge[];
+  readonly in: readonly Relation[];
+}
+
+/**
+ * One outgoing edge of the projection. `target` carries the recursively
+ * expanded node and is null when the projection stops there: the depth is
+ * exhausted, the target was already expanded once in this projection (the
+ * visited set renders cycles and diamonds as leaves), or the edge names a
+ * missing memory in a hand-corrupted store (the doctor, #13, reports it).
+ */
+export interface OutEdge extends Relation {
+  readonly target: MemoryWithRelations | null;
+}
+
+/**
+ * One memory plus its graph projection — the node of the read surface.
+ * `Memory` stays the stored truth the write verbs land; this is what
+ * serving looks like.
+ */
+export interface MemoryWithRelations extends Memory {
+  readonly relations: RelationsBlock;
+}
+
+/**
+ * A search hit: the projected node plus its FTS5 relevance score. Pure
+ * bm25 — smaller wins, best match first; no weight, recency or access
+ * terms remain.
+ */
+export interface SearchResult extends MemoryWithRelations {
+  readonly rank: number;
+}
+
+export interface GetOptions {
+  /**
+   * How deep out-edges expand. Integer >= 1, default 1 (raw edges), no
+   * upper bound — the visited set guards cycles, the caller owns the pace.
+   */
+  readonly depth?: number;
+}
+
+export interface ListOptions {
+  readonly limit?: number;
+  readonly offset?: number;
+  /**
+   * Include superseded/deprecated/merged memories — the --all surface
+   * (active-only by default).
+   */
+  readonly includeLegacy?: boolean;
+  /**
+   * A raw SQL condition on the memories row (`metadata->>'$.kind' = 'note'`
+   * and friends) — the grant opt-in that the server surface gates.
+   */
+  readonly where?: string;
+}
+
+export interface SearchOptions {
+  readonly limit?: number;
+  readonly includeLegacy?: boolean;
+  readonly where?: string;
+}
+
+export interface RecoverOptions {
+  /**
+   * The hot block's cap. Absent: no cap — recover serves the whole set;
+   * order guides attention, nothing drops.
+   */
+  readonly limit?: number;
+}
+
+export interface Stats {
+  readonly memories: number;
+  readonly hot_memories: number;
+  readonly memories_by_status: Readonly<Record<string, number>>;
+  readonly memories_by_kind: Readonly<Record<string, number>>;
+  readonly edges: number;
+  readonly edges_by_kind: Readonly<Record<string, number>>;
+}
+
+/**
+ * The recovery ritual's report: the curated hot block plus the store's
+ * shape. The block an agent's fresh session reads in one call.
+ */
+export interface RecoverReport {
+  /** Active + hot memories, newest first, relations included. */
+  readonly hot: readonly MemoryWithRelations[];
+  readonly stats: Stats;
+}
+
+/**
  * Tightens a store file and its WAL sidecars to owner-only permissions.
  * The store IS the agent's identity (directives, decisions, transcripts) —
  * the same argument that makes a group-readable token file a refusal
@@ -143,6 +239,144 @@ function execPragma(db: DatabaseSync): void {
 const SQLITE_BUSY = 5;
 const BUSY_RETRIES = 50;
 const BUSY_DELAY_MS = 20;
+
+/**
+ * Raw shape of one memories row — parsed into `Memory` by `parseMemoryRow`.
+ */
+interface MemoryRow {
+  readonly id: string;
+  readonly content: string;
+  readonly summary: string | null;
+  readonly metadata: string | null;
+  readonly created_at: string;
+  readonly status: string;
+  readonly hot: number;
+}
+
+/**
+ * Raw shape of one edges row — parsed into `Relation` by `parseRelationRow`.
+ */
+interface RelationRow {
+  readonly from_id: string;
+  readonly to_id: string;
+  readonly kind: string;
+  readonly metadata: string | null;
+  readonly created_at: string;
+}
+
+function parseRawMetadata(metadata: string | null): Record<string, unknown> | null {
+  if (metadata === null) return null;
+  try {
+    return JSON.parse(metadata) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function parseMemoryRow(row: MemoryRow): Memory {
+  return {
+    id: row.id,
+    content: row.content,
+    summary: row.summary,
+    metadata: parseRawMetadata(row.metadata),
+    created_at: row.created_at,
+    status: row.status as MemoryStatus,
+    hot: row.hot === 1,
+  };
+}
+
+function parseRelationRow(row: RelationRow): Relation {
+  return {
+    from_id: row.from_id,
+    to_id: row.to_id,
+    kind: row.kind,
+    metadata: parseRawMetadata(row.metadata),
+    created_at: row.created_at,
+  };
+}
+
+/**
+ * Depth validation for `get`: absent means 1 (raw edges), anything else
+ * must be an integer >= 1. No upper bound — the visited set guards cycles,
+ * the caller owns the pace.
+ */
+function normaliseDepth(depth: number | undefined): number {
+  if (depth === undefined) return 1;
+  if (!Number.isInteger(depth) || depth < 1) {
+    throw new Error('depth must be an integer >= 1');
+  }
+  return depth;
+}
+
+/**
+ * Limit validation shared by list/search/recover: absent means the verb's
+ * own default (recover: no cap), anything else must be an integer >= 1.
+ */
+function normaliseLimit(limit: number | undefined, fallback: number): number {
+  if (limit === undefined) return fallback;
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('limit must be an integer >= 1');
+  }
+  return limit;
+}
+
+function normaliseOffset(offset: number | undefined): number {
+  if (offset === undefined) return 0;
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('offset must be an integer >= 0');
+  }
+  return offset;
+}
+
+/**
+ * Decides whether a search failure came from malformed FTS5 query glue
+ * (punctuation inside bare tokens) rather than from a plain SQL problem.
+ * FTS5 signals it in two ways: a "fts5: syntax error" from characters it
+ * cannot parse, or "no such column: X" when a hyphenated/colonated
+ * compound makes it read X as a column filter — only trusted when X
+ * appears in the query itself.
+ */
+function ftsErrorFromQuery(err: unknown, query: string): boolean {
+  if (!(err instanceof Error)) return false;
+  if (/fts5:\s*syntax error/i.test(err.message)) return true;
+  const match = err.message.match(/no such column:\s*"([^"]+)"|no such column:\s*([A-Za-z0-9_]+)/i);
+  if (!match) return false;
+  const name = (match[1] ?? match[2]).toLowerCase();
+  return query.toLowerCase().includes(name);
+}
+
+/**
+ * Fallback query builder for FTS5 syntax failures. Keeps operators and
+ * quoted phrases, strips every other punctuation character so dotted
+ * numerics and hyphenated/colonated identifiers become plain tokens
+ * ("better-sqlite3" -> "better sqlite3"). Returns null when nothing
+ * searchable remains; the caller then rethrows the original error.
+ */
+function sanitizeFtsQuery(query: string): string | null {
+  const parts = query.match(/"[^"]*"|[^\s"]+/g);
+  if (!parts) return null;
+  const cleaned: string[] = [];
+  for (const part of parts) {
+    if (part.startsWith('"')) {
+      const inner = part
+        .slice(1, -1)
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (inner) cleaned.push(`"${inner}"`);
+      continue;
+    }
+    if (/^(OR|AND|NOT)$/i.test(part)) {
+      cleaned.push(part.toUpperCase());
+      continue;
+    }
+    const pieces = part.replace(/[^\p{L}\p{N}]/gu, ' ').split(/\s+/);
+    for (const piece of pieces) {
+      if (piece) cleaned.push(piece);
+    }
+  }
+  return cleaned.length > 0 ? cleaned.join(' ') : null;
+}
 
 export class Store {
   readonly db: DatabaseSync;
@@ -511,6 +745,222 @@ export class Store {
     });
   }
 
+  // --- reads (#12) : the projection ----------------------------------------
+
+  /**
+   * Read one memory with its graph projection. Depth 1 (default) serves
+   * raw {out, in} edges; greater depths expand out-edges recursively —
+   * *out expands, in informs* — with the visited set rendering cycles and
+   * diamonds as leaves. Reads stay reads: nothing is written, signaled or
+   * bumped. An unknown id is null, not a throw — absence is an answer.
+   */
+  get(id: string, options: GetOptions = {}): MemoryWithRelations | null {
+    const depth = normaliseDepth(options.depth);
+    return this.#expandToNode(id, depth, new Set<string>());
+  }
+
+  /**
+   * Project one memory as the tree's node: its raw edges plus, per
+   * out-edge, the target node when the remaining depth allows and the
+   * visited set has not seen it. Expansion marks targets visited in the
+   * edges' own order (created_at DESC), so the first occurrence in the
+   * projection owns the recursion and later occurrences are leaves.
+   */
+  #projectNode(memory: Memory, depth: number, visited: Set<string>): MemoryWithRelations {
+    visited.add(memory.id);
+    const out = this.db
+      .prepare(
+        'SELECT from_id, to_id, kind, metadata, created_at FROM edges' +
+          ' WHERE from_id = ? ORDER BY created_at DESC',
+      )
+      .all(memory.id) as unknown as RelationRow[];
+    const inRows = this.db
+      .prepare(
+        'SELECT from_id, to_id, kind, metadata, created_at FROM edges' +
+          ' WHERE to_id = ? ORDER BY created_at DESC',
+      )
+      .all(memory.id) as unknown as RelationRow[];
+    const relations: RelationsBlock = {
+      out: out.map((row) => {
+        const relation = parseRelationRow(row);
+        let target: MemoryWithRelations | null = null;
+        if (depth > 1 && !visited.has(row.to_id)) {
+          target = this.#expandToNode(row.to_id, depth - 1, visited);
+        }
+        return { ...relation, target };
+      }),
+      in: inRows.map((row) => parseRelationRow(row)),
+    };
+    return { ...memory, relations };
+  }
+
+  /**
+   * Fetch and project one node. Null when the id names no memory — the
+   * unknown-id contract of `get` and, deeper in a projection, the same
+   * null an orphan edge from a hand-corrupted store renders (FK
+   * enforcement makes it impossible through this store; the doctor,
+   * #13, reports the drift). Never throws on absence.
+   */
+  #expandToNode(id: string, depth: number, visited: Set<string>): MemoryWithRelations | null {
+    const row = this.db
+      .prepare(
+        'SELECT id, content, summary, metadata, created_at, status, hot FROM memories WHERE id = ?',
+      )
+      .get(id) as unknown as MemoryRow | undefined;
+    if (!row) return null;
+    return this.#projectNode(parseMemoryRow(row), depth, visited);
+  }
+
+  /**
+   * Search memories by FTS5 match, ranked by pure bm25 — search wants to
+   * search everywhere: no weight, recency or access terms (the legacy
+   * ranking factors died with their columns). Active-only unless
+   * includeLegacy, narrowed by the where grant, limit 20 by default.
+   * Hits are projected nodes (depth-1 relations included).
+   *
+   * A failed MATCH is not a refusal: when the failure comes from FTS5
+   * glue in the query itself (dotted numerics, hyphenated/colonated
+   * identifiers), one sanitized retry runs; operators and quoted phrases
+   * are preserved and a query with nothing searchable rethrows the
+   * original error.
+   */
+  search(query: string, options: SearchOptions = {}): SearchResult[] {
+    if (!query) throw new Error('query must be non-empty');
+    const limit = normaliseLimit(options.limit, 20);
+    let sql =
+      'SELECT m.id, m.content, m.summary, m.metadata, m.created_at, m.status, m.hot,' +
+      ' (bm25(memories_fts)) AS rank' +
+      ' FROM memories_fts f JOIN memories m ON m.rowid = f.rowid' +
+      ' WHERE memories_fts MATCH ?';
+    if (options.includeLegacy !== true) {
+      sql += ` AND m.status = 'active'`;
+    }
+    if (options.where) {
+      sql += ` AND ${options.where}`;
+    }
+    sql += ' ORDER BY rank LIMIT ?';
+    const runQuery = (match: string): SearchResult[] => {
+      const rows = this.db.prepare(sql).all(match, limit) as unknown as Array<
+        MemoryRow & { readonly rank: number }
+      >;
+      return rows.map((row) => ({
+        ...this.#projectNode(parseMemoryRow(row), 1, new Set<string>()),
+        rank: row.rank,
+      }));
+    };
+    try {
+      return runQuery(query);
+    } catch (err) {
+      if (ftsErrorFromQuery(err, query)) {
+        const sanitized = sanitizeFtsQuery(query);
+        if (sanitized) return runQuery(sanitized);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * The recovery ritual in one call — the deep-module home the HTTP
+   * /recover endpoint and the MCP recover tool will both serve. The hot
+   * block replaces the legacy kind blocks: active + hot memories served
+   * as projected nodes, relations included (zero drill-in), newest first.
+   * No cap by default — the limit opt guides attention without ever
+   * dropping anything silently. Reads stay reads.
+   */
+  recover(options: RecoverOptions = {}): RecoverReport {
+    // LIMIT -1 is SQLite's no-cap form: the hot set serves whole.
+    const limit = normaliseLimit(options.limit, -1);
+    const rows = this.db
+      .prepare(
+        'SELECT id, content, summary, metadata, created_at, status, hot FROM memories' +
+          " WHERE status = 'active' AND hot = 1 ORDER BY created_at DESC LIMIT ?",
+      )
+      .all(limit) as unknown as MemoryRow[];
+    return {
+      hot: rows.map((row) => this.#projectNode(parseMemoryRow(row), 1, new Set<string>())),
+      stats: this.stats(),
+    };
+  }
+
+  /**
+   * List memories as projected nodes: newest first, active-only unless
+   * includeLegacy, paged by limit/offset, narrowed by the where grant.
+   * Every row carries its depth-1 relations block — list is the
+   * set-serving verb, and the projection rides free next to the content
+   * read.
+   */
+  list(options: ListOptions = {}): MemoryWithRelations[] {
+    const limit = normaliseLimit(options.limit, 20);
+    const offset = normaliseOffset(options.offset);
+    let sql = 'SELECT id, content, summary, metadata, created_at, status, hot FROM memories';
+    const conditions: string[] = [];
+    if (options.includeLegacy !== true) {
+      conditions.push("status = 'active'");
+    }
+    if (options.where) {
+      conditions.push(options.where);
+    }
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    const rows = this.db.prepare(sql).all(limit, offset) as unknown as MemoryRow[];
+    return rows.map((row) => this.#projectNode(parseMemoryRow(row), 1, new Set<string>()));
+  }
+
+  /**
+   * The store's shape in one aggregate call — counts, not rows. Reads
+   * never move these numbers (no access signal): two stats() calls across
+   * any reads return the same report. The by-kind ledger groups the
+   * metadata path `$.kind` over every status; kind-less memories simply
+   * don't appear (kind is a free tag, the refonte keeps it that way).
+   */
+  stats(): Stats {
+    const memories_by_status: Record<string, number> = {};
+    const statusRows = this.db
+      .prepare('SELECT status, count(*) AS c FROM memories GROUP BY status ORDER BY status')
+      .all() as unknown as Array<{ status: string; c: number }>;
+    for (const row of statusRows) {
+      memories_by_status[row.status] = row.c;
+    }
+    const memories_by_kind: Record<string, number> = {};
+    const kindRows = this.db
+      .prepare(
+        `SELECT json_extract(metadata, '$.kind') AS kind, count(*) AS c FROM memories
+         WHERE metadata IS NOT NULL AND json_extract(metadata, '$.kind') IS NOT NULL
+         GROUP BY kind ORDER BY kind`,
+      )
+      .all() as unknown as Array<{ kind: string; c: number }>;
+    for (const row of kindRows) {
+      memories_by_kind[row.kind] = row.c;
+    }
+    const edges_by_kind: Record<string, number> = {};
+    const kindEdges = this.db
+      .prepare('SELECT kind, count(*) AS c FROM edges GROUP BY kind ORDER BY kind')
+      .all() as unknown as Array<{ kind: string; c: number }>;
+    for (const row of kindEdges) {
+      edges_by_kind[row.kind] = row.c;
+    }
+    return {
+      memories: this.#count('SELECT count(*) AS c FROM memories'),
+      hot_memories: this.#count(
+        "SELECT count(*) AS c FROM memories WHERE status = 'active' AND hot = 1",
+      ),
+      memories_by_status,
+      memories_by_kind,
+      edges: this.#count('SELECT count(*) AS c FROM edges'),
+      edges_by_kind,
+    };
+  }
+
+  /**
+   * The single SELECT count(*) row — stats' own arithmetic.
+   */
+  #count(sql: string): number {
+    const row = this.db.prepare(sql).get() as unknown as { c: number };
+    return row.c;
+  }
+
   /**
    * The status of one memory, or undefined when absent. BUSY-retried:
    * callers run it outside a transaction (unlink's pre-checks) or inside
@@ -572,12 +1022,8 @@ export class Store {
   #readMeta(id: string): Record<string, unknown> | null {
     const row = this.db.prepare('SELECT metadata FROM memories WHERE id = ?').get(id) as
       { metadata: string | null } | undefined;
-    if (row === undefined || row.metadata === null) return null;
-    try {
-      return JSON.parse(row.metadata) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
+    if (row === undefined) return null;
+    return parseRawMetadata(row.metadata);
   }
 
   /**
