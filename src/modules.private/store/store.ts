@@ -28,6 +28,14 @@ export const MAX_SUMMARY_LENGTH = 400;
 export const CHECKOUT_CHECK_COUNT = 9;
 
 /**
+ * The one-line FTS rebuild — the repair route outside the library (the
+ * store's own connection is `#db`-private); named by the fts_integrity
+ * hint.
+ */
+const FTS_REBUILD_HINT =
+  "rebuild the index with SQL: INSERT INTO memories_fts(memories_fts) VALUES('rebuild') — mechanical, no content rewrite";
+
+/**
  * One record in a store: content, its authored summary (the condensation
  * that lets recover and search serve more memories per call — owed when
  * the content runs past the ceiling), metadata, a status, and the hot
@@ -275,6 +283,14 @@ export interface ForkResult {
 }
 
 /**
+ * The db file and its WAL sidecars — the trio every permission pass and a
+ * forced fork refresh must treat together.
+ */
+function sidecarPaths(dbPath: string): string[] {
+  return [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+}
+
+/**
  * Tightens a store file and its WAL sidecars to owner-only permissions.
  * The store IS the agent's identity (directives, decisions, transcripts) —
  * the same argument that makes a group-readable token file a refusal
@@ -284,7 +300,7 @@ export interface ForkResult {
  */
 function tightenPermissions(dbPath: string): void {
   if (process.platform === 'win32') return;
-  for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+  for (const path of sidecarPaths(dbPath)) {
     try {
       if (existsSync(path)) chmodSync(path, 0o600);
     } catch {
@@ -1072,21 +1088,19 @@ export class Store {
     const byId = new Map(memories.map((memory) => [memory.id, memory]));
     const findings: CheckoutFinding[] = [];
 
-    // Metadata parsed once, from the RAW strings — unlike parseRawMetadata,
-    // which collapses invalid JSON into null, the verdict must see the
-    // difference: invalid_metadata_json is a finding of its own, and the
-    // checks that read metadata stay one finding per root cause (no echo
-    // from the same corruption).
-    const parsedMeta = new Map<string, Record<string, unknown> | null | undefined>();
+    // Corruption: metadata parse probed ONCE — no check reads metadata
+    // content (kinds stay free tags, the refonte keeps it that way), so
+    // the only fact worth keeping is the set of ids whose column is not
+    // valid JSON: invalid_metadata_json is where the corruption speaks,
+    // one finding per root cause (reads collapse invalid JSON into null
+    // metadata, silently).
+    const invalidMetadataIds = new Set<string>();
     for (const memory of memories) {
-      if (memory.metadata === null) {
-        parsedMeta.set(memory.id, null);
-        continue;
-      }
+      if (memory.metadata === null) continue;
       try {
-        parsedMeta.set(memory.id, JSON.parse(memory.metadata) as Record<string, unknown>);
+        JSON.parse(memory.metadata);
       } catch {
-        parsedMeta.set(memory.id, undefined);
+        invalidMetadataIds.add(memory.id);
       }
     }
 
@@ -1105,7 +1119,7 @@ export class Store {
     // Corruption: invalid metadata JSON — reads collapse it into null, so
     // the verdict is where the corruption speaks.
     for (const memory of memories) {
-      if (memory.metadata !== null && parsedMeta.get(memory.id) === undefined) {
+      if (invalidMetadataIds.has(memory.id)) {
         findings.push({
           check: 'invalid_metadata_json',
           id: memory.id,
@@ -1263,7 +1277,7 @@ export class Store {
     if (options.force === true) {
       // VACUUM INTO refuses an existing target; a forced refresh removes
       // the old file and its WAL sidecars first.
-      for (const path of [target, `${target}-wal`, `${target}-shm`]) {
+      for (const path of sidecarPaths(target)) {
         rmSync(path, { force: true });
       }
     }
@@ -1293,7 +1307,7 @@ export class Store {
    * the SQL line, executed outside the library (the store is #db-private).
    */
   #checkFts(): CheckoutFinding[] {
-    const out: CheckoutFinding[] = [];
+    const findings: CheckoutFinding[] = [];
     const snapshotDir = mkdtempSync(join(tmpdir(), 'souvenance-checkout-'));
     try {
       const snapshotPath = join(snapshotDir, 'snapshot.db').replace(/'/g, "''");
@@ -1315,19 +1329,19 @@ export class Store {
           indexRowids.size !== memoryRowids.length ||
           memoryRowids.some((rowid) => !indexRowids.has(rowid));
         if (drifted) {
-          out.push({
+          findings.push({
             check: 'fts_integrity',
             detail: `FTS index holds ${indexRowids.size} rowids for ${memoryRowids.length} memories`,
-            hint: "rebuild the index with SQL: INSERT INTO memories_fts(memories_fts) VALUES('rebuild') — mechanical, no content rewrite",
+            hint: FTS_REBUILD_HINT,
           });
         }
         try {
           snapshot.exec("INSERT INTO memories_fts(memories_fts) VALUES('integrity-check')");
         } catch (err) {
-          out.push({
+          findings.push({
             check: 'fts_integrity',
             detail: `integrity-check failed: ${err instanceof Error ? err.message : String(err)}`,
-            hint: "rebuild the index with SQL: INSERT INTO memories_fts(memories_fts) VALUES('rebuild') — mechanical, no content rewrite",
+            hint: FTS_REBUILD_HINT,
           });
         }
       } finally {
@@ -1336,7 +1350,7 @@ export class Store {
     } finally {
       rmSync(snapshotDir, { recursive: true, force: true });
     }
-    return out;
+    return findings;
   }
 
   /**

@@ -163,12 +163,13 @@ test('checkout: hot_without_active finds the v6 invariant broken by hand SQL', (
     raw.close();
     // Two findings, one defect: the invariant break AND the gate's own
     // debt — a was the register's only hot memory, so the hand-cool leaves
-    // an unserved register too.
+    // an unserved register too. The order is the contract: corruption
+    // first, consolidation after.
     let report = store.checkout();
-    assert.deepEqual(report.findings.map((finding) => finding.check).sort(), [
-      'hot_without_active',
-      'no_hot',
-    ]);
+    assert.deepEqual(
+      report.findings.map((finding) => finding.check),
+      ['hot_without_active', 'no_hot'],
+    );
     const flagged = report.findings.find((finding) => finding.check === 'hot_without_active');
     assert.equal(flagged!.id, a);
 
@@ -420,8 +421,8 @@ test('checkout: all-or-nothing — pay every debt, then the light is green', () 
   const { store, cleanup } = tempStore();
   try {
     // A messy session: memories stored, nothing linked, nothing curated,
-    // the same title twice. The verdict names each debt — corruption first
-    // by the ordered contract, then consolidation.
+    // the same title twice. The verdict names each consolidation debt —
+    // and the all-or-nothing contract blocks on any of them.
     const first = store.store('# The plan\n\nDo the thing.\n\nKeywords: plan.', {
       metadata: { kind: 'note' },
     });
