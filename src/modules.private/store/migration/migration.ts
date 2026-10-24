@@ -65,10 +65,13 @@ ALTER TABLE memories RENAME COLUMN read_count TO access_count;
  * on them) and `hot` takes over curation. The exact basket the legacy
  * recover served — active directives, summaries, and OPEN objectives —
  * arrives hot, so an existing individual recovers the same memories it
- * always did, now by explicit flag instead of kind convention.
+ * always did, now by explicit flag instead of kind convention. `summary`
+ * joins as the authored condensation of long content (null on migrated
+ * rows — the obligation starts with the refonte's writes).
  */
 const V6 = `
 ALTER TABLE memories ADD COLUMN hot INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE memories ADD COLUMN summary TEXT;
 UPDATE memories SET hot = 1
  WHERE status = 'active'
    AND json_extract(metadata, '$.kind') IN ('directive', 'summary', 'objective')
