@@ -80,3 +80,24 @@ test(
     }
   },
 );
+
+test('permissions: a fork target lands owner-only', { skip: SKIP_WINDOWS }, () => {
+  const { dbPath, cleanup } = tempStorePath('parent.db');
+  let forkCleanup: (() => void) | undefined;
+  try {
+    const store = Store.open({ dbPath });
+    try {
+      store.store('fork me');
+      const fork = tempStorePath('fork.db');
+      forkCleanup = fork.cleanup;
+      const result = store.fork(fork.dbPath);
+      assert.equal(result.path, fork.dbPath);
+      assert.equal(mode(fork.dbPath), 0o600, 'fork copy tightened');
+    } finally {
+      store.close();
+    }
+  } finally {
+    cleanup();
+    forkCleanup?.();
+  }
+});

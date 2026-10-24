@@ -23,6 +23,19 @@ function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'souvenance-open-'));
 }
 
+/**
+ * A raw connection on the store's file — the schema-inspection vantage. The
+ * store's own connection is `#db`-private (no in-process raw access), and
+ * the facts these probes read (tables, schema rows, the WAL journal mode)
+ * are file state any second connection sees — the hand-SQL scenario the
+ * store must survive.
+ */
+function rawConnection(dbPath: string): DatabaseSync {
+  const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA busy_timeout = 5000');
+  return db;
+}
+
 test('open requires a dbPath — the library never guesses a location', () => {
   // Compile-time pin: OpenOptions.dbPath is REQUIRED. If someone relaxes
   // the interface, OpenOptions stops extending { dbPath: string } and the
@@ -33,14 +46,19 @@ test('open requires a dbPath — the library never guesses a location', () => {
 test('open creates all tables on a fresh store', () => {
   const { store, cleanup } = tempStore();
   try {
-    const tables = store.db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as { name: string }[];
-    const names = tables.map((table) => table.name);
-    assert.ok(names.includes('memories'));
-    assert.ok(names.includes('edges'));
-    assert.ok(names.includes('schema_version'));
-    assert.ok(names.includes('memories_fts'));
+    const db = rawConnection(store.dbPath);
+    try {
+      const tables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .all() as { name: string }[];
+      const names = tables.map((table) => table.name);
+      assert.ok(names.includes('memories'));
+      assert.ok(names.includes('edges'));
+      assert.ok(names.includes('schema_version'));
+      assert.ok(names.includes('memories_fts'));
+    } finally {
+      db.close();
+    }
   } finally {
     cleanup();
   }
@@ -49,19 +67,24 @@ test('open creates all tables on a fresh store', () => {
 test('the fresh store is at SCHEMA_VERSION, with the v6 column set', () => {
   const { store, cleanup } = tempStore();
   try {
-    const version = store.db
-      .prepare('SELECT MAX(version) AS max_version FROM schema_version')
-      .get() as {
-      max_version: number;
-    };
-    assert.equal(version.max_version, SCHEMA_VERSION);
-    const columns = (
-      store.db.prepare('PRAGMA table_info(memories)').all() as { name: string }[]
-    ).map((column) => column.name);
-    assert.ok(columns.includes('hot'), 'the v6 curation flag exists');
-    assert.ok(columns.includes('summary'), 'the v6 authored condensation exists');
-    assert.ok(!columns.includes('weight'), 'weight was dropped by the refonte');
-    assert.ok(!columns.includes('access_count'), 'the read-signal column was dropped');
+    const db = rawConnection(store.dbPath);
+    try {
+      const version = db
+        .prepare('SELECT MAX(version) AS max_version FROM schema_version')
+        .get() as {
+        max_version: number;
+      };
+      assert.equal(version.max_version, SCHEMA_VERSION);
+      const columns = (db.prepare('PRAGMA table_info(memories)').all() as { name: string }[]).map(
+        (column) => column.name,
+      );
+      assert.ok(columns.includes('hot'), 'the v6 curation flag exists');
+      assert.ok(columns.includes('summary'), 'the v6 authored condensation exists');
+      assert.ok(!columns.includes('weight'), 'weight was dropped by the refonte');
+      assert.ok(!columns.includes('access_count'), 'the read-signal column was dropped');
+    } finally {
+      db.close();
+    }
   } finally {
     cleanup();
   }
@@ -72,30 +95,56 @@ test('reopening is a no-op (schema_version unchanged)', () => {
   const path = join(dir, 'memory.db');
   try {
     const first = Store.open({ dbPath: path });
-    const firstVersion = first.db.prepare('SELECT version FROM schema_version').get() as {
-      version: number;
-    };
     first.close();
+    let firstVersion: number;
+    {
+      const db = rawConnection(path);
+      try {
+        firstVersion = (
+          db.prepare('SELECT version FROM schema_version').get() as {
+            version: number;
+          }
+        ).version;
+      } finally {
+        db.close();
+      }
+    }
     const second = Store.open({ dbPath: path });
-    const secondVersion = second.db.prepare('SELECT version FROM schema_version').get() as {
-      version: number;
-    };
-    assert.equal(secondVersion.version, firstVersion.version);
     second.close();
+    let secondVersion: number;
+    {
+      const db = rawConnection(path);
+      try {
+        secondVersion = (
+          db.prepare('SELECT version FROM schema_version').get() as {
+            version: number;
+          }
+        ).version;
+      } finally {
+        db.close();
+      }
+    }
+    assert.equal(secondVersion, firstVersion);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('WAL and FK pragmas are set', () => {
+test('the store file speaks WAL — a second connection sees the journal mode', () => {
   const { store, cleanup } = tempStore();
   try {
-    const journal = store.db.prepare('PRAGMA journal_mode').get() as { journal_mode: string };
-    assert.equal(journal.journal_mode, 'wal');
-    const foreignKeys = store.db.prepare('PRAGMA foreign_keys').get() as {
-      foreign_keys: number;
-    };
-    assert.equal(foreignKeys.foreign_keys, 1);
+    const db = rawConnection(store.dbPath);
+    try {
+      // journal_mode is a FILE property once WAL: any connection reads it.
+      const journal = db.prepare('PRAGMA journal_mode').get() as { journal_mode: string };
+      assert.equal(journal.journal_mode, 'wal');
+    } finally {
+      db.close();
+    }
+    // The foreign_keys pragma is per-connection, invisible from outside:
+    // its last wall is not a pinned pragma but the checkout's
+    // orphan_edges finding — a dropped enforcement line lands as drift
+    // the verdict reports.
   } finally {
     cleanup();
   }
@@ -104,43 +153,43 @@ test('WAL and FK pragmas are set', () => {
 test('FTS5 stays in sync: insert, update, delete', () => {
   const { store, cleanup } = tempStore();
   try {
-    const db = store.db;
-    db.prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)').run(
-      'a1',
-      'hello world',
-      null,
-      new Date().toISOString(),
-    );
-    db.prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)').run(
-      'a2',
-      'goodbye cruel world',
-      null,
-      new Date().toISOString(),
-    );
+    // The triggers are schema-level: ANY writer on the file — here a raw
+    // second connection, the hand-SQL vantage — stays indexed.
+    const raw = rawConnection(store.dbPath);
+    try {
+      raw
+        .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
+        .run('a1', 'hello world', null, new Date().toISOString());
+      raw
+        .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
+        .run('a2', 'goodbye cruel world', null, new Date().toISOString());
 
-    const match = db
-      .prepare(
-        'SELECT m.id FROM memories_fts f JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ? ORDER BY rank',
-      )
-      .all('world') as { id: string }[];
-    assert.equal(match.length, 2);
+      const match = raw
+        .prepare(
+          'SELECT m.id FROM memories_fts f JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ? ORDER BY rank',
+        )
+        .all('world') as { id: string }[];
+      assert.equal(match.length, 2);
 
-    db.prepare('UPDATE memories SET content = ? WHERE id = ?').run('hello universe', 'a1');
-    const afterUpdate = db
-      .prepare(
-        'SELECT m.id FROM memories_fts f JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ?',
-      )
-      .all('universe') as { id: string }[];
-    assert.equal(afterUpdate.length, 1);
-    assert.equal(afterUpdate[0]!.id, 'a1');
+      raw.prepare('UPDATE memories SET content = ? WHERE id = ?').run('hello universe', 'a1');
+      const afterUpdate = raw
+        .prepare(
+          'SELECT m.id FROM memories_fts f JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ?',
+        )
+        .all('universe') as { id: string }[];
+      assert.equal(afterUpdate.length, 1);
+      assert.equal(afterUpdate[0]!.id, 'a1');
 
-    db.prepare('DELETE FROM memories WHERE id = ?').run('a2');
-    const afterDelete = db
-      .prepare(
-        'SELECT m.id FROM memories_fts f JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ?',
-      )
-      .all('goodbye') as { id: string }[];
-    assert.equal(afterDelete.length, 0);
+      raw.prepare('DELETE FROM memories WHERE id = ?').run('a2');
+      const afterDelete = raw
+        .prepare(
+          'SELECT m.id FROM memories_fts f JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ?',
+        )
+        .all('goodbye') as { id: string }[];
+      assert.equal(afterDelete.length, 0);
+    } finally {
+      raw.close();
+    }
   } finally {
     cleanup();
   }
@@ -149,27 +198,27 @@ test('FTS5 stays in sync: insert, update, delete', () => {
 test('FK cascade: deleting a memory removes its edges', () => {
   const { store, cleanup } = tempStore();
   try {
-    const db = store.db;
-    const now = new Date().toISOString();
-    db.prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)').run(
-      'a1',
-      'one',
-      null,
-      now,
-    );
-    db.prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)').run(
-      'a2',
-      'two',
-      null,
-      now,
-    );
-    db.prepare(
-      'INSERT INTO edges (from_id, to_id, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('a1', 'a2', 'references', null, now);
+    const raw = rawConnection(store.dbPath);
+    try {
+      const now = new Date().toISOString();
+      raw
+        .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
+        .run('a1', 'one', null, now);
+      raw
+        .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
+        .run('a2', 'two', null, now);
+      raw
+        .prepare(
+          'INSERT INTO edges (from_id, to_id, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run('a1', 'a2', 'references', null, now);
 
-    db.prepare('DELETE FROM memories WHERE id = ?').run('a1');
-    const edges = db.prepare('SELECT count(*) as c FROM edges').get() as { c: number };
-    assert.equal(edges.c, 0);
+      raw.prepare('DELETE FROM memories WHERE id = ?').run('a1');
+      const edges = raw.prepare('SELECT count(*) as c FROM edges').get() as { c: number };
+      assert.equal(edges.c, 0);
+    } finally {
+      raw.close();
+    }
   } finally {
     cleanup();
   }
@@ -211,16 +260,24 @@ test('v6 migration: the legacy recover basket arrives hot, dead columns dropped'
 
     const migrated = Store.open({ dbPath: path });
     try {
-      const hotById = () =>
-        Object.fromEntries(
-          (
-            migrated.db.prepare('SELECT id, hot FROM memories').all() as {
-              id: string;
-              hot: number;
-            }[]
-          ).map((memory) => [memory.id, memory.hot]),
-        );
-      const hot = hotById();
+      // And the migrated store is writable again (the refonte surface).
+      const id = migrated.store('post-migration write');
+      assert.ok(id);
+    } finally {
+      migrated.close();
+    }
+
+    // The migration's effect is file state — a raw connection reads it.
+    const db = rawConnection(path);
+    try {
+      const hot = Object.fromEntries(
+        (
+          db.prepare('SELECT id, hot FROM memories').all() as {
+            id: string;
+            hot: number;
+          }[]
+        ).map((memory) => [memory.id, memory.hot]),
+      );
       assert.equal(hot[directive], 1, 'an active directive arrives hot');
       assert.equal(hot[summary], 1, 'an active summary arrives hot');
       assert.equal(hot[openObjective], 1, 'an open objective arrives hot');
@@ -228,17 +285,13 @@ test('v6 migration: the legacy recover basket arrives hot, dead columns dropped'
       assert.equal(hot[note] ?? 0, 0, 'a plain note does not');
       assert.equal(hot[supersededDirective] ?? 0, 0, 'a superseded directive does not');
 
-      const columns = (
-        migrated.db.prepare('PRAGMA table_info(memories)').all() as { name: string }[]
-      ).map((column) => column.name);
+      const columns = (db.prepare('PRAGMA table_info(memories)').all() as { name: string }[]).map(
+        (column) => column.name,
+      );
       assert.ok(!columns.includes('weight'));
       assert.ok(!columns.includes('access_count'));
-
-      // And the migrated store is writable again (the refonte surface).
-      const id = migrated.store('post-migration write');
-      assert.ok(id);
     } finally {
-      migrated.close();
+      db.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

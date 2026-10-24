@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { migrate, SCHEMA_VERSION, schemaVersion } from './migration/migration.ts';
 
 export type UUID = string;
@@ -16,6 +17,15 @@ export type MemoryStatus = 'active' | 'superseded' | 'deprecated' | 'merged';
  * not configurable — the contract is the contract.
  */
 export const MAX_SUMMARY_LENGTH = 400;
+
+/**
+ * The checkout's check count — the union it reports findings from. The
+ * corruption family (orphan_edges, invalid_metadata_json,
+ * status_without_bridge, hot_without_active, fts_integrity,
+ * file_permissions) plus the consolidation gate (no_hot, isolated_active,
+ * duplicate_titles). Tests pin it as part of the report shape.
+ */
+export const CHECKOUT_CHECK_COUNT = 9;
 
 /**
  * One record in a store: content, its authored summary (the condensation
@@ -116,7 +126,7 @@ export interface RelationsBlock {
  * expanded node and is null when the projection stops there: the depth is
  * exhausted, the target was already expanded once in this projection (the
  * visited set renders cycles and diamonds as leaves), or the edge names a
- * missing memory in a hand-corrupted store (the doctor, #13, reports it).
+ * missing memory in a hand-corrupted store (checkout, #13, reports it).
  */
 export interface OutEdge extends Relation {
   readonly target: MemoryWithRelations | null;
@@ -197,11 +207,79 @@ export interface RecoverReport {
 }
 
 /**
+ * The checkout's finding-producing checks — the verdict vocabulary, two
+ * families: corruption (states impossible through the write surface —
+ * hand SQL, external tools) and consolidation (the closure gate's debts,
+ * payable with the raw verbs). No check depends on a `kind` or a window:
+ * kinds stay free metadata tags, the verdict is timeless store state.
+ */
+export type CheckoutCheck =
+  | 'orphan_edges'
+  | 'invalid_metadata_json'
+  | 'status_without_bridge'
+  | 'hot_without_active'
+  | 'fts_integrity'
+  | 'file_permissions'
+  | 'no_hot'
+  | 'isolated_active'
+  | 'duplicate_titles';
+
+/**
+ * One problem the checkout returns. All-or-nothing: no severity — a debt
+ * either blocks the green light or the store is healthy. `id` carries the
+ * implicated memory where one exists (edge findings name both endpoints in
+ * the detail). The hint names the payable path: a raw verb where the state
+ * is agent-owned, SQL where corruption entered from outside the library.
+ */
+export interface CheckoutFinding {
+  readonly check: CheckoutCheck;
+  readonly id?: UUID;
+  readonly detail: string;
+  readonly hint: string;
+}
+
+/**
+ * The store's verdict: the corruption report and the consolidation gate in
+ * one call. `healthy` is the green light to end a session — earned, never
+ * granted: zero findings. Read-only — it verifies the store and never
+ * repairs it; the hints tell the agent (verbs) or the operator (SQL) how.
+ */
+export interface CheckoutReport {
+  readonly healthy: boolean;
+  readonly findings: readonly CheckoutFinding[];
+  readonly summary: {
+    readonly checks: number;
+    readonly issues: number;
+    readonly memories: number;
+    readonly hot_memories: number;
+    readonly edges: number;
+    readonly edges_by_kind: Readonly<Record<string, number>>;
+  };
+}
+
+export interface ForkOptions {
+  /**
+   * Overwrite an existing target file (and its WAL sidecars). Default
+   * off — a fork never clobbers an existing store silently.
+   */
+  readonly force?: boolean;
+}
+
+export interface ForkResult {
+  /** Absolute path of the forked store. */
+  readonly path: string;
+  /** Memories copied (all statuses) — an exact copy: nothing added. */
+  readonly memories: number;
+  /** Relations copied. */
+  readonly edges: number;
+}
+
+/**
  * Tightens a store file and its WAL sidecars to owner-only permissions.
  * The store IS the agent's identity (directives, decisions, transcripts) —
  * the same argument that makes a group-readable token file a refusal
  * applies to the store file. Best-effort: a failed chmod never bricks the
- * open; the doctor's file_permissions check is the visible enforcer for
+ * open; the checkout's file_permissions check is the visible enforcer for
  * anything this pass cannot reach (win32 skipped — stat mode is unreliable).
  */
 function tightenPermissions(dbPath: string): void {
@@ -210,7 +288,7 @@ function tightenPermissions(dbPath: string): void {
     try {
       if (existsSync(path)) chmodSync(path, 0o600);
     } catch {
-      // best effort — the doctor reports drift
+      // best effort — checkout's file_permissions check reports drift
     }
   }
 }
@@ -379,7 +457,7 @@ function sanitizeFtsQuery(query: string): string | null {
 }
 
 export class Store {
-  readonly db: DatabaseSync;
+  readonly #db: DatabaseSync;
   readonly dbPath: string;
   /** True when opened with readOnly — write verbs refuse, migration is
    *  skipped. */
@@ -388,7 +466,7 @@ export class Store {
   // The one `private` the code style allows: `#` cannot prefix a
   // constructor, and hiding it is what makes `open` the only way in.
   private constructor(db: DatabaseSync, dbPath: string, readOnly: boolean) {
-    this.db = db;
+    this.#db = db;
     this.dbPath = dbPath;
     this.readOnly = readOnly;
   }
@@ -425,7 +503,8 @@ export class Store {
   /**
    * Write verbs refuse on a read-only store. NOT enforced inside
    * #withBusyRetry(): it also carries legitimate non-write uses (the
-   * doctor's VACUUM INTO snapshot lands there in #13).
+   * checkout's VACUUM INTO snapshot — a file-level write to a NEW file,
+   * never to the store itself — lands there).
    */
   #assertWritable(): void {
     if (this.readOnly) {
@@ -440,7 +519,7 @@ export class Store {
    * it to the head, merge unions it across sources.
    */
   #requireActive(id: string, verb: string): boolean {
-    const row = this.db.prepare('SELECT status, hot FROM memories WHERE id = ?').get(id) as
+    const row = this.#db.prepare('SELECT status, hot FROM memories WHERE id = ?').get(id) as
       { status: MemoryStatus; hot: number } | undefined;
     if (!row) throw new Error(`memory not found: ${id}`);
     if (row.status !== 'active') {
@@ -458,13 +537,13 @@ export class Store {
    */
   #transaction<GOutput>(operation: () => GOutput): GOutput {
     return this.#withBusyRetry(() => {
-      this.db.exec('BEGIN');
+      this.#db.exec('BEGIN');
       try {
         const result = operation();
-        this.db.exec('COMMIT');
+        this.#db.exec('COMMIT');
         return result;
       } catch (err) {
-        this.db.exec('ROLLBACK');
+        this.#db.exec('ROLLBACK');
         throw err;
       }
     });
@@ -503,7 +582,7 @@ export class Store {
     const metadata = options.metadata ? JSON.stringify(options.metadata) : null;
     const created_at = new Date().toISOString();
     this.#transaction(() => {
-      this.db
+      this.#db
         .prepare(
           'INSERT INTO memories (id, content, summary, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
         )
@@ -537,13 +616,13 @@ export class Store {
       const hot = this.#requireActive(oldId, 'supersede');
       const inherited = options.metadata ?? this.#structuralInherit([this.#readMeta(oldId)]);
       const metadata = inherited ? JSON.stringify(inherited) : null;
-      this.db
+      this.#db
         .prepare(
           'INSERT INTO memories (id, content, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?)',
         )
         .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
       if (!options.relations?.length) {
-        const inheritedEdges = this.db
+        const inheritedEdges = this.#db
           .prepare('SELECT to_id, kind, metadata, created_at FROM edges WHERE from_id = ?')
           .all(oldId) as unknown as Array<{
           to_id: string;
@@ -551,7 +630,7 @@ export class Store {
           metadata: string | null;
           created_at: string;
         }>;
-        const memoryExists = this.db.prepare('SELECT 1 FROM memories WHERE id = ?');
+        const memoryExists = this.#db.prepare('SELECT 1 FROM memories WHERE id = ?');
         for (const edge of inheritedEdges) {
           // Pre-validated like #insertRelations: refuse-don't-hide — a
           // hand-corrupted orphan source edge names its missing target
@@ -569,7 +648,9 @@ export class Store {
         this.#insertRelations(newId, options.relations, created_at);
       }
       this.#insertEdge(oldId, newId, 'supersedes', null, created_at);
-      this.db.prepare("UPDATE memories SET status = 'superseded', hot = 0 WHERE id = ?").run(oldId);
+      this.#db
+        .prepare("UPDATE memories SET status = 'superseded', hot = 0 WHERE id = ?")
+        .run(oldId);
     });
     return newId;
   }
@@ -603,14 +684,14 @@ export class Store {
       }
       const inherited = options.metadata ?? this.#structuralInherit(metadataList);
       const metadata = inherited ? JSON.stringify(inherited) : null;
-      this.db
+      this.#db
         .prepare(
           'INSERT INTO memories (id, content, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?)',
         )
         .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
       for (const id of ids) {
         this.#insertEdge(id, newId, 'merges', null, created_at);
-        this.db.prepare("UPDATE memories SET status = 'merged', hot = 0 WHERE id = ?").run(id);
+        this.#db.prepare("UPDATE memories SET status = 'merged', hot = 0 WHERE id = ?").run(id);
       }
     });
     return newId;
@@ -626,7 +707,7 @@ export class Store {
     this.#assertWritable();
     this.#transaction(() => {
       this.#requireActive(id, 'deprecate');
-      this.db.prepare("UPDATE memories SET status = 'deprecated', hot = 0 WHERE id = ?").run(id);
+      this.#db.prepare("UPDATE memories SET status = 'deprecated', hot = 0 WHERE id = ?").run(id);
     });
   }
 
@@ -646,7 +727,7 @@ export class Store {
       if (row !== 'active') {
         throw new Error(`cannot hot a memory with status '${row}'`);
       }
-      this.db.prepare('UPDATE memories SET hot = ? WHERE id = ?').run(hot ? 1 : 0, id);
+      this.#db.prepare('UPDATE memories SET hot = ? WHERE id = ?').run(hot ? 1 : 0, id);
     });
   }
 
@@ -658,12 +739,18 @@ export class Store {
   link(fromId: string, toId: string, kind: string, options: LinkOptions = {}): void {
     this.#assertWritable();
     if (!kind) throw new Error('kind must be non-empty');
+    // Refuse-don't-hide: an edge from a memory to itself names no
+    // relationship. The one-gesture paths are a construction impossibility
+    // (the new id is unknown to the caller), so this verb is the only door.
+    if (fromId === toId) {
+      throw new Error('self-edge refused: from and to must be different memories');
+    }
     const fromExists = this.#withBusyRetry(() =>
-      this.db.prepare('SELECT 1 FROM memories WHERE id = ?').get(fromId),
+      this.#db.prepare('SELECT 1 FROM memories WHERE id = ?').get(fromId),
     );
     if (!fromExists) throw new Error(`memory not found: ${fromId}`);
     const toExists = this.#withBusyRetry(() =>
-      this.db.prepare('SELECT 1 FROM memories WHERE id = ?').get(toId),
+      this.#db.prepare('SELECT 1 FROM memories WHERE id = ?').get(toId),
     );
     if (!toExists) throw new Error(`memory not found: ${toId}`);
 
@@ -708,7 +795,7 @@ export class Store {
 
       if (kind !== undefined) {
         if (!kind) throw new Error('kind must be non-empty');
-        const result = this.db
+        const result = this.#db
           .prepare('DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?')
           .run(fromId, toId, kind);
         if (result.changes === 0) {
@@ -717,17 +804,17 @@ export class Store {
         return;
       }
 
-      const directed = this.db
+      const directed = this.#db
         .prepare('SELECT kind FROM edges WHERE from_id = ? AND to_id = ? ORDER BY kind')
         .all(fromId, toId) as unknown as Array<{ kind: string }>;
       if (directed.length === 1) {
-        this.db
+        this.#db
           .prepare('DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?')
           .run(fromId, toId, directed[0]!.kind);
         return;
       }
       if (directed.length === 0) {
-        const reverse = this.db
+        const reverse = this.#db
           .prepare('SELECT kind FROM edges WHERE from_id = ? AND to_id = ? ORDER BY kind')
           .all(toId, fromId) as unknown as Array<{ kind: string }>;
         if (reverse.length > 0) {
@@ -768,13 +855,13 @@ export class Store {
    */
   #projectNode(memory: Memory, depth: number, visited: Set<string>): MemoryWithRelations {
     visited.add(memory.id);
-    const out = this.db
+    const out = this.#db
       .prepare(
         'SELECT from_id, to_id, kind, metadata, created_at FROM edges' +
           ' WHERE from_id = ? ORDER BY created_at DESC',
       )
       .all(memory.id) as unknown as RelationRow[];
-    const inRows = this.db
+    const inRows = this.#db
       .prepare(
         'SELECT from_id, to_id, kind, metadata, created_at FROM edges' +
           ' WHERE to_id = ? ORDER BY created_at DESC',
@@ -798,11 +885,11 @@ export class Store {
    * Fetch and project one node. Null when the id names no memory — the
    * unknown-id contract of `get` and, deeper in a projection, the same
    * null an orphan edge from a hand-corrupted store renders (FK
-   * enforcement makes it impossible through this store; the doctor,
-   * #13, reports the drift). Never throws on absence.
+   * enforcement makes it impossible through this store; the checkout
+   * reports the drift). Never throws on absence.
    */
   #expandToNode(id: string, depth: number, visited: Set<string>): MemoryWithRelations | null {
-    const row = this.db
+    const row = this.#db
       .prepare(
         'SELECT id, content, summary, metadata, created_at, status, hot FROM memories WHERE id = ?',
       )
@@ -840,7 +927,7 @@ export class Store {
     }
     sql += ' ORDER BY rank LIMIT ?';
     const runQuery = (match: string): SearchResult[] => {
-      const rows = this.db.prepare(sql).all(match, limit) as unknown as Array<
+      const rows = this.#db.prepare(sql).all(match, limit) as unknown as Array<
         MemoryRow & { readonly rank: number }
       >;
       return rows.map((row) => ({
@@ -870,7 +957,7 @@ export class Store {
   recover(options: RecoverOptions = {}): RecoverReport {
     // LIMIT -1 is SQLite's no-cap form: the hot set serves whole.
     const limit = normaliseLimit(options.limit, -1);
-    const rows = this.db
+    const rows = this.#db
       .prepare(
         'SELECT id, content, summary, metadata, created_at, status, hot FROM memories' +
           " WHERE status = 'active' AND hot = 1 ORDER BY created_at DESC LIMIT ?",
@@ -904,7 +991,7 @@ export class Store {
       sql += ` WHERE ${conditions.join(' AND ')}`;
     }
     sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    const rows = this.db.prepare(sql).all(limit, offset) as unknown as MemoryRow[];
+    const rows = this.#db.prepare(sql).all(limit, offset) as unknown as MemoryRow[];
     return rows.map((row) => this.#projectNode(parseMemoryRow(row), 1, new Set<string>()));
   }
 
@@ -917,14 +1004,14 @@ export class Store {
    */
   stats(): Stats {
     const memories_by_status: Record<string, number> = {};
-    const statusRows = this.db
+    const statusRows = this.#db
       .prepare('SELECT status, count(*) AS c FROM memories GROUP BY status ORDER BY status')
       .all() as unknown as Array<{ status: string; c: number }>;
     for (const row of statusRows) {
       memories_by_status[row.status] = row.c;
     }
     const memories_by_kind: Record<string, number> = {};
-    const kindRows = this.db
+    const kindRows = this.#db
       .prepare(
         `SELECT json_extract(metadata, '$.kind') AS kind, count(*) AS c FROM memories
          WHERE metadata IS NOT NULL AND json_extract(metadata, '$.kind') IS NOT NULL
@@ -935,7 +1022,7 @@ export class Store {
       memories_by_kind[row.kind] = row.c;
     }
     const edges_by_kind: Record<string, number> = {};
-    const kindEdges = this.db
+    const kindEdges = this.#db
       .prepare('SELECT kind, count(*) AS c FROM edges GROUP BY kind ORDER BY kind')
       .all() as unknown as Array<{ kind: string; c: number }>;
     for (const row of kindEdges) {
@@ -957,8 +1044,299 @@ export class Store {
    * The single SELECT count(*) row — stats' own arithmetic.
    */
   #count(sql: string): number {
-    const row = this.db.prepare(sql).get() as unknown as { c: number };
+    const row = this.#db.prepare(sql).get() as unknown as { c: number };
     return row.c;
+  }
+
+  // --- the verdict (#13) : checkout ----------------------------------------
+
+  /**
+   * The store's verdict — one call for both families: the corruption
+   * report (states impossible through the write surface, entered by hand
+   * SQL or external tools) and the consolidation gate (the closure debts,
+   * payable with the raw verbs). The fused successor of the legacy doctor
+   * and finish: the agent consolidates, pays what the findings name, and
+   * the light goes green — healthy, zero findings — only when nothing is
+   * left. Purely diagnostic: no option, no write (the VACUUM INTO snapshot
+   * of #checkFts lands in a temp dir, never in the store), and it runs
+   * read-only against a read-only open. Findings come ordered by check,
+   * corruption first.
+   */
+  checkout(): CheckoutReport {
+    const memories = this.#db
+      .prepare('SELECT id, content, summary, metadata, created_at, status, hot FROM memories')
+      .all() as unknown as MemoryRow[];
+    const edges = this.#db
+      .prepare('SELECT from_id, to_id, kind, metadata, created_at FROM edges')
+      .all() as unknown as RelationRow[];
+    const byId = new Map(memories.map((memory) => [memory.id, memory]));
+    const findings: CheckoutFinding[] = [];
+
+    // Metadata parsed once, from the RAW strings — unlike parseRawMetadata,
+    // which collapses invalid JSON into null, the verdict must see the
+    // difference: invalid_metadata_json is a finding of its own, and the
+    // checks that read metadata stay one finding per root cause (no echo
+    // from the same corruption).
+    const parsedMeta = new Map<string, Record<string, unknown> | null | undefined>();
+    for (const memory of memories) {
+      if (memory.metadata === null) {
+        parsedMeta.set(memory.id, null);
+        continue;
+      }
+      try {
+        parsedMeta.set(memory.id, JSON.parse(memory.metadata) as Record<string, unknown>);
+      } catch {
+        parsedMeta.set(memory.id, undefined);
+      }
+    }
+
+    // Corruption: an edge naming a missing memory — FK enforcement makes
+    // it impossible through the verbs; hand SQL is the only producer.
+    for (const edge of edges) {
+      if (!byId.has(edge.from_id) || !byId.has(edge.to_id)) {
+        findings.push({
+          check: 'orphan_edges',
+          detail: `edge ${edge.from_id} -> ${edge.to_id} (${edge.kind}) references a missing memory`,
+          hint: 'the store was edited outside the library; restore the missing memory or remove the edge with direct SQL',
+        });
+      }
+    }
+
+    // Corruption: invalid metadata JSON — reads collapse it into null, so
+    // the verdict is where the corruption speaks.
+    for (const memory of memories) {
+      if (memory.metadata !== null && parsedMeta.get(memory.id) === undefined) {
+        findings.push({
+          check: 'invalid_metadata_json',
+          id: memory.id,
+          detail: 'metadata column is not valid JSON',
+          hint: 'replace it with a valid object via direct SQL — the write surface cannot edit metadata after store',
+        });
+      }
+    }
+
+    // Corruption: a superseded/merged status with no supersedes/merges
+    // bridge — supersede and merge always bridge in the same transaction,
+    // so only a hand-edited status lands without one.
+    for (const memory of memories) {
+      if (memory.status !== 'superseded' && memory.status !== 'merged') continue;
+      const bridged = edges.some(
+        (edge) =>
+          edge.from_id === memory.id && (edge.kind === 'supersedes' || edge.kind === 'merges'),
+      );
+      if (!bridged) {
+        findings.push({
+          check: 'status_without_bridge',
+          id: memory.id,
+          detail: `status '${memory.status}' but no supersedes/merges edge outgoing`,
+          hint: "hand-edited status: restore 'active' via SQL, or create the bridge edge to the successor memory",
+        });
+      }
+    }
+
+    // Corruption: the v6 invariant — hot = 1 only while status = 'active'.
+    // Every status transition cools in the same UPDATE and setHot refuses
+    // non-active memories, so only hand SQL can heat a terminated one.
+    for (const memory of memories) {
+      if (memory.hot && memory.status !== 'active') {
+        findings.push({
+          check: 'hot_without_active',
+          id: memory.id,
+          detail: `hot flag set on a memory with status '${memory.status}'`,
+          hint: 'clear it with direct SQL (UPDATE memories SET hot = 0 ...) — no verb re-heats a terminated memory',
+        });
+      }
+    }
+
+    findings.push(...this.#checkFts());
+
+    // Corruption: the store file carries the agent's whole identity — a
+    // group/world-readable store voids the boundary the ownership lock
+    // enforces elsewhere. tightenPermissions is best-effort; this is the
+    // mechanical report for anything it could not reach.
+    if (process.platform !== 'win32') {
+      try {
+        const mode = statSync(this.dbPath).mode;
+        if ((mode & 0o077) !== 0) {
+          findings.push({
+            check: 'file_permissions',
+            detail: `store file readable by group/others (mode 0${(mode & 0o777).toString(8)})`,
+            hint: `chmod 600 ${this.dbPath} — a shared-readable store file voids the identity boundary`,
+          });
+        }
+      } catch {
+        // an unreadable stat is no finding here — the other checks surface
+        // what actually matters about the store's contents
+      }
+    }
+
+    // The consolidation gate: a register nobody curated is a ghost — the
+    // next recover serves an empty hot block and a fresh session reads
+    // nothing. Silent when there is nothing to serve (no memories, no
+    // actives).
+    const activeCount = memories.filter((memory) => memory.status === 'active').length;
+    const hotCount = memories.filter((memory) => memory.hot && memory.status === 'active').length;
+    if (activeCount > 0 && hotCount === 0) {
+      findings.push({
+        check: 'no_hot',
+        detail: `${activeCount} active memories and none hot — the next recover serves an empty block`,
+        hint: 'setHot the memories a fresh session must read — the register owes curation',
+      });
+    }
+
+    // The consolidation gate: edge-less actives while other actives exist
+    // to relate to — the session-end nudge to explore the memory before
+    // closing. One finding, ids aggregated; a one-memory store is an atom,
+    // not an island.
+    const isolated = memories.filter(
+      (memory) =>
+        memory.status === 'active' &&
+        !edges.some((edge) => edge.from_id === memory.id || edge.to_id === memory.id),
+    );
+    if (isolated.length > 0 && activeCount >= 2) {
+      const ids = isolated.map((memory) => memory.id).join(', ');
+      findings.push({
+        check: 'isolated_active',
+        detail: `${isolated.length} active memories hold no edges in either direction: ${ids}`,
+        hint: 'link them to related memories, merge or supersede what duplicates, deprecate what was a mistake — a register of islands is unconsolidated',
+      });
+    }
+
+    // The consolidation nudge: two active memories sharing the exact
+    // first-line markdown heading are candidates to merge — text-level,
+    // self-contained, no kind. Heading-less memories never group.
+    const titleGroups = new Map<string, string[]>();
+    for (const memory of memories) {
+      if (memory.status !== 'active') continue;
+      const firstLine = memory.content.split('\n')[0]!.trim();
+      if (!firstLine.startsWith('#')) continue;
+      const group = titleGroups.get(firstLine) ?? [];
+      group.push(memory.id);
+      titleGroups.set(firstLine, group);
+    }
+    for (const [title, ids] of titleGroups) {
+      if (ids.length > 1) {
+        findings.push({
+          check: 'duplicate_titles',
+          detail: `${ids.length} active memories share the title "${title}": ${ids.join(', ')}`,
+          hint: 'merge the group, or supersede with a distinct title',
+        });
+      }
+    }
+
+    const edges_by_kind: Record<string, number> = {};
+    for (const edge of edges) {
+      edges_by_kind[edge.kind] = (edges_by_kind[edge.kind] ?? 0) + 1;
+    }
+    return {
+      healthy: findings.length === 0,
+      findings,
+      summary: {
+        checks: CHECKOUT_CHECK_COUNT,
+        issues: findings.length,
+        memories: memories.length,
+        hot_memories: hotCount,
+        edges: edges.length,
+        edges_by_kind,
+      },
+    };
+  }
+
+  /**
+   * Fork the store: an exact copy at targetPath — the mitosis primitive
+   * of the fork model (a store is an individual; forks never re-sync).
+   * The copy is a VACUUM INTO snapshot: safe under concurrent WAL writers,
+   * compacted, FTS index included — and NOTHING is added to it. A fork
+   * that should know its origin gets told by its forker, in the forker's
+   * own words: store a memory in the child after the copy (the tool does
+   * not presume the narrative — archive, gift, sandbox, product seed).
+   * Fork never writes to the parent, so it is allowed on a read-only
+   * open: an archive can be forked without waking it. Restoring a dormant
+   * fork is rebirth, never resync. Backup scheduling and transport stay
+   * outside the library — this is the copy primitive only.
+   */
+  fork(targetPath: string, options: ForkOptions = {}): ForkResult {
+    const target = resolve(targetPath);
+    if (existsSync(target) && options.force !== true) {
+      throw new Error(`fork target already exists: ${target} (pass force to overwrite)`);
+    }
+    if (options.force === true) {
+      // VACUUM INTO refuses an existing target; a forced refresh removes
+      // the old file and its WAL sidecars first.
+      for (const path of [target, `${target}-wal`, `${target}-shm`]) {
+        rmSync(path, { force: true });
+      }
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    // Reporting counts, read on this connection right before the snapshot:
+    // the copied rows are exactly these (a concurrent commit in between
+    // could skew the report, never the copy itself).
+    const memories = this.#count('SELECT count(*) AS c FROM memories');
+    const edges = this.#count('SELECT count(*) AS c FROM edges');
+    const quoted = target.replace(/'/g, "''");
+    this.#withBusyRetry(() => this.#db.exec(`VACUUM INTO '${quoted}'`));
+    tightenPermissions(target);
+    return { path: target, memories, edges };
+  }
+
+  /**
+   * Verify the FTS5 index against the memories table on a VACUUM INTO
+   * snapshot — the checkout must never take a write lock on a store agents
+   * write to concurrently, and must stay readable on a read-only open.
+   * The snapshot is deleted before returning.
+   *
+   * The rowid diff runs through an fts5vocab 'instance' table: FTS5 serves
+   * plain scans (and count(*)) of an external-content table FROM THE
+   * CONTENT TABLE, so ghost rowids are invisible to them; only the
+   * vocabulary side reads the index. integrity-check adds internal-
+   * structure verification. The repair is NOT a store verb: the hint names
+   * the SQL line, executed outside the library (the store is #db-private).
+   */
+  #checkFts(): CheckoutFinding[] {
+    const out: CheckoutFinding[] = [];
+    const snapshotDir = mkdtempSync(join(tmpdir(), 'souvenance-checkout-'));
+    try {
+      const snapshotPath = join(snapshotDir, 'snapshot.db').replace(/'/g, "''");
+      this.#withBusyRetry(() => this.#db.exec(`VACUUM INTO '${snapshotPath}'`));
+      const snapshot = new DatabaseSync(snapshotPath);
+      try {
+        snapshot.exec("CREATE VIRTUAL TABLE fts_vocab USING fts5vocab('memories_fts', 'instance')");
+        const indexRowids = new Set(
+          (snapshot.prepare('SELECT DISTINCT doc FROM fts_vocab').all() as { doc: number }[]).map(
+            (row) => row.doc,
+          ),
+        );
+        const memoryRowids = (
+          snapshot.prepare('SELECT rowid FROM memories').all() as { rowid: number }[]
+        ).map((row) => row.rowid);
+        // Ghosts show up as an index rowid the content lacks; holes as the
+        // reverse. Equal sizes plus full content membership ⇒ identical sets.
+        const drifted =
+          indexRowids.size !== memoryRowids.length ||
+          memoryRowids.some((rowid) => !indexRowids.has(rowid));
+        if (drifted) {
+          out.push({
+            check: 'fts_integrity',
+            detail: `FTS index holds ${indexRowids.size} rowids for ${memoryRowids.length} memories`,
+            hint: "rebuild the index with SQL: INSERT INTO memories_fts(memories_fts) VALUES('rebuild') — mechanical, no content rewrite",
+          });
+        }
+        try {
+          snapshot.exec("INSERT INTO memories_fts(memories_fts) VALUES('integrity-check')");
+        } catch (err) {
+          out.push({
+            check: 'fts_integrity',
+            detail: `integrity-check failed: ${err instanceof Error ? err.message : String(err)}`,
+            hint: "rebuild the index with SQL: INSERT INTO memories_fts(memories_fts) VALUES('rebuild') — mechanical, no content rewrite",
+          });
+        }
+      } finally {
+        snapshot.close();
+      }
+    } finally {
+      rmSync(snapshotDir, { recursive: true, force: true });
+    }
+    return out;
   }
 
   /**
@@ -968,7 +1346,7 @@ export class Store {
    */
   #readStatus(id: string): MemoryStatus | undefined {
     const row = this.#withBusyRetry(() =>
-      this.db.prepare('SELECT status FROM memories WHERE id = ?').get(id),
+      this.#db.prepare('SELECT status FROM memories WHERE id = ?').get(id),
     ) as { status: MemoryStatus } | undefined;
     return row?.status;
   }
@@ -977,16 +1355,15 @@ export class Store {
    * The outgoing edges of a one-gesture write (StoreOptions.relations).
    * Per-edge validation is link's own — kind non-empty, target exists —
    * and the INSERT is #insertEdge — link's statement, shared verbatim. A
-   * self-edge is left to land: the doctor's self_edges check is the
-   * visible enforcer, the write is not smarter than the graph. Runs
-   * INSIDE the caller's transaction, so the memory and its edges land
-   * atomically or not at all.
+   * self-edge is refused: link's own guard turns them down at the gate
+   * (refuse-don't-hide). Runs INSIDE the caller's transaction, so the
+   * memory and its edges land atomically or not at all.
    */
   #insertRelations(fromId: string, relations: readonly RelationSpec[], createdAt: string): void {
     for (const relation of relations) {
       if (!relation.kind) throw new Error('kind must be non-empty');
       if (!relation.to) throw new Error('to must be a memory id');
-      const targetExists = this.db.prepare('SELECT 1 FROM memories WHERE id = ?').get(relation.to);
+      const targetExists = this.#db.prepare('SELECT 1 FROM memories WHERE id = ?').get(relation.to);
       if (!targetExists) throw new Error(`memory not found: ${relation.to}`);
     }
     for (const relation of relations) {
@@ -1007,7 +1384,7 @@ export class Store {
     metadata: string | null,
     createdAt: string,
   ): void {
-    this.db
+    this.#db
       .prepare(
         'INSERT OR IGNORE INTO edges (from_id, to_id, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
       )
@@ -1020,7 +1397,7 @@ export class Store {
    * surfaces to callers.
    */
   #readMeta(id: string): Record<string, unknown> | null {
-    const row = this.db.prepare('SELECT metadata FROM memories WHERE id = ?').get(id) as
+    const row = this.#db.prepare('SELECT metadata FROM memories WHERE id = ?').get(id) as
       { metadata: string | null } | undefined;
     if (row === undefined) return null;
     return parseRawMetadata(row.metadata);
@@ -1059,7 +1436,7 @@ export class Store {
   }
 
   close(): void {
-    this.db.close();
+    this.#db.close();
   }
 
   /**
