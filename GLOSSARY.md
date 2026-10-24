@@ -19,8 +19,12 @@ The human who runs the manager and owns the host — the only audience of `souve
 _Avoid_: user, admin
 
 **Memory**:
-One record in a store: content, metadata, a status (active, superseded, deprecated, merged), and the hot flag.
+One record in a store: content, its authored summary, metadata, a status (active, superseded, deprecated, merged), and the hot flag.
 _Avoid_: note, fact, recollection
+
+**Summary**:
+The authored condensation of a memory's content — what recover and search serve to hand a fresh session more memories per call. Owed at write time when the content runs past the ceiling; condensed always; revised by supersede, never in place.
+_Avoid_: abstract, digest, tldr
 
 **Hot**:
 The curation flag of an active memory: what recover serves a fresh session. Only an active memory can be hot; supersede transfers it to the head, merge unions it, every termination cools it.

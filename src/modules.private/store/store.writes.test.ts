@@ -33,6 +33,7 @@ function uuidRegex(value: string): boolean {
 interface RawMemory {
   readonly id: string;
   readonly content: string;
+  readonly summary: string | null;
   readonly metadata: string | null;
   readonly created_at: string;
   readonly status: string;
@@ -71,6 +72,7 @@ test('store: inserts a memory with UUID id, metadata, born cold and active', () 
     assert.deepEqual(JSON.parse(memory.metadata!), { tags: ['a'] });
     assert.equal(memory.status, 'active');
     assert.equal(memory.hot, 0, 'a memory is born cold — the flag is earned via setHot');
+    assert.equal(memory.summary, null, 'a short content owes no summary');
   } finally {
     cleanup();
   }
@@ -964,6 +966,106 @@ test('setHot: only an active memory can be hot', () => {
     // The head itself is fine.
     store.setHot(newId, true);
     assert.equal(memoryRow(store, newId).hot, 1);
+  } finally {
+    cleanup();
+  }
+});
+
+// --- summary ---------------------------------------------------------------
+
+test('store: a content beyond the ceiling refuses without a summary', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const longContent = 'a'.repeat(401);
+    assert.throws(
+      () => store.store(longContent),
+      /content exceeds 400 characters; provide a summary condensing it/,
+    );
+    assert.equal(count(store, 'SELECT count(*) as c FROM memories'), 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: a content at the ceiling needs no summary', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const id = store.store('a'.repeat(400));
+    assert.equal(memoryRow(store, id).summary, null);
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: a long content lands with its authored summary', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const summary = 'the essence of the long memory';
+    const id = store.store('a'.repeat(401), { summary });
+    const memory = memoryRow(store, id);
+    assert.equal(memory.summary, summary);
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: a summary beyond the ceiling refuses — a condensation, not a second copy', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const bloated = 'a'.repeat(401);
+    assert.throws(
+      () => store.store('the content', { summary: bloated }),
+      /summary exceeds 400 characters; condense it further/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: a summary at the ceiling lands', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const id = store.store('a'.repeat(401), { summary: 'a'.repeat(400) });
+    assert.equal(memoryRow(store, id).summary, 'a'.repeat(400));
+  } finally {
+    cleanup();
+  }
+});
+
+test('supersede: the summary is authored fresh for the new content, never carried over', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store('a'.repeat(401), { summary: 'the old essence' });
+
+    // A long revision owes its own summary — the old one condenses the old
+    // content, not this one.
+    assert.throws(() => store.supersede(oldId, 'a'.repeat(401)), /content exceeds 400 characters/);
+
+    const newId = store.supersede(oldId, 'a'.repeat(401), { summary: 'the new essence' });
+    const newMemory = memoryRow(store, newId);
+    assert.equal(newMemory.summary, 'the new essence', 'the fresh summary serves');
+    assert.equal(memoryRow(store, oldId).summary, 'the old essence', 'history is untouched');
+
+    // A short revision needs no summary and lands cold-condensed: null.
+    const shortId = store.supersede(newId, 'short and complete');
+    assert.equal(memoryRow(store, shortId).summary, null);
+  } finally {
+    cleanup();
+  }
+});
+
+test('merge: the fusion owes its summary as any other write', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store('memory a');
+    const b = store.store('memory b');
+
+    assert.throws(() => store.merge([a, b], 'a'.repeat(401)), /content exceeds 400 characters/);
+
+    const mergedId = store.merge([a, b], 'a'.repeat(401), {
+      summary: 'the fusion essence',
+    });
+    assert.equal(memoryRow(store, mergedId).summary, 'the fusion essence');
   } finally {
     cleanup();
   }

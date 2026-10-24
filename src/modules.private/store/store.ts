@@ -9,14 +9,26 @@ export type UUID = string;
 export type MemoryStatus = 'active' | 'superseded' | 'deprecated' | 'merged';
 
 /**
- * One record in a store: content, metadata, a status, and the hot flag —
- * the curation mark that hands the memory to the recover ritual (#12).
- * `hot` is earned after the fact (setHot), never at birth, and survives
- * only on an active memory.
+ * The condensation ceiling: a memory longer than this owes its summary at
+ * write time, and no summary may exceed it either. Characters, not bytes —
+ * ~100 tokens, so a recover serving twenty hot memories costs ~2K tokens
+ * of content while the full text stays one `get` away. Fixed by the store,
+ * not configurable — the contract is the contract.
+ */
+export const MAX_SUMMARY_LENGTH = 400;
+
+/**
+ * One record in a store: content, its authored summary (the condensation
+ * that lets recover and search serve more memories per call — owed when
+ * the content runs past the ceiling), metadata, a status, and the hot
+ * flag — the curation mark that hands the memory to the recover ritual
+ * (#12). `hot` is earned after the fact (setHot), never at birth, and
+ * survives only on an active memory.
  */
 export interface Memory {
   readonly id: UUID;
   readonly content: string;
+  readonly summary: string | null;
   readonly metadata: Record<string, unknown> | null;
   readonly created_at: string;
   readonly status: MemoryStatus;
@@ -49,11 +61,25 @@ export interface RelationSpec {
 export interface StoreOptions {
   readonly metadata?: Record<string, unknown>;
   /**
+   * The authored condensation of the content — owed when the content runs
+   * past `MAX_SUMMARY_LENGTH`, refused when it exceeds the ceiling itself.
+   * Written here and never after: revising a summary is a supersede.
+   */
+  readonly summary?: string;
+  /**
    * Outgoing edges created in the same call (store: to the new memory;
    * supersede: to the NEW memory — the old→new supersedes edge still
    * happens). Per-edge validation identical to link.
    */
   readonly relations?: readonly RelationSpec[];
+}
+
+/** merge's own options — it bridges its sources (the `merges` edges come
+ *  from the fusion itself), so the one-gesture `relations` of
+ *  StoreOptions has no meaning here. */
+export interface MergeOptions {
+  readonly metadata?: Record<string, unknown>;
+  readonly summary?: string;
 }
 
 export interface LinkOptions {
@@ -179,6 +205,24 @@ export class Store {
   }
 
   /**
+   * The summary contract: a memory running past the ceiling owes its
+   * authored condensation, and no condensation may exceed the ceiling
+   * itself — a summary longer than the limit is not a condensation.
+   * Enforced at write time only: migrated rows keep their long content
+   * and their null summary (the obligation starts with the refonte).
+   */
+  #checkSummary(content: string, summary: string | null): void {
+    if (content.length > MAX_SUMMARY_LENGTH && !summary) {
+      throw new Error(
+        `content exceeds ${MAX_SUMMARY_LENGTH} characters; provide a summary condensing it`,
+      );
+    }
+    if (summary && summary.length > MAX_SUMMARY_LENGTH) {
+      throw new Error(`summary exceeds ${MAX_SUMMARY_LENGTH} characters; condense it further`);
+    }
+  }
+
+  /**
    * Store a memory: UUID id, metadata JSON, born cold — the hot flag is
    * earned after the fact (setHot), never at birth. The one-gesture
    * relations land in the same transaction: the memory and its edges
@@ -187,15 +231,19 @@ export class Store {
   store(content: string, options: StoreOptions = {}): string {
     this.#assertWritable();
     if (!content) throw new Error('content must be non-empty');
+    this.#checkSummary(content, options.summary ?? null);
     const id = randomUUID();
+    const summary = options.summary ?? null;
     const metadata = options.metadata ? JSON.stringify(options.metadata) : null;
     const created_at = new Date().toISOString();
     this.#run(() => {
       this.db.exec('BEGIN');
       try {
         this.db
-          .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
-          .run(id, content, metadata, created_at);
+          .prepare(
+            'INSERT INTO memories (id, content, summary, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
+          )
+          .run(id, content, summary, metadata, created_at);
         if (options.relations?.length) {
           this.#insertRelations(id, options.relations, created_at);
         }
@@ -223,6 +271,7 @@ export class Store {
   supersede(oldId: string, content: string, options: StoreOptions = {}): string {
     this.#assertWritable();
     if (!content) throw new Error('content must be non-empty');
+    this.#checkSummary(content, options.summary ?? null);
     const newId = randomUUID();
     const created_at = new Date().toISOString();
     this.#run(() => {
@@ -233,9 +282,9 @@ export class Store {
         const metadata = inherited ? JSON.stringify(inherited) : null;
         this.db
           .prepare(
-            'INSERT INTO memories (id, content, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO memories (id, content, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?)',
           )
-          .run(newId, content, metadata, created_at, hot ? 1 : 0);
+          .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
         if (!options.relations?.length) {
           const inheritedEdges = this.db
             .prepare('SELECT to_id, kind, metadata, created_at FROM edges WHERE from_id = ?')
@@ -294,10 +343,11 @@ export class Store {
    * recover, the fusion is. Sources cool: the flag lives only on active
    * memories.
    */
-  merge(ids: readonly string[], content: string, options: StoreOptions = {}): string {
+  merge(ids: readonly string[], content: string, options: MergeOptions = {}): string {
     this.#assertWritable();
     if (ids.length < 2) throw new Error('merge requires at least 2 memories');
     if (!content) throw new Error('content must be non-empty');
+    this.#checkSummary(content, options.summary ?? null);
     const seen = new Set<string>();
     for (const id of ids) {
       if (seen.has(id)) throw new Error(`duplicate id in merge: ${id}`);
@@ -318,9 +368,9 @@ export class Store {
         const metadata = inherited ? JSON.stringify(inherited) : null;
         this.db
           .prepare(
-            'INSERT INTO memories (id, content, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO memories (id, content, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?)',
           )
-          .run(newId, content, metadata, created_at, hot ? 1 : 0);
+          .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
         for (const id of ids) {
           this.db
             .prepare(

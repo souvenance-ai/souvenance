@@ -58,6 +58,7 @@ test('the fresh store is at SCHEMA_VERSION, with the v6 column set', () => {
       store.db.prepare('PRAGMA table_info(memories)').all() as { name: string }[]
     ).map((column) => column.name);
     assert.ok(columns.includes('hot'), 'the v6 curation flag exists');
+    assert.ok(columns.includes('summary'), 'the v6 authored condensation exists');
     assert.ok(!columns.includes('weight'), 'weight was dropped by the refonte');
     assert.ok(!columns.includes('access_count'), 'the read-signal column was dropped');
   } finally {
@@ -199,6 +200,7 @@ test('v6 migration: the legacy recover basket arrives hot, dead columns dropped'
     const raw = new DatabaseSync(path);
     raw.exec(`
       ALTER TABLE memories DROP COLUMN hot;
+      ALTER TABLE memories DROP COLUMN summary;
       ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 0.5;
       ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;
       DELETE FROM schema_version WHERE version >= 5;
