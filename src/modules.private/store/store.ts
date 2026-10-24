@@ -119,13 +119,25 @@ function tightenPermissions(dbPath: string): void {
   }
 }
 
-function execPragma(db: DatabaseSync): void {
+/** The busy handler both open paths share, in milliseconds. */
+const BUSY_TIMEOUT_MS = 5000;
+
+/**
+ * The pragmas both open paths share: the busy handler and FK enforcement.
+ * The read-only open stops here — the store is served as its owner left
+ * it, and no journal_mode may switch under it.
+ */
+function execSharedPragmas(db: DatabaseSync): void {
   // busy_timeout MUST come first: PRAGMA journal_mode = WAL grabs an exclusive
   // file-header lock when the store is fresh (or unwal'd). With the busy handler
   // unset, any racing open loses that grab immediately with SQLITE_BUSY.
-  db.exec('PRAGMA busy_timeout = 5000');
-  db.exec('PRAGMA journal_mode = WAL');
+  db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
   db.exec('PRAGMA foreign_keys = ON');
+}
+
+function execPragma(db: DatabaseSync): void {
+  execSharedPragmas(db);
+  db.exec('PRAGMA journal_mode = WAL');
 }
 
 const SQLITE_BUSY = 5;
@@ -157,8 +169,7 @@ export class Store {
         throw new Error(`no store at ${dbPath}`);
       }
       const db = new DatabaseSync(dbPath, { readOnly: true });
-      db.exec('PRAGMA busy_timeout = 5000');
-      db.exec('PRAGMA foreign_keys = ON');
+      execSharedPragmas(db);
       const version = schemaVersion(db);
       if (version < SCHEMA_VERSION) {
         throw new Error(
@@ -178,9 +189,9 @@ export class Store {
   }
 
   /**
-   * Write verbs refuse on a read-only store. NOT enforced inside #run():
-   * #run() also carries legitimate non-write uses (the doctor's VACUUM INTO
-   * snapshot lands there in #13).
+   * Write verbs refuse on a read-only store. NOT enforced inside
+   * #withBusyRetry(): it also carries legitimate non-write uses (the
+   * doctor's VACUUM INTO snapshot lands there in #13).
    */
   #assertWritable(): void {
     if (this.readOnly) {
@@ -212,7 +223,7 @@ export class Store {
    * exists.
    */
   #transaction<GOutput>(operation: () => GOutput): GOutput {
-    return this.#run(() => {
+    return this.#withBusyRetry(() => {
       this.db.exec('BEGIN');
       try {
         const result = operation();
@@ -307,11 +318,6 @@ export class Store {
           created_at: string;
         }>;
         const memoryExists = this.db.prepare('SELECT 1 FROM memories WHERE id = ?');
-        const insertEdge = this.db.prepare(
-          'INSERT OR IGNORE INTO edges' +
-            ' (from_id, to_id, kind, metadata, created_at)' +
-            ' VALUES (?, ?, ?, ?, ?)',
-        );
         for (const edge of inheritedEdges) {
           // Pre-validated like #insertRelations: refuse-don't-hide — a
           // hand-corrupted orphan source edge names its missing target
@@ -320,7 +326,7 @@ export class Store {
           if (!memoryExists.get(edge.to_id)) {
             throw new Error(`memory not found: ${edge.to_id}`);
           }
-          insertEdge.run(newId, edge.to_id, edge.kind, edge.metadata, edge.created_at);
+          this.#insertEdge(newId, edge.to_id, edge.kind, edge.metadata, edge.created_at);
         }
       }
       // The one-gesture relations are the NEW memory's outgoing edges —
@@ -328,13 +334,7 @@ export class Store {
       if (options.relations?.length) {
         this.#insertRelations(newId, options.relations, created_at);
       }
-      this.db
-        .prepare(
-          'INSERT OR IGNORE INTO edges' +
-            ' (from_id, to_id, kind, metadata, created_at)' +
-            ' VALUES (?, ?, ?, ?, ?)',
-        )
-        .run(oldId, newId, 'supersedes', null, created_at);
+      this.#insertEdge(oldId, newId, 'supersedes', null, created_at);
       this.db.prepare("UPDATE memories SET status = 'superseded', hot = 0 WHERE id = ?").run(oldId);
     });
     return newId;
@@ -375,13 +375,7 @@ export class Store {
         )
         .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
       for (const id of ids) {
-        this.db
-          .prepare(
-            'INSERT OR IGNORE INTO edges' +
-              ' (from_id, to_id, kind, metadata, created_at)' +
-              ' VALUES (?, ?, ?, ?, ?)',
-          )
-          .run(id, newId, 'merges', null, created_at);
+        this.#insertEdge(id, newId, 'merges', null, created_at);
         this.db.prepare("UPDATE memories SET status = 'merged', hot = 0 WHERE id = ?").run(id);
       }
     });
@@ -430,26 +424,18 @@ export class Store {
   link(fromId: string, toId: string, kind: string, options: LinkOptions = {}): void {
     this.#assertWritable();
     if (!kind) throw new Error('kind must be non-empty');
-    const fromExists = this.#run(() =>
+    const fromExists = this.#withBusyRetry(() =>
       this.db.prepare('SELECT 1 FROM memories WHERE id = ?').get(fromId),
     );
     if (!fromExists) throw new Error(`memory not found: ${fromId}`);
-    const toExists = this.#run(() =>
+    const toExists = this.#withBusyRetry(() =>
       this.db.prepare('SELECT 1 FROM memories WHERE id = ?').get(toId),
     );
     if (!toExists) throw new Error(`memory not found: ${toId}`);
 
     const metadata = options.metadata ? JSON.stringify(options.metadata) : null;
     const created_at = new Date().toISOString();
-    this.#run(() => {
-      this.db
-        .prepare(
-          'INSERT OR IGNORE INTO edges' +
-            ' (from_id, to_id, kind, metadata, created_at)' +
-            ' VALUES (?, ?, ?, ?, ?)',
-        )
-        .run(fromId, toId, kind, metadata, created_at);
-    });
+    this.#withBusyRetry(() => this.#insertEdge(fromId, toId, kind, metadata, created_at));
   }
 
   /**
@@ -466,64 +452,63 @@ export class Store {
    */
   unlink(fromId: string, toId: string, kind?: string): void {
     this.#assertWritable();
-    // Endpoint existence first: a missing memory can hold no edge, and the
-    // transposed-id mistake (the lived failure behind this verb) reads as a
-    // precise endpoint error instead of a bare "edge not found".
-    const fromStatus = this.#readStatus(fromId);
-    if (!fromStatus) throw new Error(`memory not found: ${fromId}`);
-    const toStatus = this.#readStatus(toId);
-    if (!toStatus) throw new Error(`memory not found: ${toId}`);
-    if (fromStatus !== 'active') {
-      throw new Error(`cannot unlink a memory with status '${fromStatus}'`);
-    }
-    if (toStatus !== 'active') {
-      throw new Error(`cannot unlink a memory with status '${toStatus}'`);
-    }
-
-    if (kind !== undefined) {
-      if (!kind) throw new Error('kind must be non-empty');
-      const result = this.#run(() =>
-        this.db
-          .prepare('DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?')
-          .run(fromId, toId, kind),
-      );
-      if (result.changes === 0) {
-        throw new Error(`edge not found: ${fromId} -> ${toId} (${kind})`);
+    // One transaction end to end: the endpoint checks and the deletion are
+    // atomic, so a racing deprecate/supersede cannot flip an endpoint's
+    // status between the check and the write — the bridges stay
+    // untouchable by construction under concurrency, and the candidate
+    // list cannot interleave with a racing link.
+    this.#transaction(() => {
+      // Endpoint existence first: a missing memory can hold no edge, and the
+      // transposed-id mistake (the lived failure behind this verb) reads as a
+      // precise endpoint error instead of a bare "edge not found".
+      const fromStatus = this.#readStatus(fromId);
+      if (!fromStatus) throw new Error(`memory not found: ${fromId}`);
+      const toStatus = this.#readStatus(toId);
+      if (!toStatus) throw new Error(`memory not found: ${toId}`);
+      if (fromStatus !== 'active') {
+        throw new Error(`cannot unlink a memory with status '${fromStatus}'`);
       }
-      return;
-    }
+      if (toStatus !== 'active') {
+        throw new Error(`cannot unlink a memory with status '${toStatus}'`);
+      }
 
-    const directed = this.#run(() =>
-      this.db
+      if (kind !== undefined) {
+        if (!kind) throw new Error('kind must be non-empty');
+        const result = this.db
+          .prepare('DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?')
+          .run(fromId, toId, kind);
+        if (result.changes === 0) {
+          throw new Error(`edge not found: ${fromId} -> ${toId} (${kind})`);
+        }
+        return;
+      }
+
+      const directed = this.db
         .prepare('SELECT kind FROM edges WHERE from_id = ? AND to_id = ? ORDER BY kind')
-        .all(fromId, toId),
-    ) as Array<{ kind: string }>;
-    if (directed.length === 1) {
-      this.#run(() =>
+        .all(fromId, toId) as unknown as Array<{ kind: string }>;
+      if (directed.length === 1) {
         this.db
           .prepare('DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?')
-          .run(fromId, toId, directed[0]!.kind),
-      );
-      return;
-    }
-    if (directed.length === 0) {
-      const reverse = this.#run(() =>
-        this.db
-          .prepare('SELECT kind FROM edges WHERE from_id = ? AND to_id = ? ORDER BY kind')
-          .all(toId, fromId),
-      ) as Array<{ kind: string }>;
-      if (reverse.length > 0) {
-        const list = reverse.map((edge) => `${toId} -> ${fromId} (${edge.kind})`).join(', ');
-        throw new Error(
-          `edge not found: ${fromId} -> ${toId}; edges exist in the reverse direction: ${list}`,
-        );
+          .run(fromId, toId, directed[0]!.kind);
+        return;
       }
-      throw new Error(`edge not found: ${fromId} -> ${toId}`);
-    }
-    const kinds = directed.map((edge) => edge.kind).join(', ');
-    throw new Error(
-      `ambiguous: ${directed.length} edges between ${fromId} and ${toId}, pass --kind: ${kinds}`,
-    );
+      if (directed.length === 0) {
+        const reverse = this.db
+          .prepare('SELECT kind FROM edges WHERE from_id = ? AND to_id = ? ORDER BY kind')
+          .all(toId, fromId) as unknown as Array<{ kind: string }>;
+        if (reverse.length > 0) {
+          const list = reverse.map((edge) => `${toId} -> ${fromId} (${edge.kind})`).join(', ');
+          throw new Error(
+            `edge not found: ${fromId} -> ${toId}; edges exist in the reverse direction: ${list}`,
+          );
+        }
+        throw new Error(`edge not found: ${fromId} -> ${toId}`);
+      }
+      const kinds = directed.map((edge) => edge.kind).join(', ');
+      throw new Error(
+        `ambiguous: ${directed.length} edges between ${fromId} and ${toId}, pass --kind: ${kinds}`,
+      );
+    });
   }
 
   /**
@@ -532,7 +517,7 @@ export class Store {
    * one where the retry stays a plain read (setHot).
    */
   #readStatus(id: string): MemoryStatus | undefined {
-    const row = this.#run(() =>
+    const row = this.#withBusyRetry(() =>
       this.db.prepare('SELECT status FROM memories WHERE id = ?').get(id),
     ) as { status: MemoryStatus } | undefined;
     return row?.status;
@@ -541,7 +526,7 @@ export class Store {
   /**
    * The outgoing edges of a one-gesture write (StoreOptions.relations).
    * Per-edge validation is link's own — kind non-empty, target exists —
-   * and the INSERT is link's statement verbatim (no duplicate SQL). A
+   * and the INSERT is #insertEdge — link's statement, shared verbatim. A
    * self-edge is left to land: the doctor's self_edges check is the
    * visible enforcer, the write is not smarter than the graph. Runs
    * INSIDE the caller's transaction, so the memory and its edges land
@@ -554,12 +539,29 @@ export class Store {
       const targetExists = this.db.prepare('SELECT 1 FROM memories WHERE id = ?').get(relation.to);
       if (!targetExists) throw new Error(`memory not found: ${relation.to}`);
     }
-    const insertEdge = this.db.prepare(
-      'INSERT OR IGNORE INTO edges (from_id, to_id, kind, metadata, created_at) VALUES (?, ?, ?, NULL, ?)',
-    );
     for (const relation of relations) {
-      insertEdge.run(fromId, relation.to, relation.kind, createdAt);
+      this.#insertEdge(fromId, relation.to, relation.kind, null, createdAt);
     }
+  }
+
+  /**
+   * The one edge INSERT — link's statement, shared verbatim by the
+   * one-gesture relations (#insertRelations), the supersede bridge, the
+   * merge bridges and the supersede's inherited-edge copy. Idempotent per
+   * (from, to, kind).
+   */
+  #insertEdge(
+    fromId: string,
+    toId: string,
+    kind: string,
+    metadata: string | null,
+    createdAt: string,
+  ): void {
+    this.db
+      .prepare(
+        'INSERT OR IGNORE INTO edges (from_id, to_id, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(fromId, toId, kind, metadata, createdAt);
   }
 
   /**
@@ -615,10 +617,10 @@ export class Store {
   }
 
   /**
-   * Run a write that may hit SQLITE_BUSY under concurrent WAL access.
+   * Run an operation that may hit SQLITE_BUSY under concurrent WAL access.
    * Retries with a short delay until `BUSY_RETRIES` is exhausted.
    */
-  #run<GOutput>(operation: () => GOutput): GOutput {
+  #withBusyRetry<GOutput>(operation: () => GOutput): GOutput {
     let lastError: unknown;
     for (let attempt = 0; attempt < BUSY_RETRIES; attempt++) {
       try {
@@ -630,6 +632,8 @@ export class Store {
           (err as { errcode: number }).errcode === SQLITE_BUSY
         ) {
           lastError = err;
+          // Synchronous sleep on purpose: #withBusyRetry must stay sync —
+          // an async sleep would change every caller's contract.
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, BUSY_DELAY_MS);
           continue;
         }

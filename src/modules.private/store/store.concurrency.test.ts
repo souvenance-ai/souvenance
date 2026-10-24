@@ -34,6 +34,14 @@ const CHILD_SCRIPT = `
       const gate = Number.parseInt(rest[0], 10);
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, gate - Date.now())));
       process.stdout.write(store.store(rest[1]));
+    } else if (operation === 'gated-supersede') {
+      const gate = Number.parseInt(rest[0], 10);
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, gate - Date.now())));
+      process.stdout.write(store.supersede(rest[1], rest[2]));
+    } else if (operation === 'gated-unlink') {
+      const gate = Number.parseInt(rest[0], 10);
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, gate - Date.now())));
+      store.unlink(rest[1], rest[2], rest[3]);
     } else if (operation === 'store') {
       process.stdout.write(store.store(rest[0]));
     } else if (operation === 'link') {
@@ -403,3 +411,74 @@ test(
     }
   },
 );
+
+test('concurrency: unlink racing a supersede never severs the bridge', { timeout: 120_000 }, () => {
+  const dir = tempDir();
+  const dbPath = join(dir, 'memory.db');
+  try {
+    // Seed: the source carries one authored claim.
+    const source = spawnChild(dbPath, 'store', 'the source memory').stdout;
+    const other = spawnChild(dbPath, 'store', 'the cited memory').stdout;
+    const linked = spawnChild(dbPath, 'link', source, other, 'references');
+    assert.equal(linked.status, 0);
+
+    // Race: the revision and the correction, gated to fire together.
+    const gate = Date.now() + 400;
+    const supersedeChild = spawnChild(
+      dbPath,
+      'gated-supersede',
+      String(gate),
+      source,
+      'the revision',
+    );
+    const unlinkChild = spawnChild(
+      dbPath,
+      'gated-unlink',
+      String(gate),
+      source,
+      other,
+      'references',
+    );
+
+    // The revision always wins its own check: the unlink never changes
+    // the source's status, so supersede cannot refuse here.
+    assert.equal(
+      supersedeChild.status,
+      0,
+      `supersede should succeed, stderr: ${supersedeChild.stderr}`,
+    );
+    const head = supersedeChild.stdout;
+
+    const store = Store.open({ dbPath });
+    try {
+      // Invariant 1: the bridge survives every interleaving — unlink's
+      // check and delete share one transaction, so a bridge can never be
+      // severed between the check and the write.
+      const bridge = store.db
+        .prepare("SELECT count(*) AS c FROM edges WHERE from_id = ? AND kind = 'supersedes'")
+        .get(source) as { c: number };
+      assert.equal(bridge.c, 1, 'the supersedes bridge must survive the race');
+
+      // Invariant 2: the outcome is consistent. Either the correction
+      // landed BEFORE the revision (the head inherits nothing) or the
+      // unlink was refused (the head keeps the inherited claim).
+      const sourceRow = store.db
+        .prepare('SELECT status FROM memories WHERE id = ?')
+        .get(source) as { status: string };
+      assert.equal(sourceRow.status, 'superseded');
+
+      const inherited = store.db
+        .prepare("SELECT count(*) AS c FROM edges WHERE from_id = ? AND kind = 'references'")
+        .get(head) as { c: number };
+      if (unlinkChild.status === 0) {
+        assert.equal(inherited.c, 0, 'the correction landed before the revision');
+      } else {
+        assert.equal(inherited.c, 1, 'the unlink was refused after the revision');
+      }
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

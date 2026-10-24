@@ -81,7 +81,7 @@ ALTER TABLE memories DROP COLUMN weight;
 ALTER TABLE memories DROP COLUMN access_count;
 `;
 
-const migrations: Record<number, string> = {
+const migrations: Readonly<Record<number, string>> = {
   1: V1,
   2: V2,
   3: V3,
@@ -107,7 +107,7 @@ function ensureVersionTable(db: DatabaseSync): number {
  * The store's applied schema version, read WITHOUT creating anything.
  * `ensureVersionTable` writes (CREATE TABLE IF NOT EXISTS), so read-only
  * opens must not use it; this is the pure read. Returns 0 when the table
- * is absent (a pre-versioning store) or unreadable — the ro open refuses.
+ * is absent (a pre-versioning store) or unreadable — the read-only open refuses.
  */
 export function schemaVersion(db: DatabaseSync): number {
   try {
