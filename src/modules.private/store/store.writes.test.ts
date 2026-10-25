@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { test } from 'vitest';
-import { Store } from './store.ts';
+import { type StoreOptions, Store } from './store.ts';
 
 function tempStore(): { store: Store; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'souvenance-test-'));
@@ -50,6 +50,7 @@ function uuidRegex(value: string): boolean {
 interface RawMemory {
   readonly id: string;
   readonly content: string;
+  readonly kind: string;
   readonly summary: string | null;
   readonly metadata: string | null;
   readonly created_at: string;
@@ -82,15 +83,16 @@ function edgesOf(store: Store, id: string): RawEdge[] {
 
 // --- store -----------------------------------------------------------------
 
-test('store: inserts a memory with UUID id, metadata, born cold and active', () => {
+test('store: inserts a memory with UUID id, kind, metadata, born cold and active', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('hello world', { metadata: { tags: ['a'] } });
+    const id = store.store('hello world', { kind: 'note', metadata: { tags: ['a'] } });
     assert.ok(uuidRegex(id), `id should be a UUID v4, got: ${id}`);
 
     const memory = memoryRow(store, id);
     assert.equal(memory.id, id);
     assert.equal(memory.content, 'hello world');
+    assert.equal(memory.kind, 'note', 'kind is a column — the required classification');
     assert.deepEqual(JSON.parse(memory.metadata!), { tags: ['a'] });
     assert.equal(memory.status, 'active');
     assert.equal(memory.hot, 0, 'a memory is born cold — the flag is earned via setHot');
@@ -100,12 +102,39 @@ test('store: inserts a memory with UUID id, metadata, born cold and active', () 
   }
 });
 
+test('store: kind is required — a kind-less memory does not exist', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    // The runtime guard exists for the JS caller TS cannot see: play it by
+    // erasing the type system's view of the required property.
+    const kindless = { metadata: { tags: ['a'] } } as unknown as StoreOptions;
+    assert.throws(() => store.store('doomed memory', kindless), /kind is required: pass kind/);
+    assert.equal(count(store, 'SELECT count(*) as c FROM memories'), 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: metadata.kind is refused with the teaching error — one spelling', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    assert.throws(
+      () => store.store('doomed memory', { kind: 'note', metadata: { kind: 'note' } }),
+      /kind is a column — pass kind, not metadata\.kind/,
+    );
+    assert.equal(count(store, 'SELECT count(*) as c FROM memories'), 0);
+  } finally {
+    cleanup();
+  }
+});
+
 test('store: works without metadata', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('no metadata here');
+    const id = store.store('no metadata here', { kind: 'note' });
     const memory = memoryRow(store, id);
     assert.equal(memory.content, 'no metadata here');
+    assert.equal(memory.kind, 'note');
     assert.equal(memory.metadata, null);
   } finally {
     cleanup();
@@ -115,7 +144,7 @@ test('store: works without metadata', () => {
 test('store: throws on empty content', () => {
   const { store, cleanup } = tempStore();
   try {
-    assert.throws(() => store.store(''), /content must be non-empty/);
+    assert.throws(() => store.store('', { kind: 'note' }), /content must be non-empty/);
   } finally {
     cleanup();
   }
@@ -124,7 +153,7 @@ test('store: throws on empty content', () => {
 test('store: FTS index stays in sync after insert', () => {
   const { store, cleanup } = tempStore();
   try {
-    store.store('the quick brown fox');
+    store.store('the quick brown fox', { kind: 'note' });
     const fts = count(
       store,
       'SELECT count(*) as c FROM memories_fts f JOIN memories m ON m.rowid = f.rowid WHERE memories_fts MATCH ?',
@@ -139,9 +168,9 @@ test('store: FTS index stays in sync after insert', () => {
 test('store: relations create the outgoing edges in the same call', () => {
   const { store, cleanup } = tempStore();
   try {
-    const target = store.store('the referenced decision', { metadata: { kind: 'decision' } });
+    const target = store.store('the referenced decision', { kind: 'decision' });
     const id = store.store('# Decision: the new one\n\nOne gesture, no store-then-link.', {
-      metadata: { kind: 'decision' },
+      kind: 'decision',
       relations: [
         { to: target, kind: 'references' },
         { to: target, kind: 'extends' },
@@ -164,7 +193,11 @@ test('store: an invalid relation target refuses and NOTHING lands (atomic write)
   try {
     const ghost = '00000000-0000-4000-8000-000000000009';
     assert.throws(
-      () => store.store('doomed memory', { relations: [{ to: ghost, kind: 'references' }] }),
+      () =>
+        store.store('doomed memory', {
+          kind: 'note',
+          relations: [{ to: ghost, kind: 'references' }],
+        }),
       new RegExp(`memory not found: ${ghost}`),
     );
     assert.equal(
@@ -180,9 +213,13 @@ test('store: an invalid relation target refuses and NOTHING lands (atomic write)
 test('store: an empty relation kind is refused', () => {
   const { store, cleanup } = tempStore();
   try {
-    const target = store.store('target');
+    const target = store.store('target', { kind: 'note' });
     assert.throws(
-      () => store.store('doomed memory', { relations: [{ to: target, kind: '' }] }),
+      () =>
+        store.store('doomed memory', {
+          kind: 'note',
+          relations: [{ to: target, kind: '' }],
+        }),
       /kind must be non-empty/,
     );
     assert.equal(count(store, 'SELECT count(*) as c FROM memories'), 1);
@@ -200,13 +237,13 @@ test('link: a self-edge is refused — corrections name two different memories',
     // at it. link() is the only self-edge door, and it refuses at the gate
     // (refuse-don't-hide): an edge from a memory to itself names no
     // relationship, so the store never lets one land.
-    const id = store.store('the only candidate self-source');
+    const id = store.store('the only candidate self-source', { kind: 'note' });
     assert.throws(() => store.link(id, id, 'references'), /self-edge refused/);
     assert.equal(count(store, 'SELECT count(*) as c FROM edges'), 0);
 
     // The refusal is not destructive: the memory still exists and accepts
     // a real edge to another memory.
-    const other = store.store('another memory');
+    const other = store.store('another memory', { kind: 'note' });
     store.link(id, other, 'references');
     assert.equal(count(store, 'SELECT count(*) as c FROM edges'), 1);
   } finally {
@@ -219,8 +256,8 @@ test('link: a self-edge is refused — corrections name two different memories',
 test('link: creates a typed directed edge', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(a, b, 'references');
 
     const edge = row<RawEdge>(store, 'SELECT * FROM edges');
@@ -236,8 +273,8 @@ test('link: creates a typed directed edge', () => {
 test('link: stores metadata as JSON', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(a, b, 'references', { metadata: { note: 0.9 } });
 
     const edge = row<{ metadata: string | null }>(store, 'SELECT metadata FROM edges');
@@ -250,8 +287,8 @@ test('link: stores metadata as JSON', () => {
 test('link: duplicate (same from/to/kind) is ignored (idempotent)', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(a, b, 'references');
     store.link(a, b, 'references');
 
@@ -264,8 +301,8 @@ test('link: duplicate (same from/to/kind) is ignored (idempotent)', () => {
 test('link: allows different kinds between same pair', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(a, b, 'references');
     store.link(a, b, 'extends');
 
@@ -278,7 +315,7 @@ test('link: allows different kinds between same pair', () => {
 test('link: throws on unknown from_id', () => {
   const { store, cleanup } = tempStore();
   try {
-    const b = store.store('memory b');
+    const b = store.store('memory b', { kind: 'note' });
     assert.throws(() => store.link('nope', b, 'references'), /memory not found: nope/);
   } finally {
     cleanup();
@@ -288,7 +325,7 @@ test('link: throws on unknown from_id', () => {
 test('link: throws on unknown to_id', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
+    const a = store.store('memory a', { kind: 'note' });
     assert.throws(() => store.link(a, 'nope', 'references'), /memory not found: nope/);
   } finally {
     cleanup();
@@ -298,8 +335,8 @@ test('link: throws on unknown to_id', () => {
 test('link: throws on empty kind', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     assert.throws(() => store.link(a, b, ''), /kind must be non-empty/);
   } finally {
     cleanup();
@@ -311,8 +348,8 @@ test('link: throws on empty kind', () => {
 test('unlink: removes the single edge on a pair without kind', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(a, b, 'references');
     store.unlink(a, b);
     assert.equal(count(store, 'SELECT count(*) as c FROM edges'), 0);
@@ -324,8 +361,8 @@ test('unlink: removes the single edge on a pair without kind', () => {
 test('unlink: explicit kind removes exactly that edge among several', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(a, b, 'references');
     store.link(a, b, 'extends');
     store.unlink(a, b, 'extends');
@@ -339,8 +376,8 @@ test('unlink: explicit kind removes exactly that edge among several', () => {
 test('unlink: refuses an ambiguous pair with the candidate kinds', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(a, b, 'references');
     store.link(a, b, 'extends');
     assert.throws(
@@ -357,8 +394,8 @@ test('unlink: refuses an ambiguous pair with the candidate kinds', () => {
 test('unlink: not found on an absent edge', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     assert.throws(() => store.unlink(a, b), /edge not found: .* -> .*/);
   } finally {
     cleanup();
@@ -368,8 +405,8 @@ test('unlink: not found on an absent edge', () => {
 test('unlink: names reverse-direction edges to catch transposed ids', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(b, a, 'references');
     assert.throws(
       () => store.unlink(a, b),
@@ -386,7 +423,7 @@ test('unlink: names reverse-direction edges to catch transposed ids', () => {
 test('unlink: names the missing endpoint before consulting edges', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
+    const a = store.store('memory a', { kind: 'note' });
     assert.throws(() => store.unlink(a, 'nope'), /memory not found: nope/);
     assert.throws(() => store.unlink('nope', a), /memory not found: nope/);
   } finally {
@@ -397,8 +434,8 @@ test('unlink: names the missing endpoint before consulting edges', () => {
 test('unlink: throws on empty explicit kind', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(a, b, 'references');
     assert.throws(() => store.unlink(a, b, ''), /kind must be non-empty/);
   } finally {
@@ -409,8 +446,8 @@ test('unlink: throws on empty explicit kind', () => {
 test('unlink: refuses when an endpoint is not active — corrections among the living', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(a, b, 'references');
 
     store.deprecate(b);
@@ -431,7 +468,7 @@ test('unlink: refuses when an endpoint is not active — corrections among the l
 test('unlink: the supersedes bridge is untouchable by construction', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('# Decision: v1', { metadata: { kind: 'decision' } });
+    const oldId = store.store('# Decision: v1', { kind: 'decision' });
     const newId = store.supersede(oldId, '# Decision: v2');
     assert.throws(
       () => store.unlink(oldId, newId),
@@ -447,8 +484,8 @@ test('unlink: the supersedes bridge is untouchable by construction', () => {
 test('unlink: the merges bridge is untouchable like the supersedes one', () => {
   const { store, cleanup } = tempStore();
   try {
-    const sourceA = store.store('memory a');
-    const sourceB = store.store('memory b');
+    const sourceA = store.store('memory a', { kind: 'note' });
+    const sourceB = store.store('memory b', { kind: 'note' });
     const fusion = store.merge([sourceA, sourceB], 'the fusion');
     assert.throws(
       () => store.unlink(sourceA, fusion),
@@ -462,7 +499,7 @@ test('unlink: the merges bridge is untouchable like the supersedes one', () => {
 test('supersede: stores new memory, links old, marks old as superseded', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('hello world');
+    const oldId = store.store('hello world', { kind: 'note' });
     const newId = store.supersede(oldId, 'hello universe');
 
     assert.ok(uuidRegex(newId), 'new id should be a UUID');
@@ -488,7 +525,7 @@ test('supersede: stores new memory, links old, marks old as superseded', () => {
 test('supersede: FTS stays in sync (old excluded from the active surface, new findable)', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('hello world');
+    const oldId = store.store('hello world', { kind: 'note' });
     store.supersede(oldId, 'hello universe');
 
     const ftsActive = (query: string): number =>
@@ -516,7 +553,7 @@ test('supersede: FTS stays in sync (old excluded from the active surface, new fi
 test('supersede: stores metadata on the new memory', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('hello world');
+    const oldId = store.store('hello world', { kind: 'note' });
     const newId = store.supersede(oldId, 'hello universe', {
       metadata: { tags: ['greeting'] },
     });
@@ -527,17 +564,19 @@ test('supersede: stores metadata on the new memory', () => {
   }
 });
 
-test('supersede: inherits kind and tags from the old memory when metadata omitted', () => {
+test('supersede: the head inherits the source kind column and unions tags', () => {
   const { store, cleanup } = tempStore();
   try {
     const oldId = store.store('hello world', {
-      metadata: { kind: 'note', tags: ['a', 'b'], session: 2 },
+      kind: 'note',
+      metadata: { tags: ['a', 'b'], session: 2 },
     });
     const newId = store.supersede(oldId, 'hello universe');
 
-    // kind and tags are structural and carry; contextual keys do not.
+    // The kind column carries (omitted kind = inherited, #31); tags are
+    // structural and carry; contextual keys do not.
+    assert.equal(memoryRow(store, newId).kind, 'note');
     assert.deepEqual(JSON.parse(memoryRow(store, newId).metadata!), {
-      kind: 'note',
       tags: ['a', 'b'],
     });
   } finally {
@@ -545,29 +584,60 @@ test('supersede: inherits kind and tags from the old memory when metadata omitte
   }
 });
 
-test('supersede: explicit metadata is used verbatim, no inherit', () => {
+test('supersede: explicit metadata is used verbatim, no inherit — the kind still is', () => {
   const { store, cleanup } = tempStore();
   try {
     const oldId = store.store('hello world', {
-      metadata: { kind: 'note', tags: ['a'] },
+      kind: 'note',
+      metadata: { tags: ['a'] },
     });
     const newId = store.supersede(oldId, 'hello universe', {
-      metadata: { kind: 'decision' },
+      metadata: { session: 3 },
     });
 
-    assert.deepEqual(JSON.parse(memoryRow(store, newId).metadata!), { kind: 'decision' });
+    // Explicit metadata wins verbatim (no tag inheritance), while the kind
+    // column inherits: the kind is not metadata's business anymore.
+    assert.deepEqual(JSON.parse(memoryRow(store, newId).metadata!), { session: 3 });
+    assert.equal(memoryRow(store, newId).kind, 'note');
   } finally {
     cleanup();
   }
 });
 
-test('supersede: kindless old memory yields kindless successor', () => {
+test('supersede: metadata.kind is refused — the kind rides the column', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('hello world');
+    const oldId = store.store('hello world', { kind: 'note' });
+    assert.throws(
+      () => store.supersede(oldId, 'hello universe', { metadata: { kind: 'decision' } }),
+      /kind is a column — pass kind, not metadata\.kind/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('supersede: a provided kind reclassifies the revision', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store('a fleeting note', { kind: 'note' });
+    const newId = store.supersede(oldId, 'the decision it became', { kind: 'decision' });
+
+    assert.equal(memoryRow(store, newId).kind, 'decision', 'the revision reclassifies');
+    assert.equal(memoryRow(store, oldId).kind, 'note', 'history is untouched');
+  } finally {
+    cleanup();
+  }
+});
+
+test('supersede: no metadata in, no metadata out — the kind column still inherits', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store('hello world', { kind: 'note' });
     const newId = store.supersede(oldId, 'hello universe');
 
     assert.equal(memoryRow(store, newId).metadata, null);
+    assert.equal(memoryRow(store, newId).kind, 'note');
   } finally {
     cleanup();
   }
@@ -585,7 +655,7 @@ test('supersede: throws on unknown old id', () => {
 test('supersede: throws on empty content', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('old content');
+    const oldId = store.store('old content', { kind: 'note' });
     assert.throws(() => store.supersede(oldId, ''), /content must be non-empty/);
   } finally {
     cleanup();
@@ -595,7 +665,7 @@ test('supersede: throws on empty content', () => {
 test('supersede: throws when old memory is not active', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('old content');
+    const oldId = store.store('old content', { kind: 'note' });
     store.deprecate(oldId);
     assert.throws(
       () => store.supersede(oldId, 'new content'),
@@ -609,7 +679,7 @@ test('supersede: throws when old memory is not active', () => {
 test('supersede: the head inherits the source hot flag, the source cools', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('a curated memory');
+    const oldId = store.store('a curated memory', { kind: 'note' });
     store.setHot(oldId, true);
     const newId = store.supersede(oldId, 'the revision');
 
@@ -623,7 +693,7 @@ test('supersede: the head inherits the source hot flag, the source cools', () =>
 test('supersede: a cold source yields a cold head', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('a plain memory');
+    const oldId = store.store('a plain memory', { kind: 'note' });
     const newId = store.supersede(oldId, 'the revision');
     assert.equal(memoryRow(store, newId).hot, 0);
   } finally {
@@ -634,8 +704,8 @@ test('supersede: a cold source yields a cold head', () => {
 test('supersede: relations attach to the NEW memory, supersedes edge still lands', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('# Decision: v1', { metadata: { kind: 'decision' } });
-    const other = store.store('a live target', { metadata: { kind: 'note' } });
+    const oldId = store.store('# Decision: v1', { kind: 'decision' });
+    const other = store.store('a live target', { kind: 'note' });
     const newId = store.supersede(oldId, '# Decision: v2', {
       relations: [{ to: other, kind: 'references' }],
     });
@@ -660,7 +730,7 @@ test('supersede: relations attach to the NEW memory, supersedes edge still lands
 test('supersede: an invalid relation target rolls the whole revision back', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('# Decision: v1', { metadata: { kind: 'decision' } });
+    const oldId = store.store('# Decision: v1', { kind: 'decision' });
     const ghost = '00000000-0000-4000-8000-000000000008';
     assert.throws(
       () =>
@@ -681,10 +751,10 @@ test('supersede: an invalid relation target rolls the whole revision back', () =
 test('supersede: the head inherits the source outgoing edges verbatim', () => {
   const { store, cleanup } = tempStore();
   try {
-    const targetA = store.store('target A', { metadata: { kind: 'note' } });
-    const targetB = store.store('target B', { metadata: { kind: 'note' } });
+    const targetA = store.store('target A', { kind: 'note' });
+    const targetB = store.store('target B', { kind: 'note' });
     const oldId = store.store('# Decision: v1', {
-      metadata: { kind: 'decision' },
+      kind: 'decision',
       relations: [
         { to: targetA, kind: 'references' },
         { to: targetB, kind: 'extends' },
@@ -724,10 +794,10 @@ test('supersede: the head inherits the source outgoing edges verbatim', () => {
 test('supersede: explicit relations REPLACE the inherited set verbatim', () => {
   const { store, cleanup } = tempStore();
   try {
-    const targetA = store.store('target A', { metadata: { kind: 'note' } });
-    const targetC = store.store('target C', { metadata: { kind: 'note' } });
+    const targetA = store.store('target A', { kind: 'note' });
+    const targetC = store.store('target C', { kind: 'note' });
     const oldId = store.store('# Decision: v1', {
-      metadata: { kind: 'decision' },
+      kind: 'decision',
       relations: [{ to: targetA, kind: 'references' }],
     });
     const newId = store.supersede(oldId, '# Decision: v2 — claims corrected', {
@@ -750,7 +820,7 @@ test('supersede: explicit relations REPLACE the inherited set verbatim', () => {
 test('supersede: a corrupted orphan SOURCE edge refuses the revision precisely', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('# Decision: v1', { metadata: { kind: 'decision' } });
+    const oldId = store.store('# Decision: v1', { kind: 'decision' });
     const ghost = '00000000-0000-4000-8000-000000000003';
     // Corruption via a second raw connection — the outside-the-library
     // vantage: FKs off, the orphan lands, the connection goes away.
@@ -781,7 +851,7 @@ test('supersede: a corrupted orphan SOURCE edge refuses the revision precisely',
 test('deprecate: marks a memory as deprecated and cools it', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('to be deprecated');
+    const id = store.store('to be deprecated', { kind: 'note' });
     store.setHot(id, true);
     store.deprecate(id);
 
@@ -805,7 +875,7 @@ test('deprecate: throws on unknown id', () => {
 test('deprecate: throws when memory is not active', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('content');
+    const id = store.store('content', { kind: 'note' });
     store.deprecate(id);
     assert.throws(() => store.deprecate(id), /cannot deprecate a memory with status 'deprecated'/);
   } finally {
@@ -818,8 +888,8 @@ test('deprecate: throws when memory is not active', () => {
 test('merge: combines memories, marks originals as merged, bridges them', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     const mergedId = store.merge([a, b], 'combined content');
 
     assert.ok(uuidRegex(mergedId), 'merged id should be a UUID');
@@ -844,8 +914,8 @@ test('merge: combines memories, marks originals as merged, bridges them', () => 
 test('merge: stores metadata on the merged memory', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     const mergedId = store.merge([a, b], 'combined', {
       metadata: { tags: ['merged'] },
     });
@@ -856,15 +926,16 @@ test('merge: stores metadata on the merged memory', () => {
   }
 });
 
-test('merge: inherits kind when every source agrees, unions tags', () => {
+test('merge: inherits the kind when every source agrees, unions tags', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('alpha', { metadata: { kind: 'note', tags: ['x'] } });
-    const b = store.store('beta', { metadata: { kind: 'note', tags: ['y', 'x'] } });
+    const a = store.store('alpha', { kind: 'note', metadata: { tags: ['x'] } });
+    const b = store.store('beta', { kind: 'note', metadata: { tags: ['y', 'x'] } });
     const id = store.merge([a, b], 'alpha beta combined');
 
+    // The kind column inherits on agreement; the tags union in metadata.
+    assert.equal(memoryRow(store, id).kind, 'note');
     assert.deepEqual(JSON.parse(memoryRow(store, id).metadata!), {
-      kind: 'note',
       tags: ['x', 'y'],
     });
   } finally {
@@ -872,14 +943,46 @@ test('merge: inherits kind when every source agrees, unions tags', () => {
   }
 });
 
-test('merge: divergent kinds are not inherited; tags still union', () => {
+test('merge: sources disagreeing on kind are refused with the candidate kinds', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('alpha', { metadata: { kind: 'note', tags: ['x'] } });
-    const b = store.store('beta', { metadata: { kind: 'decision', tags: ['y'] } });
-    const id = store.merge([a, b], 'alpha beta combined');
+    const a = store.store('alpha', { kind: 'note', metadata: { tags: ['x'] } });
+    const b = store.store('beta', { kind: 'decision', metadata: { tags: ['y'] } });
+    assert.throws(
+      () => store.merge([a, b], 'alpha beta combined'),
+      /merge refused: sources disagree on kind \(decision, note\) — pass kind to classify the fusion/,
+    );
+    // Refuse, don't hide: nothing landed, the sources stay active.
+    assert.equal(memoryRow(store, a).status, 'active');
+    assert.equal(memoryRow(store, b).status, 'active');
+    assert.equal(count(store, 'SELECT count(*) as c FROM edges'), 0);
+  } finally {
+    cleanup();
+  }
+});
 
-    assert.deepEqual(JSON.parse(memoryRow(store, id).metadata!), { tags: ['x', 'y'] });
+test('merge: a provided kind wins — the fusion is classified, not inherited', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store('alpha', { kind: 'note' });
+    const b = store.store('beta', { kind: 'decision' });
+    const id = store.merge([a, b], 'alpha beta combined', { kind: 'summary' });
+
+    assert.equal(memoryRow(store, id).kind, 'summary', 'the provided kind wins');
+  } finally {
+    cleanup();
+  }
+});
+
+test('merge: metadata.kind is refused — the kind rides the column', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
+    assert.throws(
+      () => store.merge([a, b], 'combined', { metadata: { kind: 'note' } }),
+      /kind is a column — pass kind, not metadata\.kind/,
+    );
   } finally {
     cleanup();
   }
@@ -888,8 +991,8 @@ test('merge: divergent kinds are not inherited; tags still union', () => {
 test('merge: the hot flag unions across sources, sources cool', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('hot memory a');
-    const b = store.store('cold memory b');
+    const a = store.store('hot memory a', { kind: 'note' });
+    const b = store.store('cold memory b', { kind: 'note' });
     store.setHot(a, true);
     const mergedId = store.merge([a, b], 'the fusion');
 
@@ -904,8 +1007,8 @@ test('merge: the hot flag unions across sources, sources cool', () => {
 test('merge: all-cold sources yield a cold fusion', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     const mergedId = store.merge([a, b], 'the fusion');
     assert.equal(memoryRow(store, mergedId).hot, 0);
   } finally {
@@ -916,7 +1019,7 @@ test('merge: all-cold sources yield a cold fusion', () => {
 test('merge: throws on fewer than 2 ids', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('only one');
+    const a = store.store('only one', { kind: 'note' });
     assert.throws(() => store.merge([a], 'content'), /merge requires at least 2 memories/);
   } finally {
     cleanup();
@@ -926,7 +1029,7 @@ test('merge: throws on fewer than 2 ids', () => {
 test('merge: throws on duplicate ids', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
+    const a = store.store('memory a', { kind: 'note' });
     assert.throws(() => store.merge([a, a], 'content'), /duplicate id in merge/);
   } finally {
     cleanup();
@@ -936,7 +1039,7 @@ test('merge: throws on duplicate ids', () => {
 test('merge: throws on unknown id', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
+    const a = store.store('memory a', { kind: 'note' });
     assert.throws(() => store.merge([a, 'nope'], 'content'), /memory not found: nope/);
   } finally {
     cleanup();
@@ -946,8 +1049,8 @@ test('merge: throws on unknown id', () => {
 test('merge: throws on empty content', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     assert.throws(() => store.merge([a, b], ''), /content must be non-empty/);
   } finally {
     cleanup();
@@ -957,8 +1060,8 @@ test('merge: throws on empty content', () => {
 test('merge: throws when an original is not active', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.deprecate(b);
     assert.throws(
       () => store.merge([a, b], 'content'),
@@ -974,7 +1077,7 @@ test('merge: throws when an original is not active', () => {
 test('setHot: flags an active memory, and unflags it', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('a curated memory');
+    const id = store.store('a curated memory', { kind: 'note' });
     store.setHot(id, true);
     assert.equal(memoryRow(store, id).hot, 1);
     store.setHot(id, false);
@@ -996,11 +1099,11 @@ test('setHot: throws on unknown id', () => {
 test('setHot: only an active memory can be hot', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('content');
+    const id = store.store('content', { kind: 'note' });
     store.deprecate(id);
     assert.throws(() => store.setHot(id, true), /cannot hot a memory with status 'deprecated'/);
 
-    const oldId = store.store('a decision');
+    const oldId = store.store('a decision', { kind: 'note' });
     const newId = store.supersede(oldId, 'the revision');
     assert.throws(() => store.setHot(oldId, true), /cannot hot a memory with status 'superseded'/);
     // The head itself is fine.
@@ -1018,7 +1121,7 @@ test('store: a content beyond the ceiling refuses without a summary', () => {
   try {
     const longContent = 'a'.repeat(401);
     assert.throws(
-      () => store.store(longContent),
+      () => store.store(longContent, { kind: 'note' }),
       /content exceeds 400 characters; provide a summary condensing it/,
     );
     assert.equal(count(store, 'SELECT count(*) as c FROM memories'), 0);
@@ -1030,7 +1133,7 @@ test('store: a content beyond the ceiling refuses without a summary', () => {
 test('store: a content at the ceiling needs no summary', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('a'.repeat(400));
+    const id = store.store('a'.repeat(400), { kind: 'note' });
     assert.equal(memoryRow(store, id).summary, null);
   } finally {
     cleanup();
@@ -1041,7 +1144,7 @@ test('store: a long content lands with its authored summary', () => {
   const { store, cleanup } = tempStore();
   try {
     const summary = 'the essence of the long memory';
-    const id = store.store('a'.repeat(401), { summary });
+    const id = store.store('a'.repeat(401), { kind: 'note', summary });
     const memory = memoryRow(store, id);
     assert.equal(memory.summary, summary);
   } finally {
@@ -1054,7 +1157,7 @@ test('store: a summary beyond the ceiling refuses — a condensation, not a seco
   try {
     const bloated = 'a'.repeat(401);
     assert.throws(
-      () => store.store('the content', { summary: bloated }),
+      () => store.store('the content', { kind: 'note', summary: bloated }),
       /summary exceeds 400 characters; condense it further/,
     );
   } finally {
@@ -1065,7 +1168,7 @@ test('store: a summary beyond the ceiling refuses — a condensation, not a seco
 test('store: a summary at the ceiling lands', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('a'.repeat(401), { summary: 'a'.repeat(400) });
+    const id = store.store('a'.repeat(401), { kind: 'note', summary: 'a'.repeat(400) });
     assert.equal(memoryRow(store, id).summary, 'a'.repeat(400));
   } finally {
     cleanup();
@@ -1075,7 +1178,7 @@ test('store: a summary at the ceiling lands', () => {
 test('supersede: the summary is authored fresh for the new content, never carried over', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('a'.repeat(401), { summary: 'the old essence' });
+    const oldId = store.store('a'.repeat(401), { kind: 'note', summary: 'the old essence' });
 
     // A long revision owes its own summary — the old one condenses the old
     // content, not this one.
@@ -1097,8 +1200,8 @@ test('supersede: the summary is authored fresh for the new content, never carrie
 test('merge: the fusion owes its summary as any other write', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
 
     assert.throws(() => store.merge([a, b], 'a'.repeat(401)), /content exceeds 400 characters/);
 

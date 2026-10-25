@@ -29,8 +29,8 @@ function advanceMs(): void {
 test('get: depth 1 (default) projects raw edges — targets stay null', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
     store.link(a, b, 'references');
 
     const node = store.get(a)!;
@@ -48,9 +48,9 @@ test('get: depth 1 (default) projects raw edges — targets stay null', () => {
 test('get: depth 2 expands the out tree — the target node carries its own block', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b', { summary: 'b condensed' });
-    const c = store.store('memory c');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note', summary: 'b condensed' });
+    const c = store.store('memory c', { kind: 'note' });
     store.link(a, b, 'references');
     store.link(b, c, 'extends');
 
@@ -77,10 +77,10 @@ test('get: depth 2 expands the out tree — the target node carries its own bloc
 test('get: out expands while in stays a raw list at every depth', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
-    const c = store.store('memory c');
-    const d = store.store('watcher');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
+    const c = store.store('memory c', { kind: 'note' });
+    const d = store.store('watcher', { kind: 'note' });
     store.link(a, b, 'references');
     store.link(b, c, 'extends');
     advanceMs();
@@ -100,10 +100,10 @@ test('get: out expands while in stays a raw list at every depth', () => {
 test('get: the visited set expands a diamond target once — later occurrences are leaves', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
-    const c = store.store('memory c');
-    const d = store.store('diamond');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
+    const c = store.store('memory c', { kind: 'note' });
+    const d = store.store('diamond', { kind: 'note' });
     store.link(b, d, 'first'); // newest edge
     advanceMs();
     store.link(c, d, 'second');
@@ -131,9 +131,9 @@ test('get: the visited set expands a diamond target once — later occurrences a
 test('get: a cycle terminates — the back edge renders its already-seen node a leaf', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    const b = store.store('memory b');
-    const c = store.store('memory c');
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
+    const c = store.store('memory c', { kind: 'note' });
     store.link(a, b, 'next');
     store.link(b, c, 'next');
     store.link(c, b, 'back'); // the cycle: c -> b
@@ -152,7 +152,9 @@ test('get: a cycle terminates — the back edge renders its already-seen node a 
 test('get: no hard cap — a long chain is walked to its end', () => {
   const { store, cleanup } = tempStore();
   try {
-    const ids = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'].map((name) => store.store(`memory ${name}`));
+    const ids = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'].map((name) =>
+      store.store(`memory ${name}`, { kind: 'note' }),
+    );
     for (let i = 0; i < ids.length - 1; i++) {
       store.link(ids[i]!, ids[i + 1]!, 'next');
     }
@@ -171,7 +173,7 @@ test('get: no hard cap — a long chain is walked to its end', () => {
 test('get: depth must be an integer >= 1', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('memory');
+    const id = store.store('memory', { kind: 'note' });
     assert.throws(() => store.get(id, { depth: 0 }), /depth must be an integer >= 1/);
     assert.throws(() => store.get(id, { depth: -2 }), /depth must be an integer >= 1/);
     assert.throws(() => store.get(id, { depth: 1.5 }), /depth must be an integer >= 1/);

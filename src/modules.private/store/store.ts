@@ -42,16 +42,18 @@ const FTS_REBUILD_HINT =
   "rebuild the index with SQL: INSERT INTO memories_fts(memories_fts) VALUES('rebuild') — mechanical, no content rewrite";
 
 /**
- * One record in a store: content, its authored summary (the condensation
- * that lets checkin and search serve more memories per call — owed when
- * the content runs past the ceiling), metadata, a status, and the hot
- * flag — the curation mark that hands the memory to the checkin ritual
- * (#12). `hot` is earned after the fact (setHot), never at birth, and
- * survives only on an active memory.
+ * One record in a store: content, its kind (the required, free-vocabulary
+ * classification — a column since v6, #31), its authored summary (the
+ * condensation that lets checkin and search serve more memories per call —
+ * owed when the content runs past the ceiling), metadata, a status, and
+ * the hot flag — the curation mark that hands the memory to the checkin
+ * ritual (#12). `hot` is earned after the fact (setHot), never at birth,
+ * and survives only on an active memory.
  */
 export interface Memory {
   readonly id: UUID;
   readonly content: string;
+  readonly kind: string;
   readonly summary: string | null;
   readonly metadata: Record<string, unknown> | null;
   readonly created_at: string;
@@ -83,6 +85,14 @@ export interface RelationSpec {
 }
 
 export interface StoreOptions {
+  /**
+   * The memory's classification — a required column with a free
+   * vocabulary, no enum (#31: the real v0.1 store carried kind on every
+   * row, and dream/vision rule the enum out). Required at store: a
+   * kind-less memory does not exist. `metadata.kind` is refused — kind
+   * is a column, one spelling.
+   */
+  readonly kind: string;
   readonly metadata?: Record<string, unknown>;
   /**
    * The authored condensation of the content — owed when the content runs
@@ -98,10 +108,21 @@ export interface StoreOptions {
   readonly relations?: readonly RelationSpec[];
 }
 
+/** supersede's own options — the split the kind column rules (#31):
+ *  `kind` is OPTIONAL here, omitted = inherited from the source's
+ *  column; a revision may reclassify. Everything else matches
+ *  store's options. */
+export interface SupersedeOptions extends Omit<StoreOptions, 'kind'> {
+  readonly kind?: string;
+}
+
 /** merge's own options — it bridges its sources (the `merges` edges come
  *  from the fusion itself), so the one-gesture `relations` of
- *  StoreOptions has no meaning here. */
+ *  StoreOptions has no meaning here. `kind` is optional: omitted =
+ *  inherited when every source agrees, refused with the candidate kinds
+ *  when they disagree; provided = it wins. */
 export interface MergeOptions {
+  readonly kind?: string;
   readonly metadata?: Record<string, unknown>;
   readonly summary?: string;
 }
@@ -181,8 +202,10 @@ export interface ListOptions {
    */
   readonly includeLegacy?: boolean;
   /**
-   * A raw SQL condition on the memories row (`metadata->>'$.kind' = 'note'`
-   * and friends) — the grant opt-in that the server surface gates.
+   * A raw SQL condition on the memories row (`kind = 'note'` and
+   * friends) — the grant opt-in that the server surface gates. Since v6
+   * kind is a column: the idiom is a plain column comparison, not a
+   * `metadata->>'$.kind'` JSON path.
    */
   readonly where?: string;
 }
@@ -224,8 +247,9 @@ export interface CheckinReport {
  * The doctor's finding-producing checks — the corruption family: states
  * the write surface cannot produce (hand SQL on a second connection,
  * external tools). The legacy kind-based checks (active_without_kind,
- * stale_handoff, weight_bounds) are not in the vocabulary: kinds stay
- * free metadata tags and the weight column is gone.
+ * stale_handoff, weight_bounds) are not in the vocabulary: kind is a
+ * NOT NULL column from v6 on (kind-less memories no longer exist, #31)
+ * and the weight column is gone.
  */
 export type DoctorCheck =
   | 'orphan_edges'
@@ -268,8 +292,7 @@ export interface DoctorReport {
 /**
  * The checkout's finding-producing checks — the consolidation gate: the
  * closure debts an agent pays with the raw verbs. No check depends on a
- * `kind` or a window: kinds stay free metadata tags, the verdict is
- * timeless store state.
+ * `kind` or a window: the verdict is timeless store state.
  */
 export type CheckoutCheck = 'no_hot' | 'isolated_active' | 'duplicate_titles';
 
@@ -377,6 +400,7 @@ const BUSY_DELAY_MS = 20;
 interface MemoryRow {
   readonly id: string;
   readonly content: string;
+  readonly kind: string;
   readonly summary: string | null;
   readonly metadata: string | null;
   readonly created_at: string;
@@ -408,6 +432,7 @@ function parseMemoryRow(row: MemoryRow): Memory {
   return {
     id: row.id,
     content: row.content,
+    kind: row.kind,
     summary: row.summary,
     metadata: parseRawMetadata(row.metadata),
     created_at: row.created_at,
@@ -457,6 +482,40 @@ function normaliseOffset(offset: number | undefined): number {
     throw new Error('offset must be an integer >= 0');
   }
   return offset;
+}
+
+/**
+ * store's kind contract: REQUIRED — a memory always carries its
+ * classification. The vocabulary is free (no enum, #31); the error names
+ * the interface, so an agent learns the shape on first refusal.
+ */
+function assertStoreKind(kind: string): void {
+  if (typeof kind !== 'string' || !kind) {
+    throw new Error('kind is required: pass kind ("note", "decision", …) — the vocabulary is free');
+  }
+}
+
+/**
+ * supersede/merge's kind contract: optional, but present means a real
+ * string — an empty kind classifies nothing.
+ */
+function assertOptionalKind(kind: string | undefined): void {
+  if (kind !== undefined && (typeof kind !== 'string' || !kind)) {
+    throw new Error('kind must be non-empty');
+  }
+}
+
+/**
+ * `metadata.kind` is refused everywhere a successor or memory is
+ * authored (store, supersede, merge): kind is a column from v6 on —
+ * one spelling, the interface teaches (#31). Letting the old spelling
+ * ride metadata would smuggle the divergence the strip just buried back
+ * into new writes.
+ */
+function refuseMetadataKind(metadata: Record<string, unknown> | undefined | null): void {
+  if (metadata && 'kind' in metadata) {
+    throw new Error('kind is a column — pass kind, not metadata.kind');
+  }
 }
 
 /**
@@ -568,17 +627,19 @@ export class Store {
   /**
    * The write verbs' shared pre-check: refuse an unknown id by name, then
    * refuse any non-active status — supersede/merge/deprecate only ever
-   * touch the living. Returns the memory's hot flag: supersede transfers
-   * it to the head, merge unions it across sources.
+   * touch the living. Returns the memory's hot flag AND its kind column:
+   * supersede transfers the flag to the head and inherits the kind from
+   * the source (unless reclassified); merge unions the flag across
+   * sources and reads every source's kind for the inheritance rule.
    */
-  #requireActive(id: string, verb: string): boolean {
-    const row = this.#db.prepare('SELECT status, hot FROM memories WHERE id = ?').get(id) as
-      { status: MemoryStatus; hot: number } | undefined;
+  #requireActive(id: string, verb: string): { hot: boolean; kind: string } {
+    const row = this.#db.prepare('SELECT status, hot, kind FROM memories WHERE id = ?').get(id) as
+      { status: MemoryStatus; hot: number; kind: string } | undefined;
     if (!row) throw new Error(`memory not found: ${id}`);
     if (row.status !== 'active') {
       throw new Error(`cannot ${verb} a memory with status '${row.status}'`);
     }
-    return row.hot === 1;
+    return { hot: row.hot === 1, kind: row.kind };
   }
 
   /**
@@ -621,14 +682,17 @@ export class Store {
   }
 
   /**
-   * Store a memory: UUID id, metadata JSON, born cold — the hot flag is
+   * Store a memory: UUID id, its required kind (the free-vocabulary
+   * classification, #31), metadata JSON, born cold — the hot flag is
    * earned after the fact (setHot), never at birth. The one-gesture
    * relations land in the same transaction: the memory and its edges
    * arrive together or not at all.
    */
-  store(content: string, options: StoreOptions = {}): string {
+  store(content: string, options: StoreOptions): string {
     this.#assertWritable();
     if (!content) throw new Error('content must be non-empty');
+    assertStoreKind(options.kind);
+    refuseMetadataKind(options.metadata);
     this.#checkSummary(content, options.summary ?? null);
     const id = randomUUID();
     const summary = options.summary ?? null;
@@ -637,9 +701,9 @@ export class Store {
     this.#transaction(() => {
       this.#db
         .prepare(
-          'INSERT INTO memories (id, content, summary, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO memories (id, content, kind, summary, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         )
-        .run(id, content, summary, metadata, created_at);
+        .run(id, content, options.kind, summary, metadata, created_at);
       if (options.relations?.length) {
         this.#insertRelations(id, options.relations, created_at);
       }
@@ -648,9 +712,10 @@ export class Store {
   }
 
   /**
-   * Revise a memory: the successor carries the content, the structural
-   * metadata (kind when every source agrees, tags unioned) and — when no
-   * explicit relations are given — the source's outgoing edges VERBATIM
+   * Revise a memory: the successor carries the content, the source's kind
+   * column (reclassify with `kind` — a revision may reclassify, #31),
+   * the structural metadata (tags unioned) and — when no explicit
+   * relations are given — the source's outgoing edges VERBATIM
    * (kind, metadata, created_at copied row by row). A revision corrects
    * CONTENT, not the relation set; the old memory keeps its edges as
    * provenance (addition-only, nothing moves). Explicit relations win over
@@ -659,21 +724,24 @@ export class Store {
    * marked superseded, and its hot flag TRANSFERS to the head — the
    * revision replaces what checkin would have served.
    */
-  supersede(oldId: string, content: string, options: StoreOptions = {}): string {
+  supersede(oldId: string, content: string, options: SupersedeOptions = {}): string {
     this.#assertWritable();
     if (!content) throw new Error('content must be non-empty');
+    assertOptionalKind(options.kind);
+    refuseMetadataKind(options.metadata);
     this.#checkSummary(content, options.summary ?? null);
     const newId = randomUUID();
     const created_at = new Date().toISOString();
     this.#transaction(() => {
-      const hot = this.#requireActive(oldId, 'supersede');
+      const { hot, kind: inheritedKind } = this.#requireActive(oldId, 'supersede');
+      const kind = options.kind ?? inheritedKind;
       const inherited = options.metadata ?? this.#structuralInherit([this.#readMeta(oldId)]);
       const metadata = inherited ? JSON.stringify(inherited) : null;
       this.#db
         .prepare(
-          'INSERT INTO memories (id, content, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO memories (id, content, kind, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
+        .run(newId, content, kind, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
       if (!options.relations?.length) {
         const inheritedEdges = this.#db
           .prepare('SELECT to_id, kind, metadata, created_at FROM edges WHERE from_id = ?')
@@ -709,17 +777,21 @@ export class Store {
   }
 
   /**
-   * Fuse memories: one successor carries the content and the structural
-   * metadata (kind only when every source agrees, tags unioned); each
-   * source keeps a `merges` bridge as provenance and is marked merged.
-   * The hot flag UNIONS across sources — if any source was headed for
-   * checkin, the fusion is. Sources cool: the flag lives only on active
-   * memories.
+   * Fuse memories: one successor carries the content and the kind column —
+   * inherited when every source agrees, refused with the candidate kinds
+   * when they disagree and `kind` is omitted, the provided `kind` wins
+   * (#31: refuse, don't hide — a fusion never guesses its classification).
+   * The structural metadata carries the tags unioned; each source keeps a
+   * `merges` bridge as provenance and is marked merged. The hot flag
+   * UNIONS across sources — if any source was headed for checkin, the
+   * fusion is. Sources cool: the flag lives only on active memories.
    */
   merge(ids: readonly string[], content: string, options: MergeOptions = {}): string {
     this.#assertWritable();
     if (ids.length < 2) throw new Error('merge requires at least 2 memories');
     if (!content) throw new Error('content must be non-empty');
+    assertOptionalKind(options.kind);
+    refuseMetadataKind(options.metadata);
     this.#checkSummary(content, options.summary ?? null);
     const seen = new Set<string>();
     for (const id of ids) {
@@ -730,18 +802,32 @@ export class Store {
     const created_at = new Date().toISOString();
     this.#transaction(() => {
       const metadataList: Array<Record<string, unknown> | null> = [];
+      const kinds = new Set<string>();
       let hot = false;
       for (const id of ids) {
-        if (this.#requireActive(id, 'merge')) hot = true;
+        const { hot: isHot, kind } = this.#requireActive(id, 'merge');
+        if (isHot) hot = true;
+        kinds.add(kind);
         metadataList.push(this.#readMeta(id));
+      }
+      let kind: string;
+      if (options.kind !== undefined) {
+        kind = options.kind;
+      } else if (kinds.size === 1) {
+        kind = [...kinds][0]!;
+      } else {
+        const candidates = [...kinds].sort().join(', ');
+        throw new Error(
+          `merge refused: sources disagree on kind (${candidates}) — pass kind to classify the fusion`,
+        );
       }
       const inherited = options.metadata ?? this.#structuralInherit(metadataList);
       const metadata = inherited ? JSON.stringify(inherited) : null;
       this.#db
         .prepare(
-          'INSERT INTO memories (id, content, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO memories (id, content, kind, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(newId, content, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
+        .run(newId, content, kind, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
       for (const id of ids) {
         this.#insertEdge(id, newId, 'merges', null, created_at);
         this.#db.prepare("UPDATE memories SET status = 'merged', hot = 0 WHERE id = ?").run(id);
@@ -944,7 +1030,7 @@ export class Store {
   #expandToNode(id: string, depth: number, visited: Set<string>): MemoryWithRelations | null {
     const row = this.#db
       .prepare(
-        'SELECT id, content, summary, metadata, created_at, status, hot FROM memories WHERE id = ?',
+        'SELECT id, content, kind, summary, metadata, created_at, status, hot FROM memories WHERE id = ?',
       )
       .get(id) as unknown as MemoryRow | undefined;
     if (!row) return null;
@@ -968,7 +1054,7 @@ export class Store {
     if (!query) throw new Error('query must be non-empty');
     const limit = normaliseLimit(options.limit, 20);
     let sql =
-      'SELECT m.id, m.content, m.summary, m.metadata, m.created_at, m.status, m.hot,' +
+      'SELECT m.id, m.content, m.kind, m.summary, m.metadata, m.created_at, m.status, m.hot,' +
       ' (bm25(memories_fts)) AS rank' +
       ' FROM memories_fts f JOIN memories m ON m.rowid = f.rowid' +
       ' WHERE memories_fts MATCH ?';
@@ -1012,7 +1098,7 @@ export class Store {
     const limit = normaliseLimit(options.limit, -1);
     const rows = this.#db
       .prepare(
-        'SELECT id, content, summary, metadata, created_at, status, hot FROM memories' +
+        'SELECT id, content, kind, summary, metadata, created_at, status, hot FROM memories' +
           " WHERE status = 'active' AND hot = 1 ORDER BY created_at DESC LIMIT ?",
       )
       .all(limit) as unknown as MemoryRow[];
@@ -1032,7 +1118,7 @@ export class Store {
   list(options: ListOptions = {}): MemoryWithRelations[] {
     const limit = normaliseLimit(options.limit, 20);
     const offset = normaliseOffset(options.offset);
-    let sql = 'SELECT id, content, summary, metadata, created_at, status, hot FROM memories';
+    let sql = 'SELECT id, content, kind, summary, metadata, created_at, status, hot FROM memories';
     const conditions: string[] = [];
     if (options.includeLegacy !== true) {
       conditions.push("status = 'active'");
@@ -1051,9 +1137,10 @@ export class Store {
   /**
    * The store's shape in one aggregate call — counts, not rows. Reads
    * never move these numbers (no access signal): two stats() calls across
-   * any reads return the same report. The by-kind ledger groups the
-   * metadata path `$.kind` over every status; kind-less memories simply
-   * don't appear (kind is a free tag, the refonte keeps it that way).
+   * any reads return the same report. The by-kind ledger reads the
+   * COLUMN over every status — every memory appears, kind is a required
+   * column (kind-less memories no longer exist; the migration marks the
+   * rows it could not classify 'unclassified', #31).
    */
   stats(): Stats {
     const memories_by_status: Record<string, number> = {};
@@ -1065,11 +1152,7 @@ export class Store {
     }
     const memories_by_kind: Record<string, number> = {};
     const kindRows = this.#db
-      .prepare(
-        `SELECT json_extract(metadata, '$.kind') AS kind, count(*) AS c FROM memories
-         WHERE metadata IS NOT NULL AND json_extract(metadata, '$.kind') IS NOT NULL
-         GROUP BY kind ORDER BY kind`,
-      )
+      .prepare('SELECT kind, count(*) AS c FROM memories GROUP BY kind ORDER BY kind')
       .all() as unknown as Array<{ kind: string; c: number }>;
     for (const row of kindRows) {
       memories_by_kind[row.kind] = row.c;
@@ -1118,7 +1201,7 @@ export class Store {
    */
   doctor(): DoctorReport {
     const memories = this.#db
-      .prepare('SELECT id, content, summary, metadata, created_at, status, hot FROM memories')
+      .prepare('SELECT id, content, kind, summary, metadata, created_at, status, hot FROM memories')
       .all() as unknown as MemoryRow[];
     const edges = this.#db
       .prepare('SELECT from_id, to_id, kind, metadata, created_at FROM edges')
@@ -1126,8 +1209,8 @@ export class Store {
     const byId = new Map(memories.map((memory) => [memory.id, memory]));
     const findings: DoctorFinding[] = [];
 
-    // Metadata parse probed ONCE — no check reads metadata content (kinds
-    // stay free tags, the refonte keeps it that way), so the only fact
+    // Metadata parse probed ONCE — no check reads metadata content (kind
+    // left the metadata: it is a column from v6 on, #31), so the only fact
     // worth keeping is the set of ids whose column is not valid JSON:
     // invalid_metadata_json is where the corruption speaks, one finding
     // per root cause (reads collapse invalid JSON into null metadata,
@@ -1255,7 +1338,7 @@ export class Store {
    */
   checkout(): CheckoutReport {
     const memories = this.#db
-      .prepare('SELECT id, content, summary, metadata, created_at, status, hot FROM memories')
+      .prepare('SELECT id, content, kind, summary, metadata, created_at, status, hot FROM memories')
       .all() as unknown as MemoryRow[];
     const edges = this.#db
       .prepare('SELECT from_id, to_id, kind, metadata, created_at FROM edges')
@@ -1489,22 +1572,20 @@ export class Store {
 
   /**
    * Structural metadata for a supersede/merge successor built from source
-   * metadata: kind carries only when every source agrees, tags union across
-   * sources. Explicit options.metadata wins verbatim — inherit happens only
-   * when the caller passed no metadata at all. Rationale: kind is what the
-   * CLI's read filters select on; a kind-less successor silently drops out
-   * of those filters (observed defect October 2026, caught by the
-   * cold-reader re-test). Contextual metadata is never copied — the
-   * successor's content describes new state.
+   * metadata: tags union across sources. Kind is NOT here — it is a
+   * column from v6 on (#31): supersede inherits it from the source's
+   * column (a revision may reclassify), merge inherits on agreement or
+   * demands a verdict on disagreement. Explicit options.metadata wins
+   * verbatim — inherit happens only when the caller passed no metadata at
+   * all. Contextual metadata is never copied — the successor's content
+   * describes new state.
    */
   #structuralInherit(
     metadataList: Array<Record<string, unknown> | null>,
   ): Record<string, unknown> | null {
-    const kinds = new Set<unknown>();
     const tags: unknown[] = [];
     for (const metadata of metadataList) {
       if (!metadata) continue;
-      if ('kind' in metadata && metadata['kind'] !== undefined) kinds.add(metadata['kind']);
       if (Array.isArray(metadata['tags'])) {
         for (const tag of metadata['tags'] as unknown[]) {
           if (!tags.some((existing) => JSON.stringify(existing) === JSON.stringify(tag))) {
@@ -1514,7 +1595,6 @@ export class Store {
       }
     }
     const structural: Record<string, unknown> = {};
-    if (kinds.size === 1) structural['kind'] = [...kinds][0];
     if (tags.length > 0) structural['tags'] = tags;
     return Object.keys(structural).length > 0 ? structural : null;
   }

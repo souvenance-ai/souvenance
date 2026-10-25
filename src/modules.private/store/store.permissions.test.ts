@@ -25,7 +25,7 @@ test(
     try {
       const store = Store.open({ dbPath });
       try {
-        store.store('the identity lives here');
+        store.store('the identity lives here', { kind: 'note' });
         assert.equal(mode(dbPath), 0o600, 'a fresh store is 0600 at open');
       } finally {
         store.close();
@@ -44,7 +44,7 @@ test(
     try {
       const store = Store.open({ dbPath });
       try {
-        store.store('a write to force the WAL');
+        store.store('a write to force the WAL', { kind: 'note' });
         for (const sidecar of [`${dbPath}-wal`, `${dbPath}-shm`]) {
           if (existsSync(sidecar)) {
             assert.equal(mode(sidecar), 0o600, `sidecar ${sidecar} tightened`);
@@ -87,7 +87,7 @@ test('permissions: a fork target lands owner-only', { skip: SKIP_WINDOWS }, () =
   try {
     const store = Store.open({ dbPath });
     try {
-      store.store('fork me');
+      store.store('fork me', { kind: 'note' });
       const fork = tempStorePath('fork.db');
       forkCleanup = fork.cleanup;
       const result = store.fork(fork.dbPath);
