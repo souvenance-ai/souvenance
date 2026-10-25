@@ -200,7 +200,7 @@ test(
       try {
         assert.equal(store.get(original)!.status, 'superseded', 'original should be superseded');
         const replacements = store.list({
-          includeLegacy: true,
+          includeTerminals: true,
           where: "content LIKE 'replacement %' AND status = 'active'",
         });
         assert.equal(replacements.length, 1, 'exactly 1 replacement should be active');
@@ -242,7 +242,7 @@ test(
         assert.equal(statusOf(candidateB), 'merged', 'b should be merged');
 
         const merged = store.list({
-          includeLegacy: true,
+          includeTerminals: true,
           where: "content LIKE 'merged result %' AND status = 'active'",
         });
         assert.equal(merged.length, 1, 'exactly 1 merged result should be active');
@@ -315,7 +315,7 @@ test(
       const store = Store.open({ dbPath });
       try {
         const heads = store.list({
-          includeLegacy: true,
+          includeTerminals: true,
           where: "content LIKE '%revision'",
         });
         assert.equal(heads.length, supersedeWins, 'one head per winning supersede');

@@ -124,7 +124,7 @@ test('checkout: no_hot stays silent when there is nothing to serve', () => {
   }
 });
 
-test('checkout: isolated_active — islands owe consolidation once others exist', () => {
+test('checkout: isolated_living — islands owe consolidation once others exist', () => {
   const { store, cleanup } = tempStore();
   try {
     const { a, b } = healthyPair(store);
@@ -135,7 +135,7 @@ test('checkout: isolated_active — islands owe consolidation once others exist'
     store.setHot(b, false);
     store.setHot(c, true);
     let report = store.checkout();
-    const islands = report.findings.filter((finding) => finding.check === 'isolated_active');
+    const islands = report.findings.filter((finding) => finding.check === 'isolated_living');
     assert.equal(islands.length, 1);
     assert.match(islands[0]!.detail, new RegExp(c));
 
@@ -149,7 +149,7 @@ test('checkout: isolated_active — islands owe consolidation once others exist'
   }
 });
 
-test('checkout: isolated_active reads the living set — hot islands owe relations too (#38)', () => {
+test('checkout: isolated_living reads the living set — hot islands owe relations too (#38)', () => {
   const { store, cleanup } = tempStore();
   try {
     // Two hot memories, no edges between them: under the old active-only
@@ -161,7 +161,7 @@ test('checkout: isolated_active reads the living set — hot islands owe relatio
     store.setHot(a, true);
     store.setHot(b, true);
     const report = store.checkout();
-    const islands = report.findings.filter((finding) => finding.check === 'isolated_active');
+    const islands = report.findings.filter((finding) => finding.check === 'isolated_living');
     assert.equal(islands.length, 1);
     assert.match(islands[0]!.detail, new RegExp(a));
     assert.match(islands[0]!.detail, new RegExp(b));
@@ -196,7 +196,7 @@ test('checkout: duplicate_titles reads the living set — hot twins would be ser
   }
 });
 
-test('checkout: isolated_active stays silent for a one-memory store (an atom)', () => {
+test('checkout: isolated_living stays silent for a one-memory store (an atom)', () => {
   const { store, cleanup } = tempStore();
   try {
     const single = store.store('# Alone\n\nNothing to relate to yet.', {
@@ -279,7 +279,7 @@ test('checkout: all-or-nothing — pay every consolidation debt, then the light 
     assert.equal(report.healthy, false);
     assert.deepEqual(
       report.findings.map((finding) => finding.check),
-      ['no_hot', 'isolated_active', 'duplicate_titles'],
+      ['no_hot', 'isolated_living', 'duplicate_titles'],
     );
 
     // Pay: curate one memory, relate the pair, merge the duplicate titles.

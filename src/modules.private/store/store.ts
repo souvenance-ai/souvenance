@@ -37,7 +37,7 @@ export const DOCTOR_CHECK_COUNT = 5;
 
 /**
  * The checkout's check count — the consolidation gate the verdict reports
- * findings from (no_hot, isolated_active, duplicate_titles). Tests pin it
+ * findings from (no_hot, isolated_living, duplicate_titles). Tests pin it
  * as part of the report shape.
  */
 export const CHECKOUT_CHECK_COUNT = 3;
@@ -209,7 +209,7 @@ export interface ListOptions {
    * Include the terminals (superseded/deprecated/merged) — the --all
    * surface (living-only by default: active + hot, #38).
    */
-  readonly includeLegacy?: boolean;
+  readonly includeTerminals?: boolean;
   /**
    * A raw SQL condition on the memories row (`kind = 'note'` and
    * friends) — the grant opt-in that the server surface gates. Since v6
@@ -221,7 +221,8 @@ export interface ListOptions {
 
 export interface SearchOptions {
   readonly limit?: number;
-  readonly includeLegacy?: boolean;
+  /** Same contract as ListOptions.includeTerminals: the terminals join the living default. */
+  readonly includeTerminals?: boolean;
   readonly where?: string;
 }
 
@@ -301,7 +302,7 @@ export interface DoctorReport {
  * closure debts an agent pays with the raw verbs. No check depends on a
  * `kind` or a window: the verdict is timeless store state.
  */
-export type CheckoutCheck = 'no_hot' | 'isolated_active' | 'duplicate_titles';
+export type CheckoutCheck = 'no_hot' | 'isolated_living' | 'duplicate_titles';
 
 /**
  * One problem the checkout returns. All-or-nothing: no severity — a debt
@@ -490,6 +491,16 @@ function normaliseOffset(offset: number | undefined): number {
 }
 
 /**
+ * The LIVING set (#38): `active` + `hot`. Living is a glossary concept —
+ * the refusal set of the write verbs (supersede, merge, deprecate, unlink
+ * endpoints), setHot's transition domain, and the checkout's read; this
+ * is its one spelling in code.
+ */
+function isLiving(status: MemoryStatus): boolean {
+  return status === 'active' || status === 'hot';
+}
+
+/**
  * store's kind contract: REQUIRED — a memory always carries its
  * classification. The vocabulary is free (no enum, #31); the error names
  * the interface, so an agent learns the shape on first refusal.
@@ -638,11 +649,14 @@ export class Store {
    * unions the status across sources and reads every source's kind for the
    * inheritance rule.
    */
-  #requireLiving(id: string, verb: string): { status: MemoryStatus; kind: string } {
+  #requireLiving(
+    id: string,
+    verb: string,
+  ): { readonly status: MemoryStatus; readonly kind: string } {
     const row = this.#db.prepare('SELECT status, kind FROM memories WHERE id = ?').get(id) as
       { status: MemoryStatus; kind: string } | undefined;
     if (!row) throw new Error(`memory not found: ${id}`);
-    if (row.status !== 'active' && row.status !== 'hot') {
+    if (!isLiving(row.status)) {
       throw new Error(`cannot ${verb} a memory with status '${row.status}'`);
     }
     return row;
@@ -747,15 +761,7 @@ export class Store {
         .prepare(
           'INSERT INTO memories (id, content, kind, summary, metadata, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(
-          newId,
-          content,
-          kind,
-          options.summary ?? null,
-          metadata,
-          created_at,
-          status === 'hot' ? 'hot' : 'active',
-        );
+        .run(newId, content, kind, options.summary ?? null, metadata, created_at, status);
       if (!options.relations?.length) {
         const inheritedEdges = this.#db
           .prepare('SELECT to_id, kind, metadata, created_at FROM edges WHERE from_id = ?')
@@ -886,7 +892,7 @@ export class Store {
     this.#transaction(() => {
       const row = this.#readStatus(id);
       if (!row) throw new Error(`memory not found: ${id}`);
-      if (row !== 'active' && row !== 'hot') {
+      if (!isLiving(row)) {
         throw new Error(`cannot setHot a memory with status '${row}'`);
       }
       this.#db
@@ -951,10 +957,10 @@ export class Store {
       if (!fromStatus) throw new Error(`memory not found: ${fromId}`);
       const toStatus = this.#readStatus(toId);
       if (!toStatus) throw new Error(`memory not found: ${toId}`);
-      if (fromStatus !== 'active' && fromStatus !== 'hot') {
+      if (!isLiving(fromStatus)) {
         throw new Error(`cannot unlink a memory with status '${fromStatus}'`);
       }
-      if (toStatus !== 'active' && toStatus !== 'hot') {
+      if (!isLiving(toStatus)) {
         throw new Error(`cannot unlink a memory with status '${toStatus}'`);
       }
 
@@ -1067,7 +1073,7 @@ export class Store {
    * Search memories by FTS5 match, ranked by pure bm25 — search wants to
    * search everywhere: no weight, recency or access terms (the legacy
    * ranking factors died with their columns). Living-only unless
-   * includeLegacy (`active` + `hot`, #38), narrowed by the where grant,
+   * includeTerminals (`active` + `hot`, #38), narrowed by the where grant,
    * limit 20 by default. Hits are projected nodes (depth-1 relations
    * included).
    *
@@ -1085,7 +1091,7 @@ export class Store {
       ' (bm25(memories_fts)) AS rank' +
       ' FROM memories_fts f JOIN memories m ON m.rowid = f.rowid' +
       ' WHERE memories_fts MATCH ?';
-    if (options.includeLegacy !== true) {
+    if (options.includeTerminals !== true) {
       sql += ` AND m.status IN ('active', 'hot')`;
     }
     if (options.where) {
@@ -1137,7 +1143,7 @@ export class Store {
 
   /**
    * List memories as projected nodes: newest first, living-only unless
-   * includeLegacy (`active` + `hot`, #38), paged by limit/offset,
+   * includeTerminals (`active` + `hot`, #38), paged by limit/offset,
    * narrowed by the where grant. Every row carries its depth-1 relations
    * block — list is the set-serving verb, and the projection rides free
    * next to the content read.
@@ -1147,7 +1153,7 @@ export class Store {
     const offset = normaliseOffset(options.offset);
     let sql = 'SELECT id, content, kind, summary, metadata, created_at, status FROM memories';
     const conditions: string[] = [];
-    if (options.includeLegacy !== true) {
+    if (options.includeTerminals !== true) {
       conditions.push("status IN ('active', 'hot')");
     }
     if (options.where) {
@@ -1352,20 +1358,20 @@ export class Store {
    * hand-corrupted store.
    */
   checkout(): CheckoutReport {
-    const memories = this.#db
-      .prepare('SELECT id, content, kind, summary, metadata, created_at, status FROM memories')
-      .all() as unknown as MemoryRow[];
+    const memories = (
+      this.#db
+        .prepare('SELECT id, content, kind, summary, metadata, created_at, status FROM memories')
+        .all() as unknown as MemoryRow[]
+    ).map(parseMemoryRow);
     const edges = this.#db
       .prepare('SELECT from_id, to_id, kind, metadata, created_at FROM edges')
       .all() as unknown as RelationRow[];
     const findings: CheckoutFinding[] = [];
-    const isLiving = (memory: MemoryRow): boolean =>
-      memory.status === 'active' || memory.status === 'hot';
 
     // A register nobody curated is a ghost — the next checkin serves an
     // empty hot block and a fresh session reads nothing. Silent when there
     // is nothing to serve (no memories, no living).
-    const livingCount = memories.filter(isLiving).length;
+    const livingCount = memories.filter((memory) => isLiving(memory.status)).length;
     const hotCount = memories.filter((memory) => memory.status === 'hot').length;
     if (livingCount > 0 && hotCount === 0) {
       findings.push({
@@ -1382,13 +1388,13 @@ export class Store {
     // aggregated; a one-memory store is an atom, not an island.
     const isolated = memories.filter(
       (memory) =>
-        isLiving(memory) &&
+        isLiving(memory.status) &&
         !edges.some((edge) => edge.from_id === memory.id || edge.to_id === memory.id),
     );
     if (isolated.length > 0 && livingCount >= 2) {
       const ids = isolated.map((memory) => memory.id).join(', ');
       findings.push({
-        check: 'isolated_active',
+        check: 'isolated_living',
         detail: `${isolated.length} living memories hold no edges in either direction: ${ids}`,
         hint: 'link them to related memories, merge or supersede what duplicates, deprecate what was a mistake — a register of islands is unconsolidated',
       });
@@ -1401,7 +1407,7 @@ export class Store {
     // twice (the widening is deliberate, #38).
     const titleGroups = new Map<string, string[]>();
     for (const memory of memories) {
-      if (!isLiving(memory)) continue;
+      if (!isLiving(memory.status)) continue;
       const firstLine = memory.content.split('\n')[0]!.trim();
       if (!firstLine.startsWith('#')) continue;
       const group = titleGroups.get(firstLine) ?? [];
