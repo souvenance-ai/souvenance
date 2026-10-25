@@ -19,7 +19,7 @@ The human who runs the manager and owns the host — the only audience of `souve
 _Avoid_: user, admin
 
 **Memory**:
-One record in a store: content, its kind, its authored summary, metadata, a status (active, superseded, deprecated, merged), and the hot flag.
+One record in a store: content, its kind, its authored summary, metadata, and a status (active, hot, superseded, deprecated, merged).
 _Avoid_: note, fact, recollection
 
 **Kind**:
@@ -31,8 +31,12 @@ The authored condensation of a memory's content — what checkin and search serv
 _Avoid_: abstract, digest, tldr
 
 **Hot**:
-The curation flag of an active memory: what checkin serves a fresh session. Only an active memory can be hot; supersede transfers it to the head, merge unions it, every termination cools it.
-_Avoid_: pinned, starred, important
+The curation status: the sub-state of `active` a fresh session's checkin serves. Not a flag, not a parallel mark — one of the five states, the machine's only reversible edge (setHot: active ↔ hot); supersede transfers it to the head, merge unions it, every termination cools it for free.
+_Avoid_: pinned, starred, important, the hot flag (retired)
+
+**Living**:
+The set of memories still on stage: `active` + `hot` (hot is a sub-state of active). The refusal set of the write verbs — supersede, merge, deprecate, and unlink's endpoints only ever touch the living; the terminals (superseded, deprecated, merged) refuse every gesture. The checkout reads it too: a hot memory owes its relations and its title as much as an active one.
+_Avoid_: non-terminal, actives, alive
 
 **Relation**:
 A directed edge between two memories (from → to, with a kind). The graph is the single relation surface; reading surfaces project it.
