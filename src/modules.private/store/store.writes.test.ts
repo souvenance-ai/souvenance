@@ -441,7 +441,22 @@ test('unlink: throws on empty explicit kind', () => {
   }
 });
 
-test('unlink: refuses when an endpoint is not active — corrections among the living', () => {
+test('unlink: accepts a hot endpoint — corrections among the living (#38)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
+    store.link(a, b, 'references');
+    store.setHot(b, true);
+    // A hot endpoint is living: the correction goes through.
+    store.unlink(a, b);
+    assert.equal(count(store, 'SELECT count(*) as c FROM edges'), 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test('unlink: refuses when an endpoint is not living — corrections among the living', () => {
   const { store, cleanup } = tempStore();
   try {
     const a = store.store('memory a', { kind: 'note' });
@@ -802,7 +817,7 @@ test('supersede: the head inherits the source outgoing edges verbatim', () => {
     }
     // Addition-only: the old memory KEEPS its edges (provenance), plus the
     // new supersedes bridge. The head is not isolated — the edge set is
-    // intact (the doctor's isolated_active check verifies this in #13).
+    // intact (the doctor's status_without_bridge check verifies this).
     assert.equal(edgesOf(store, oldId).length, 3);
     assert.equal(edgesOf(store, newId).length, 2);
   } finally {

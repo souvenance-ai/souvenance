@@ -45,7 +45,7 @@ test('fork is an exact copy — nothing added, nothing missing', () => {
       // The copy adds NOTHING: no provenance memory, the rows are exactly
       // the origin's — a fork that should know its origin gets told by its
       // forker, via memory store in the child.
-      const all = child.list({ includeLegacy: true, limit: 100 });
+      const all = child.list({ includeTerminals: true, limit: 100 });
       assert.equal(all.length, 3);
       assert.equal(child.list({ where: "kind = 'summary'", limit: 10 }).length, 1);
       // The authored summary and the earned hot status travel with the copy.
@@ -78,7 +78,7 @@ test('fork refuses an existing target without force; force gives the exact copy 
     const result = store.fork(target, { force: true });
     const child = Store.open({ dbPath: result.path });
     try {
-      assert.equal(child.list({ includeLegacy: true, limit: 100 }).length, 2);
+      assert.equal(child.list({ includeTerminals: true, limit: 100 }).length, 2);
       assert.equal(child.list({ where: "kind = 'summary'", limit: 10 }).length, 0);
     } finally {
       child.close();

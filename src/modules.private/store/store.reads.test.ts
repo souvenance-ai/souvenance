@@ -211,18 +211,24 @@ test('list: applies the where filter on the row — the kind column since v6', (
   }
 });
 
-test('list: defaults to active memories only — includeLegacy widens', () => {
+test('list: defaults to the living set — includeTerminals widens', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a', { kind: 'note' });
-    store.store('memory b', { kind: 'note' });
-    store.deprecate(a);
-    assert.equal(store.list().length, 1);
-    assert.equal(store.list()[0]!.status, 'active');
+    const active = store.store('memory a', { kind: 'note' });
+    const hot = store.store('memory hot', { kind: 'note' });
+    const dead = store.store('memory dead', { kind: 'note' });
+    store.deprecate(dead);
+    store.setHot(hot, true);
+    // The living default serves BOTH living statuses — a hot memory is not
+    // hidden from the set-serving verb (#38).
+    const living = store.list();
+    assert.deepEqual(living.map((memory) => memory.status).sort(), ['active', 'hot']);
+    assert.ok(living.find((memory) => memory.id === hot));
 
-    const all = store.list({ includeLegacy: true });
-    assert.equal(all.length, 2);
-    assert.deepEqual(all.map((memory) => memory.status).sort(), ['active', 'deprecated']);
+    const all = store.list({ includeTerminals: true });
+    assert.equal(all.length, 3);
+    assert.deepEqual(all.map((memory) => memory.status).sort(), ['active', 'deprecated', 'hot']);
+    assert.ok(active);
   } finally {
     cleanup();
   }
@@ -363,18 +369,29 @@ test('search: deserializes metadata JSON — null stays null', () => {
   }
 });
 
-test('search: defaults to active memories only — includeLegacy widens', () => {
+test('search: defaults to the living set — includeTerminals widens', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('searchable fox content', { kind: 'note' });
-    store.supersede(a, 'searchable fox replacement');
+    const active = store.store('searchable fox content', { kind: 'note' });
+    const hot = store.store('searchable hot fox', { kind: 'note' });
+    const dead = store.store('searchable dead fox', { kind: 'note' });
+    store.supersede(dead, 'searchable replacement fox');
+    store.setHot(hot, true);
     const results = store.search('fox');
-    assert.equal(results.length, 1);
-    assert.equal(results[0]!.status, 'active');
+    // The living default: the hot memory and the supersede head serve
+    // beside the active one; the superseded source is history (#38).
+    assert.deepEqual(results.map((result) => result.status).sort(), ['active', 'active', 'hot']);
+    assert.ok(results.find((result) => result.id === hot));
 
-    const all = store.search('fox', { includeLegacy: true });
-    assert.equal(all.length, 2);
-    assert.deepEqual(all.map((result) => result.status).sort(), ['active', 'superseded']);
+    const all = store.search('fox', { includeTerminals: true });
+    assert.equal(all.length, 4);
+    assert.deepEqual(all.map((result) => result.status).sort(), [
+      'active',
+      'active',
+      'hot',
+      'superseded',
+    ]);
+    assert.ok(active);
   } finally {
     cleanup();
   }
