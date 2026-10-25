@@ -630,6 +630,23 @@ test('supersede: a provided kind reclassifies the revision', () => {
   }
 });
 
+test('supersede: an explicitly empty kind is refused', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const oldId = store.store('hello world', { kind: 'note' });
+    assert.throws(
+      () => store.supersede(oldId, 'hello universe', { kind: '' }),
+      /kind must be non-empty/,
+    );
+    // The refusal is pre-transactional: no successor landed, the source
+    // stays active and unbridged.
+    assert.equal(count(store, 'SELECT count(*) as c FROM memories'), 1);
+    assert.equal(count(store, 'SELECT count(*) as c FROM edges'), 0);
+  } finally {
+    cleanup();
+  }
+});
+
 test('supersede: no metadata in, no metadata out — the kind column still inherits', () => {
   const { store, cleanup } = tempStore();
   try {
@@ -969,6 +986,21 @@ test('merge: a provided kind wins — the fusion is classified, not inherited', 
     const id = store.merge([a, b], 'alpha beta combined', { kind: 'summary' });
 
     assert.equal(memoryRow(store, id).kind, 'summary', 'the provided kind wins');
+  } finally {
+    cleanup();
+  }
+});
+
+test('merge: an explicitly empty kind is refused', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
+    assert.throws(() => store.merge([a, b], 'the fusion', { kind: '' }), /kind must be non-empty/);
+    // Refuse, don't hide: the sources stay active, nothing landed.
+    assert.equal(memoryRow(store, a).status, 'active');
+    assert.equal(memoryRow(store, b).status, 'active');
+    assert.equal(count(store, 'SELECT count(*) as c FROM edges'), 0);
   } finally {
     cleanup();
   }
