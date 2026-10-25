@@ -19,8 +19,12 @@ The human who runs the manager and owns the host — the only audience of `souve
 _Avoid_: user, admin
 
 **Memory**:
-One record in a store: content, its authored summary, metadata, a status (active, superseded, deprecated, merged), and the hot flag.
+One record in a store: content, its kind, its authored summary, metadata, a status (active, superseded, deprecated, merged), and the hot flag.
 _Avoid_: note, fact, recollection
+
+**Kind**:
+The required classification of a memory — a column with a free vocabulary, no enum. Demanded at birth by store; a revision may reclassify it (supersede); a merge inherits it when the sources agree and demands a verdict when they disagree. `unclassified` marks the debt of a row nobody classified.
+_Avoid_: type, category, tag (that's metadata)
 
 **Summary**:
 The authored condensation of a memory's content — what checkin and search serve to hand a fresh session more memories per call. Owed at write time when the content runs past the ceiling; condensed always; revised by supersede, never in place.
