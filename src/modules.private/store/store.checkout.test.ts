@@ -31,11 +31,11 @@ function probe(store: Store): DatabaseSync {
 }
 
 /**
- * The healthy baseline: two linked actives, one of them hot. The checkout
- * reports zero findings on it. Every defect test starts here and applies
- * exactly one debt — so the expected findings array is the gate's full
- * contract, not just its presence. The kind column is fixture flavour:
- * no check reads it — the gate is kind-free (#31).
+ * The healthy baseline: two linked living memories, one of them hot. The
+ * checkout reports zero findings on it. Every defect test starts here and
+ * applies exactly one debt — so the expected findings array is the gate's
+ * full contract, not just its presence. The kind column is fixture
+ * flavour: no check reads it — the gate is kind-free (#31).
  */
 function healthyPair(store: Store): { a: string; b: string } {
   const a = store.store('# Memory alpha\n\nBody alpha.\n\nKeywords: alpha, test.', {
@@ -78,7 +78,7 @@ test('checkout: an empty fresh store is green — nothing to serve, nothing owed
   }
 });
 
-test('checkout: no_hot — an active register with nothing curated is a debt', () => {
+test('checkout: no_hot — a living register with nothing curated is a debt', () => {
   const { store, cleanup } = tempStore();
   try {
     const { a } = healthyPair(store);
@@ -144,6 +144,53 @@ test('checkout: isolated_active — islands owe consolidation once others exist'
     report = store.checkout();
     assert.equal(report.healthy, true);
     assert.deepEqual(report.findings, []);
+  } finally {
+    cleanup();
+  }
+});
+
+test('checkout: isolated_active reads the living set — hot islands owe relations too (#38)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    // Two hot memories, no edges between them: under the old active-only
+    // read this stayed silent (actives 0 < 2); the gate widened to the
+    // living set — a hot memory owes a relation as much as an active one,
+    // else the next checkin serves two unrelated registers.
+    const a = store.store('# Hot alpha\n\nBody alpha.', { kind: 'note' });
+    const b = store.store('# Hot beta\n\nBody beta.', { kind: 'note' });
+    store.setHot(a, true);
+    store.setHot(b, true);
+    const report = store.checkout();
+    const islands = report.findings.filter((finding) => finding.check === 'isolated_active');
+    assert.equal(islands.length, 1);
+    assert.match(islands[0]!.detail, new RegExp(a));
+    assert.match(islands[0]!.detail, new RegExp(b));
+    assert.equal(report.summary.hot_memories, 2);
+
+    // The payable paths: link the pair — then green.
+    store.link(a, b, 'references');
+    const green = store.checkout();
+    assert.equal(green.healthy, true);
+    assert.deepEqual(green.findings, []);
+  } finally {
+    cleanup();
+  }
+});
+
+test('checkout: duplicate_titles reads the living set — hot twins would be served twice (#38)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const a = store.store('# Same title\n\nBody one.', { kind: 'note' });
+    const b = store.store('# Same title\n\nBody two.', { kind: 'note' });
+    store.setHot(a, true);
+    store.setHot(b, true);
+    store.link(a, b, 'references');
+    const report = store.checkout();
+    assert.deepEqual(
+      report.findings.map((finding) => finding.check),
+      ['duplicate_titles'],
+    );
+    assert.match(report.findings[0]!.detail, new RegExp(a));
   } finally {
     cleanup();
   }
