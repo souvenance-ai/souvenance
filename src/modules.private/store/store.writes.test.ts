@@ -55,7 +55,6 @@ interface RawMemory {
   readonly metadata: string | null;
   readonly created_at: string;
   readonly status: string;
-  readonly hot: number;
 }
 
 function memoryRow(store: Store, id: string): RawMemory {
@@ -83,7 +82,7 @@ function edgesOf(store: Store, id: string): RawEdge[] {
 
 // --- store -----------------------------------------------------------------
 
-test('store: inserts a memory with UUID id, kind, metadata, born cold and active', () => {
+test('store: inserts a memory with UUID id, kind, metadata, born active and cold', () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store('hello world', { kind: 'note', metadata: { tags: ['a'] } });
@@ -94,8 +93,7 @@ test('store: inserts a memory with UUID id, kind, metadata, born cold and active
     assert.equal(memory.content, 'hello world');
     assert.equal(memory.kind, 'note', 'kind is a column — the required classification');
     assert.deepEqual(JSON.parse(memory.metadata!), { tags: ['a'] });
-    assert.equal(memory.status, 'active');
-    assert.equal(memory.hot, 0, 'a memory is born cold — the flag is earned via setHot');
+    assert.equal(memory.status, 'active', 'curation is a status, earned via setHot (#38)');
     assert.equal(memory.summary, null, 'a short content owes no summary');
   } finally {
     cleanup();
@@ -693,15 +691,19 @@ test('supersede: throws when old memory is not active', () => {
   }
 });
 
-test('supersede: the head inherits the source hot flag, the source cools', () => {
+test('supersede: a hot source transfers its status to the head, the source dies superseded', () => {
   const { store, cleanup } = tempStore();
   try {
     const oldId = store.store('a curated memory', { kind: 'note' });
     store.setHot(oldId, true);
     const newId = store.supersede(oldId, 'the revision');
 
-    assert.equal(memoryRow(store, newId).hot, 1, 'the head takes the flag over');
-    assert.equal(memoryRow(store, oldId).hot, 0, 'the source cools with its status');
+    assert.equal(memoryRow(store, newId).status, 'hot', 'the head takes the curation over');
+    assert.equal(
+      memoryRow(store, oldId).status,
+      'superseded',
+      'the source dies with its status — one column, no cooling mark to clear',
+    );
   } finally {
     cleanup();
   }
@@ -712,7 +714,7 @@ test('supersede: a cold source yields a cold head', () => {
   try {
     const oldId = store.store('a plain memory', { kind: 'note' });
     const newId = store.supersede(oldId, 'the revision');
-    assert.equal(memoryRow(store, newId).hot, 0);
+    assert.equal(memoryRow(store, newId).status, 'active');
   } finally {
     cleanup();
   }
@@ -873,8 +875,11 @@ test('deprecate: marks a memory as deprecated and cools it', () => {
     store.deprecate(id);
 
     const m = memoryRow(store, id);
-    assert.equal(m.status, 'deprecated');
-    assert.equal(m.hot, 0, 'a non-active memory is never hot');
+    assert.equal(
+      m.status,
+      'deprecated',
+      'the status just moves — cooling is free, no parallel mark to clear (#38)',
+    );
   } finally {
     cleanup();
   }
@@ -1020,7 +1025,7 @@ test('merge: metadata.kind is refused — the kind rides the column', () => {
   }
 });
 
-test('merge: the hot flag unions across sources, sources cool', () => {
+test('merge: the hot status unions across sources, sources die merged', () => {
   const { store, cleanup } = tempStore();
   try {
     const a = store.store('hot memory a', { kind: 'note' });
@@ -1028,9 +1033,9 @@ test('merge: the hot flag unions across sources, sources cool', () => {
     store.setHot(a, true);
     const mergedId = store.merge([a, b], 'the fusion');
 
-    assert.equal(memoryRow(store, mergedId).hot, 1, 'one hot source makes the fusion hot');
-    assert.equal(memoryRow(store, a).hot, 0, 'the source cools with its status');
-    assert.equal(memoryRow(store, b).hot, 0);
+    assert.equal(memoryRow(store, mergedId).status, 'hot', 'one hot source makes the fusion hot');
+    assert.equal(memoryRow(store, a).status, 'merged', 'the source dies with its status');
+    assert.equal(memoryRow(store, b).status, 'merged');
   } finally {
     cleanup();
   }
@@ -1042,7 +1047,7 @@ test('merge: all-cold sources yield a cold fusion', () => {
     const a = store.store('memory a', { kind: 'note' });
     const b = store.store('memory b', { kind: 'note' });
     const mergedId = store.merge([a, b], 'the fusion');
-    assert.equal(memoryRow(store, mergedId).hot, 0);
+    assert.equal(memoryRow(store, mergedId).status, 'active');
   } finally {
     cleanup();
   }
@@ -1106,14 +1111,19 @@ test('merge: throws when an original is not active', () => {
 
 // --- setHot ----------------------------------------------------------------
 
-test('setHot: flags an active memory, and unflags it', () => {
+test('setHot: the only reversible edge — active to hot, and back', () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store('a curated memory', { kind: 'note' });
     store.setHot(id, true);
-    assert.equal(memoryRow(store, id).hot, 1);
+    assert.equal(memoryRow(store, id).status, 'hot');
     store.setHot(id, false);
-    assert.equal(memoryRow(store, id).hot, 0);
+    assert.equal(memoryRow(store, id).status, 'active');
+    // The edge is a transition, not a toggle with memory: reheating an
+    // already-hot memory is a no-op, not an error.
+    store.setHot(id, true);
+    store.setHot(id, true);
+    assert.equal(memoryRow(store, id).status, 'hot');
   } finally {
     cleanup();
   }
@@ -1128,19 +1138,25 @@ test('setHot: throws on unknown id', () => {
   }
 });
 
-test('setHot: only an active memory can be hot', () => {
+test('setHot: only the living can transition — a terminal refuses both directions', () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store('content', { kind: 'note' });
     store.deprecate(id);
-    assert.throws(() => store.setHot(id, true), /cannot hot a memory with status 'deprecated'/);
+    assert.throws(() => store.setHot(id, true), /cannot setHot a memory with status 'deprecated'/);
+    assert.throws(() => store.setHot(id, false), /cannot setHot a memory with status 'deprecated'/);
 
     const oldId = store.store('a decision', { kind: 'note' });
     const newId = store.supersede(oldId, 'the revision');
-    assert.throws(() => store.setHot(oldId, true), /cannot hot a memory with status 'superseded'/);
-    // The head itself is fine.
+    assert.throws(
+      () => store.setHot(oldId, true),
+      /cannot setHot a memory with status 'superseded'/,
+    );
+    // The head itself is living — it heats, and cools back.
     store.setHot(newId, true);
-    assert.equal(memoryRow(store, newId).hot, 1);
+    assert.equal(memoryRow(store, newId).status, 'hot');
+    store.setHot(newId, false);
+    assert.equal(memoryRow(store, newId).status, 'active');
   } finally {
     cleanup();
   }

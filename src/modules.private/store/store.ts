@@ -7,7 +7,14 @@ import { migrate, SCHEMA_VERSION, schemaVersion } from './migration/migration.ts
 
 export type UUID = string;
 
-export type MemoryStatus = 'active' | 'superseded' | 'deprecated' | 'merged';
+/**
+ * The five-state machine — the single source of truth for a memory's life
+ * (#38): `active` is the living baseline, `hot` its curated sub-state (the
+ * machine's only reversible edge, setHot), and `superseded` /
+ * `deprecated` / `merged` are the terminals. The refusals operate on the
+ * LIVING set (`active` + `hot`); the terminals refuse every write gesture.
+ */
+export type MemoryStatus = 'active' | 'hot' | 'superseded' | 'deprecated' | 'merged';
 
 /**
  * The condensation ceiling: a memory longer than this owes its summary at
@@ -20,11 +27,13 @@ export const MAX_SUMMARY_LENGTH = 400;
 
 /**
  * The doctor's check count — the corruption family the audit reports
- * findings from (orphan_edges, invalid_metadata_json,
- * status_without_bridge, hot_without_active, fts_integrity,
- * file_permissions). Tests pin it as part of the report shape.
+ * findings from (orphan_edges, invalid_metadata_json, status_without_bridge,
+ * fts_integrity, file_permissions). Tests pin it as part of the report
+ * shape. The legacy sixth check (hot_without_active) retired with the hot
+ * column (#38): hot is a status now, and hot-on-a-terminal is
+ * unrepresentable.
  */
-export const DOCTOR_CHECK_COUNT = 6;
+export const DOCTOR_CHECK_COUNT = 5;
 
 /**
  * The checkout's check count — the consolidation gate the verdict reports
@@ -45,10 +54,11 @@ const FTS_REBUILD_HINT =
  * One record in a store: content, its kind (the required, free-vocabulary
  * classification — a column since v6, #31), its authored summary (the
  * condensation that lets checkin and search serve more memories per call —
- * owed when the content runs past the ceiling), metadata, a status, and
- * the hot flag — the curation mark that hands the memory to the checkin
- * ritual (#12). `hot` is earned after the fact (setHot), never at birth,
- * and survives only on an active memory.
+ * owed when the content runs past the ceiling), metadata, and a status —
+ * the five-state machine (#38). Curation is earned after the fact (setHot
+ * moves `active` to `hot`), never at birth, and survives only on the
+ * living: supersede transfers it to the head, merge unions it, every
+ * termination cools it.
  */
 export interface Memory {
   readonly id: UUID;
@@ -58,7 +68,6 @@ export interface Memory {
   readonly metadata: Record<string, unknown> | null;
   readonly created_at: string;
   readonly status: MemoryStatus;
-  readonly hot: boolean;
 }
 
 /**
@@ -197,8 +206,8 @@ export interface ListOptions {
   readonly limit?: number;
   readonly offset?: number;
   /**
-   * Include superseded/deprecated/merged memories — the --all surface
-   * (active-only by default).
+   * Include the terminals (superseded/deprecated/merged) — the --all
+   * surface (living-only by default: active + hot, #38).
    */
   readonly includeLegacy?: boolean;
   /**
@@ -226,7 +235,6 @@ export interface CheckinOptions {
 
 export interface Stats {
   readonly memories: number;
-  readonly hot_memories: number;
   readonly memories_by_status: Readonly<Record<string, number>>;
   readonly memories_by_kind: Readonly<Record<string, number>>;
   readonly edges: number;
@@ -238,7 +246,7 @@ export interface Stats {
  * shape. The block an agent's fresh session reads in one call.
  */
 export interface CheckinReport {
-  /** Active + hot memories, newest first, relations included. */
+  /** The hot memories (status 'hot'), newest first, relations included. */
   readonly hot: readonly MemoryWithRelations[];
   readonly stats: Stats;
 }
@@ -255,7 +263,6 @@ export type DoctorCheck =
   | 'orphan_edges'
   | 'invalid_metadata_json'
   | 'status_without_bridge'
-  | 'hot_without_active'
   | 'fts_integrity'
   | 'file_permissions';
 
@@ -405,7 +412,6 @@ interface MemoryRow {
   readonly metadata: string | null;
   readonly created_at: string;
   readonly status: string;
-  readonly hot: number;
 }
 
 /**
@@ -437,7 +443,6 @@ function parseMemoryRow(row: MemoryRow): Memory {
     metadata: parseRawMetadata(row.metadata),
     created_at: row.created_at,
     status: row.status as MemoryStatus,
-    hot: row.hot === 1,
   };
 }
 
@@ -626,20 +631,21 @@ export class Store {
 
   /**
    * The write verbs' shared pre-check: refuse an unknown id by name, then
-   * refuse any non-active status — supersede/merge/deprecate only ever
-   * touch the living. Returns the memory's hot flag AND its kind column:
-   * supersede transfers the flag to the head and inherits the kind from
-   * the source (unless reclassified); merge unions the flag across
-   * sources and reads every source's kind for the inheritance rule.
+   * refuse any terminal status — supersede/merge/deprecate only ever touch
+   * the living (`active` + `hot`, #38). Returns the memory's status AND
+   * its kind column: supersede transfers a hot source's status to the head
+   * and inherits the kind from the source (unless reclassified); merge
+   * unions the status across sources and reads every source's kind for the
+   * inheritance rule.
    */
-  #requireActive(id: string, verb: string): { hot: boolean; kind: string } {
-    const row = this.#db.prepare('SELECT status, hot, kind FROM memories WHERE id = ?').get(id) as
-      { status: MemoryStatus; hot: number; kind: string } | undefined;
+  #requireLiving(id: string, verb: string): { status: MemoryStatus; kind: string } {
+    const row = this.#db.prepare('SELECT status, kind FROM memories WHERE id = ?').get(id) as
+      { status: MemoryStatus; kind: string } | undefined;
     if (!row) throw new Error(`memory not found: ${id}`);
-    if (row.status !== 'active') {
+    if (row.status !== 'active' && row.status !== 'hot') {
       throw new Error(`cannot ${verb} a memory with status '${row.status}'`);
     }
-    return { hot: row.hot === 1, kind: row.kind };
+    return row;
   }
 
   /**
@@ -683,10 +689,10 @@ export class Store {
 
   /**
    * Store a memory: UUID id, its required kind (the free-vocabulary
-   * classification, #31), metadata JSON, born cold — the hot flag is
-   * earned after the fact (setHot), never at birth. The one-gesture
-   * relations land in the same transaction: the memory and its edges
-   * arrive together or not at all.
+   * classification, #31), metadata JSON, born active and cold — curation
+   * (the `hot` status) is earned after the fact (setHot), never at birth.
+   * The one-gesture relations land in the same transaction: the memory and
+   * its edges arrive together or not at all.
    */
   store(content: string, options: StoreOptions): string {
     this.#assertWritable();
@@ -720,8 +726,8 @@ export class Store {
    * CONTENT, not the relation set; the old memory keeps its edges as
    * provenance (addition-only, nothing moves). Explicit relations win over
    * inheritance, the same way explicit metadata overrides structural
-   * inheritance. The supersedes bridge lands old→new, the old memory is
-   * marked superseded, and its hot flag TRANSFERS to the head — the
+   * inheritance. The supersedes bridge lands old→new, the old memory dies
+   * `superseded`, and a hot source's status TRANSFERS to the head — the
    * revision replaces what checkin would have served.
    */
   supersede(oldId: string, content: string, options: SupersedeOptions = {}): string {
@@ -733,15 +739,23 @@ export class Store {
     const newId = randomUUID();
     const created_at = new Date().toISOString();
     this.#transaction(() => {
-      const { hot, kind: inheritedKind } = this.#requireActive(oldId, 'supersede');
+      const { status, kind: inheritedKind } = this.#requireLiving(oldId, 'supersede');
       const kind = options.kind ?? inheritedKind;
       const inherited = options.metadata ?? this.#structuralInherit([this.#readMeta(oldId)]);
       const metadata = inherited ? JSON.stringify(inherited) : null;
       this.#db
         .prepare(
-          'INSERT INTO memories (id, content, kind, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO memories (id, content, kind, summary, metadata, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(newId, content, kind, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
+        .run(
+          newId,
+          content,
+          kind,
+          options.summary ?? null,
+          metadata,
+          created_at,
+          status === 'hot' ? 'hot' : 'active',
+        );
       if (!options.relations?.length) {
         const inheritedEdges = this.#db
           .prepare('SELECT to_id, kind, metadata, created_at FROM edges WHERE from_id = ?')
@@ -769,9 +783,7 @@ export class Store {
         this.#insertRelations(newId, options.relations, created_at);
       }
       this.#insertEdge(oldId, newId, 'supersedes', null, created_at);
-      this.#db
-        .prepare("UPDATE memories SET status = 'superseded', hot = 0 WHERE id = ?")
-        .run(oldId);
+      this.#db.prepare("UPDATE memories SET status = 'superseded' WHERE id = ?").run(oldId);
     });
     return newId;
   }
@@ -782,9 +794,10 @@ export class Store {
    * when they disagree and `kind` is omitted, the provided `kind` wins
    * (#31: refuse, don't hide — a fusion never guesses its classification).
    * The structural metadata carries the tags unioned; each source keeps a
-   * `merges` bridge as provenance and is marked merged. The hot flag
-   * UNIONS across sources — if any source was headed for checkin, the
-   * fusion is. Sources cool: the flag lives only on active memories.
+   * `merges` bridge as provenance and dies `merged`. The hot status UNIONS
+   * across sources — if any source was headed for checkin, the fusion is.
+   * The curation is the fusion's now: a hot source heats it; none does,
+   * and the fusion stays active.
    */
   merge(ids: readonly string[], content: string, options: MergeOptions = {}): string {
     this.#assertWritable();
@@ -803,10 +816,10 @@ export class Store {
     this.#transaction(() => {
       const metadataList: Array<Record<string, unknown> | null> = [];
       const kinds = new Set<string>();
-      let hot = false;
+      let anySourceHot = false;
       for (const id of ids) {
-        const { hot: isHot, kind } = this.#requireActive(id, 'merge');
-        if (isHot) hot = true;
+        const { status, kind } = this.#requireLiving(id, 'merge');
+        if (status === 'hot') anySourceHot = true;
         kinds.add(kind);
         metadataList.push(this.#readMeta(id));
       }
@@ -825,12 +838,20 @@ export class Store {
       const metadata = inherited ? JSON.stringify(inherited) : null;
       this.#db
         .prepare(
-          'INSERT INTO memories (id, content, kind, summary, metadata, created_at, hot) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO memories (id, content, kind, summary, metadata, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(newId, content, kind, options.summary ?? null, metadata, created_at, hot ? 1 : 0);
+        .run(
+          newId,
+          content,
+          kind,
+          options.summary ?? null,
+          metadata,
+          created_at,
+          anySourceHot ? 'hot' : 'active',
+        );
       for (const id of ids) {
         this.#insertEdge(id, newId, 'merges', null, created_at);
-        this.#db.prepare("UPDATE memories SET status = 'merged', hot = 0 WHERE id = ?").run(id);
+        this.#db.prepare("UPDATE memories SET status = 'merged' WHERE id = ?").run(id);
       }
     });
     return newId;
@@ -838,35 +859,39 @@ export class Store {
 
   /**
    * End a memory deliberately: deprecated stays in the store (history is
-   * never rewritten), cools, and refuses any further write gesture. There
-   * is no delete — persistent memory obliges. The check and the update
-   * share the transaction: under concurrency, exactly one deprecate wins.
+   * never rewritten) and refuses any further write gesture. Cooling is
+   * free — the status just moves, no parallel mark to clear. There is no
+   * delete — persistent memory obliges. The check and the update share the
+   * transaction: under concurrency, exactly one deprecate wins.
    */
   deprecate(id: string): void {
     this.#assertWritable();
     this.#transaction(() => {
-      this.#requireActive(id, 'deprecate');
-      this.#db.prepare("UPDATE memories SET status = 'deprecated', hot = 0 WHERE id = ?").run(id);
+      this.#requireLiving(id, 'deprecate');
+      this.#db.prepare("UPDATE memories SET status = 'deprecated' WHERE id = ?").run(id);
     });
   }
 
   /**
-   * The one non-graph mutation: curation. Only an ACTIVE memory can be
-   * hot — the flag hands the memory to the checkin ritual (#12), and a
-   * superseded/deprecated/merged memory must not resurface through it.
-   * Status transitions cool the memory; this is the only way back. The
-   * check and the write share the transaction: a racing supersede and the
-   * curation resolve to exactly one winner.
+   * The one non-graph mutation: curation. The state machine's only
+   * reversible edge — `active` ↔ `hot` (#38): a hot memory is an active
+   * one the checkin ritual serves (#12), and a
+   * superseded/deprecated/merged memory must not resurface through it, so
+   * the edge exists only among the living. The check and the write share
+   * the transaction: a racing supersede and the curation resolve to
+   * exactly one winner.
    */
   setHot(id: string, hot: boolean): void {
     this.#assertWritable();
     this.#transaction(() => {
       const row = this.#readStatus(id);
       if (!row) throw new Error(`memory not found: ${id}`);
-      if (row !== 'active') {
-        throw new Error(`cannot hot a memory with status '${row}'`);
+      if (row !== 'active' && row !== 'hot') {
+        throw new Error(`cannot setHot a memory with status '${row}'`);
       }
-      this.#db.prepare('UPDATE memories SET hot = ? WHERE id = ?').run(hot ? 1 : 0, id);
+      this.#db
+        .prepare('UPDATE memories SET status = ? WHERE id = ?')
+        .run(hot ? 'hot' : 'active', id);
     });
   }
 
@@ -900,15 +925,16 @@ export class Store {
 
   /**
    * Remove one edge — a CORRECTION among the living: both endpoints must
-   * be active, which makes the supersedes/merges bridges untouchable by
-   * construction (they leave a non-active source). Persistent memory
-   * obliges: the graph only grows, except to fix a just-made mistake.
-   * The pair (from, to) identifies the edge when it carries a single kind;
-   * with several kinds on the same directed pair the removal is refused
-   * with the candidate list — refuse, don't hide. kind omitted + edges on
-   * the REVERSE pair surfaces them: the transposed-uuid mistake gets a
-   * direction hint, not a bare not-found. Removes exactly one edge row —
-   * no cascade, no update; a wrong edge is recreated right, never edited.
+   * be living (active or hot, #38), which makes the supersedes/merges
+   * bridges untouchable by construction (they leave a non-living source).
+   * Persistent memory obliges: the graph only grows, except to fix a
+   * just-made mistake. The pair (from, to) identifies the edge when it
+   * carries a single kind; with several kinds on the same directed pair
+   * the removal is refused with the candidate list — refuse, don't hide.
+   * kind omitted + edges on the REVERSE pair surfaces them: the
+   * transposed-uuid mistake gets a direction hint, not a bare not-found.
+   * Removes exactly one edge row — no cascade, no update; a wrong edge is
+   * recreated right, never edited.
    */
   unlink(fromId: string, toId: string, kind?: string): void {
     this.#assertWritable();
@@ -925,10 +951,10 @@ export class Store {
       if (!fromStatus) throw new Error(`memory not found: ${fromId}`);
       const toStatus = this.#readStatus(toId);
       if (!toStatus) throw new Error(`memory not found: ${toId}`);
-      if (fromStatus !== 'active') {
+      if (fromStatus !== 'active' && fromStatus !== 'hot') {
         throw new Error(`cannot unlink a memory with status '${fromStatus}'`);
       }
-      if (toStatus !== 'active') {
+      if (toStatus !== 'active' && toStatus !== 'hot') {
         throw new Error(`cannot unlink a memory with status '${toStatus}'`);
       }
 
@@ -1030,7 +1056,7 @@ export class Store {
   #expandToNode(id: string, depth: number, visited: Set<string>): MemoryWithRelations | null {
     const row = this.#db
       .prepare(
-        'SELECT id, content, kind, summary, metadata, created_at, status, hot FROM memories WHERE id = ?',
+        'SELECT id, content, kind, summary, metadata, created_at, status FROM memories WHERE id = ?',
       )
       .get(id) as unknown as MemoryRow | undefined;
     if (!row) return null;
@@ -1040,9 +1066,10 @@ export class Store {
   /**
    * Search memories by FTS5 match, ranked by pure bm25 — search wants to
    * search everywhere: no weight, recency or access terms (the legacy
-   * ranking factors died with their columns). Active-only unless
-   * includeLegacy, narrowed by the where grant, limit 20 by default.
-   * Hits are projected nodes (depth-1 relations included).
+   * ranking factors died with their columns). Living-only unless
+   * includeLegacy (`active` + `hot`, #38), narrowed by the where grant,
+   * limit 20 by default. Hits are projected nodes (depth-1 relations
+   * included).
    *
    * A failed MATCH is not a refusal: when the failure comes from FTS5
    * glue in the query itself (dotted numerics, hyphenated/colonated
@@ -1054,12 +1081,12 @@ export class Store {
     if (!query) throw new Error('query must be non-empty');
     const limit = normaliseLimit(options.limit, 20);
     let sql =
-      'SELECT m.id, m.content, m.kind, m.summary, m.metadata, m.created_at, m.status, m.hot,' +
+      'SELECT m.id, m.content, m.kind, m.summary, m.metadata, m.created_at, m.status,' +
       ' (bm25(memories_fts)) AS rank' +
       ' FROM memories_fts f JOIN memories m ON m.rowid = f.rowid' +
       ' WHERE memories_fts MATCH ?';
     if (options.includeLegacy !== true) {
-      sql += ` AND m.status = 'active'`;
+      sql += ` AND m.status IN ('active', 'hot')`;
     }
     if (options.where) {
       sql += ` AND ${options.where}`;
@@ -1088,18 +1115,18 @@ export class Store {
   /**
    * The checkin ritual in one call — the deep-module home the HTTP
    * /checkin endpoint and the MCP checkin tool will both serve. The hot
-   * block replaces the legacy kind blocks: active + hot memories served
-   * as projected nodes, relations included (zero drill-in), newest first.
-   * No cap by default — the limit opt guides attention without ever
-   * dropping anything silently. Reads stay reads.
+   * block replaces the legacy kind blocks: the hot memories (status
+   * 'hot', #38) served as projected nodes, relations included (zero
+   * drill-in), newest first. No cap by default — the limit opt guides
+   * attention without ever dropping anything silently. Reads stay reads.
    */
   checkin(options: CheckinOptions = {}): CheckinReport {
     // LIMIT -1 is SQLite's no-cap form: the hot set serves whole.
     const limit = normaliseLimit(options.limit, -1);
     const rows = this.#db
       .prepare(
-        'SELECT id, content, kind, summary, metadata, created_at, status, hot FROM memories' +
-          " WHERE status = 'active' AND hot = 1 ORDER BY created_at DESC LIMIT ?",
+        'SELECT id, content, kind, summary, metadata, created_at, status FROM memories' +
+          " WHERE status = 'hot' ORDER BY created_at DESC LIMIT ?",
       )
       .all(limit) as unknown as MemoryRow[];
     return {
@@ -1109,19 +1136,19 @@ export class Store {
   }
 
   /**
-   * List memories as projected nodes: newest first, active-only unless
-   * includeLegacy, paged by limit/offset, narrowed by the where grant.
-   * Every row carries its depth-1 relations block — list is the
-   * set-serving verb, and the projection rides free next to the content
-   * read.
+   * List memories as projected nodes: newest first, living-only unless
+   * includeLegacy (`active` + `hot`, #38), paged by limit/offset,
+   * narrowed by the where grant. Every row carries its depth-1 relations
+   * block — list is the set-serving verb, and the projection rides free
+   * next to the content read.
    */
   list(options: ListOptions = {}): MemoryWithRelations[] {
     const limit = normaliseLimit(options.limit, 20);
     const offset = normaliseOffset(options.offset);
-    let sql = 'SELECT id, content, kind, summary, metadata, created_at, status, hot FROM memories';
+    let sql = 'SELECT id, content, kind, summary, metadata, created_at, status FROM memories';
     const conditions: string[] = [];
     if (options.includeLegacy !== true) {
-      conditions.push("status = 'active'");
+      conditions.push("status IN ('active', 'hot')");
     }
     if (options.where) {
       conditions.push(options.where);
@@ -1140,7 +1167,9 @@ export class Store {
    * any reads return the same report. The by-kind ledger reads the
    * COLUMN over every status — every memory appears, kind is a required
    * column (kind-less memories no longer exist; the migration marks the
-   * rows it could not classify 'unclassified', #31).
+   * rows it could not classify 'unclassified', #31). Hot reads through
+   * `memories_by_status['hot']` — the same convenience precedent as the
+   * retired `active_memories` (#38).
    */
   stats(): Stats {
     const memories_by_status: Record<string, number> = {};
@@ -1166,9 +1195,6 @@ export class Store {
     }
     return {
       memories: this.#count('SELECT count(*) AS c FROM memories'),
-      hot_memories: this.#count(
-        "SELECT count(*) AS c FROM memories WHERE status = 'active' AND hot = 1",
-      ),
       memories_by_status,
       memories_by_kind,
       edges: this.#count('SELECT count(*) AS c FROM edges'),
@@ -1201,7 +1227,7 @@ export class Store {
    */
   doctor(): DoctorReport {
     const memories = this.#db
-      .prepare('SELECT id, content, kind, summary, metadata, created_at, status, hot FROM memories')
+      .prepare('SELECT id, content, kind, summary, metadata, created_at, status FROM memories')
       .all() as unknown as MemoryRow[];
     const edges = this.#db
       .prepare('SELECT from_id, to_id, kind, metadata, created_at FROM edges')
@@ -1271,19 +1297,8 @@ export class Store {
       }
     }
 
-    // The v6 invariant — hot = 1 only while status = 'active'. Every
-    // status transition cools in the same UPDATE and setHot refuses
-    // non-active memories, so only hand SQL can heat a terminated one.
-    for (const memory of memories) {
-      if (memory.hot && memory.status !== 'active') {
-        findings.push({
-          check: 'hot_without_active',
-          id: memory.id,
-          detail: `hot flag set on a memory with status '${memory.status}'`,
-          hint: 'clear it with direct SQL (UPDATE memories SET hot = 0 ...) — no verb re-heats a terminated memory',
-        });
-      }
-    }
+    // (The hot-without-active audit retired with the hot column, #38: hot
+    // is a status now — the contradiction it caught is unrepresentable.)
 
     findings.push(...this.#checkFts());
 
@@ -1338,49 +1353,55 @@ export class Store {
    */
   checkout(): CheckoutReport {
     const memories = this.#db
-      .prepare('SELECT id, content, kind, summary, metadata, created_at, status, hot FROM memories')
+      .prepare('SELECT id, content, kind, summary, metadata, created_at, status FROM memories')
       .all() as unknown as MemoryRow[];
     const edges = this.#db
       .prepare('SELECT from_id, to_id, kind, metadata, created_at FROM edges')
       .all() as unknown as RelationRow[];
     const findings: CheckoutFinding[] = [];
+    const isLiving = (memory: MemoryRow): boolean =>
+      memory.status === 'active' || memory.status === 'hot';
 
     // A register nobody curated is a ghost — the next checkin serves an
     // empty hot block and a fresh session reads nothing. Silent when there
-    // is nothing to serve (no memories, no actives).
-    const activeCount = memories.filter((memory) => memory.status === 'active').length;
-    const hotCount = memories.filter((memory) => memory.hot && memory.status === 'active').length;
-    if (activeCount > 0 && hotCount === 0) {
+    // is nothing to serve (no memories, no living).
+    const livingCount = memories.filter(isLiving).length;
+    const hotCount = memories.filter((memory) => memory.status === 'hot').length;
+    if (livingCount > 0 && hotCount === 0) {
       findings.push({
         check: 'no_hot',
-        detail: `${activeCount} active memories and none hot — the next checkin serves an empty block`,
+        detail: `${livingCount} living memories and none hot — the next checkin serves an empty block`,
         hint: 'setHot the memories a fresh session must read — the register owes curation',
       });
     }
 
-    // Edge-less actives while other actives exist to relate to — the
-    // session-end nudge to explore the memory before closing. One finding,
-    // ids aggregated; a one-memory store is an atom, not an island.
+    // Edge-less living memories while other living ones exist to relate to
+    // — the session-end nudge to explore the memory before closing. The
+    // gate reads the LIVING set: a hot memory owes a relation as much as
+    // an active one (the widening is deliberate, #38). One finding, ids
+    // aggregated; a one-memory store is an atom, not an island.
     const isolated = memories.filter(
       (memory) =>
-        memory.status === 'active' &&
+        isLiving(memory) &&
         !edges.some((edge) => edge.from_id === memory.id || edge.to_id === memory.id),
     );
-    if (isolated.length > 0 && activeCount >= 2) {
+    if (isolated.length > 0 && livingCount >= 2) {
       const ids = isolated.map((memory) => memory.id).join(', ');
       findings.push({
         check: 'isolated_active',
-        detail: `${isolated.length} active memories hold no edges in either direction: ${ids}`,
+        detail: `${isolated.length} living memories hold no edges in either direction: ${ids}`,
         hint: 'link them to related memories, merge or supersede what duplicates, deprecate what was a mistake — a register of islands is unconsolidated',
       });
     }
 
-    // Two active memories sharing the exact first-line markdown heading
+    // Two living memories sharing the exact first-line markdown heading
     // are candidates to merge — text-level, self-contained, no kind.
-    // Heading-less memories never group.
+    // Heading-less memories never group. Hot counts here too: two hot
+    // memories with one title are exactly the fusion checkin would serve
+    // twice (the widening is deliberate, #38).
     const titleGroups = new Map<string, string[]>();
     for (const memory of memories) {
-      if (memory.status !== 'active') continue;
+      if (!isLiving(memory)) continue;
       const firstLine = memory.content.split('\n')[0]!.trim();
       if (!firstLine.startsWith('#')) continue;
       const group = titleGroups.get(firstLine) ?? [];
@@ -1391,7 +1412,7 @@ export class Store {
       if (ids.length > 1) {
         findings.push({
           check: 'duplicate_titles',
-          detail: `${ids.length} active memories share the title "${title}": ${ids.join(', ')}`,
+          detail: `${ids.length} living memories share the title "${title}": ${ids.join(', ')}`,
           hint: 'merge the group, or supersede with a distinct title',
         });
       }

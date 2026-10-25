@@ -62,12 +62,17 @@ ALTER TABLE memories RENAME COLUMN read_count TO access_count;
 
 /**
  * The refonte: `weight` and `access_count` are dropped (agents never leaned
- * on them) and `hot` takes over curation. The exact basket the legacy
+ * on them) and curation becomes a STATUS: `hot` joins the five-state
+ * machine (`active | hot | superseded | deprecated | merged`) instead of
+ * riding a parallel flag column (#38 — a sub-state that changes three
+ * verbs' behavior deserves to be a state). The exact basket the legacy
  * recover served — active directives, summaries, and OPEN objectives —
- * arrives hot, so an existing individual checks in with the same memories
- * it always did, now by explicit flag instead of kind convention. `summary`
- * joins as the authored condensation of long content (null on migrated
- * rows — the obligation starts with the refonte's writes).
+ * arrives with `status = 'hot'`, so an existing individual checks in with
+ * the same memories it always did. The flag column is never added: a v5
+ * store has no `hot` column to drop (the flag was the refonte's own
+ * invention), and the contradiction it policed (hot on a terminal status)
+ * becomes unrepresentable in one column — the doctor's hot_without_active
+ * check retires with it.
  *
  * `kind` reshapes v6 IN PLACE (the version never shipped — the release
  * fires on merge to main, so no store outside this repo has applied the
@@ -86,11 +91,10 @@ ALTER TABLE memories RENAME COLUMN read_count TO access_count;
  * never silently rewritten past corruption (dev ruling, 2026-10-25).
  */
 const V6 = `
-ALTER TABLE memories ADD COLUMN hot INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE memories ADD COLUMN summary TEXT;
 ALTER TABLE memories ADD COLUMN kind TEXT NOT NULL DEFAULT 'unclassified';
 UPDATE memories SET kind = COALESCE(json_extract(metadata, '$.kind'), 'unclassified');
-UPDATE memories SET hot = 1
+UPDATE memories SET status = 'hot'
  WHERE status = 'active'
    AND json_extract(metadata, '$.kind') IN ('directive', 'summary', 'objective')
    AND (json_extract(metadata, '$.kind') != 'objective'

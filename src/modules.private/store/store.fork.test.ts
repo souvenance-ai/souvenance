@@ -48,10 +48,10 @@ test('fork is an exact copy — nothing added, nothing missing', () => {
       const all = child.list({ includeLegacy: true, limit: 100 });
       assert.equal(all.length, 3);
       assert.equal(child.list({ where: "kind = 'summary'", limit: 10 }).length, 1);
-      // The authored summary and the earned hot flag travel with the copy.
+      // The authored summary and the earned hot status travel with the copy.
       const served = child.get(summary)!;
       assert.equal(served.summary, 'the old handoff');
-      assert.equal(served.hot, true);
+      assert.equal(served.status, 'hot');
       // FTS index travels with the copy.
       const hits = child.search('kiwi');
       assert.equal(hits.length, 1);

@@ -78,7 +78,8 @@ test('the fresh store is at SCHEMA_VERSION, with the v6 column set', () => {
       const columns = (db.prepare('PRAGMA table_info(memories)').all() as { name: string }[]).map(
         (column) => column.name,
       );
-      assert.ok(columns.includes('hot'), 'the v6 curation flag exists');
+      assert.ok(!columns.includes('hot'), 'the hot column died — hot is a status (#38)');
+      assert.ok(columns.includes('status'), 'the status column carries the five-state machine');
       assert.ok(columns.includes('summary'), 'the v6 authored condensation exists');
       assert.ok(columns.includes('kind'), 'the v6 classification column exists (#31)');
       assert.ok(!columns.includes('weight'), 'weight was dropped by the refonte');
@@ -238,8 +239,10 @@ test('v6 migration: the legacy recover basket arrives hot, kind becomes a column
   const path = join(dir, 'memory.db');
   try {
     // Seed a live store, then rewind it to the v5 shape (weight +
-    // access_count present, hot/summary/kind gone, the kind back inside
+    // access_count present, summary/kind gone, the kind back inside
     // metadata, version 5) so reopening runs the real V6 migration path.
+    // No hot column to drop: the flag was the refonte's own invention —
+    // a v5 store never carried it (#38).
     const seed = Store.open({ dbPath: path });
     const directive = seed.store('a directive', { kind: 'directive' });
     const summary = seed.store('a summary', { kind: 'summary' });
@@ -260,7 +263,6 @@ test('v6 migration: the legacy recover basket arrives hot, kind becomes a column
     raw.exec(`
         UPDATE memories SET metadata = json_set(COALESCE(metadata, '{}'), '$.kind', kind);
         ALTER TABLE memories DROP COLUMN kind;
-        ALTER TABLE memories DROP COLUMN hot;
         ALTER TABLE memories DROP COLUMN summary;
         ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 0.5;
         ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;
@@ -281,13 +283,13 @@ test('v6 migration: the legacy recover basket arrives hot, kind becomes a column
     // The migration's effect is file state — a raw connection reads it.
     const db = probe(path);
     try {
-      const rows = db.prepare('SELECT id, hot, kind, metadata FROM memories').all() as {
+      const rows = db.prepare('SELECT id, status, kind, metadata FROM memories').all() as {
         id: string;
-        hot: number;
+        status: string;
         kind: string;
         metadata: string | null;
       }[];
-      const hot = Object.fromEntries(rows.map((row) => [row.id, row.hot]));
+      const statusOf = Object.fromEntries(rows.map((row) => [row.id, row.status]));
       const kindOf = Object.fromEntries(rows.map((row) => [row.id, row.kind]));
       const metadataOf = Object.fromEntries(
         rows.map((row) => [row.id, JSON.parse(row.metadata ?? 'null') as unknown]),
@@ -308,18 +310,29 @@ test('v6 migration: the legacy recover basket arrives hot, kind becomes a column
       assert.deepEqual(metadataOf[closedObjective], { state: 'done' });
       assert.equal('kind' in (metadataOf[note] as object), false);
 
-      // The legacy recover basket arrives hot (read BEFORE the strip).
-      assert.equal(hot[directive], 1, 'an active directive arrives hot');
-      assert.equal(hot[summary], 1, 'an active summary arrives hot');
-      assert.equal(hot[openObjective], 1, 'an open objective arrives hot');
-      assert.equal(hot[closedObjective] ?? 0, 0, 'a closed objective does not');
-      assert.equal(hot[note] ?? 0, 0, 'a plain note does not');
-      assert.equal(hot[supersededDirective] ?? 0, 0, 'a superseded directive does not');
+      // The legacy recover basket arrives hot — as a STATUS, read BEFORE
+      // the strip (#38).
+      assert.equal(statusOf[directive], 'hot', 'an active directive arrives hot');
+      assert.equal(statusOf[summary], 'hot', 'an active summary arrives hot');
+      assert.equal(statusOf[openObjective], 'hot', 'an open objective arrives hot');
+      assert.equal(statusOf[closedObjective], 'active', 'a closed objective stays active');
+      assert.equal(statusOf[note], 'active', 'a plain note stays active');
+      assert.equal(
+        statusOf[supersededDirective],
+        'superseded',
+        'a superseded directive stays superseded — the basket only heats the living',
+      );
+      assert.equal(
+        statusOf[replacement],
+        'hot',
+        'the head of a retired directive IS the current directive — the basket serves it',
+      );
 
       const columns = (db.prepare('PRAGMA table_info(memories)').all() as { name: string }[]).map(
         (column) => column.name,
       );
       assert.ok(columns.includes('kind'));
+      assert.ok(!columns.includes('hot'), 'no hot column ever existed at v6 (#38)');
       assert.ok(!columns.includes('weight'));
       assert.ok(!columns.includes('access_count'));
     } finally {
@@ -342,7 +355,6 @@ test('v6 migration: a row without a metadata kind arrives unclassified', () => {
     raw.exec(`
       UPDATE memories SET metadata = json_set(COALESCE(metadata, '{}'), '$.kind', kind);
       ALTER TABLE memories DROP COLUMN kind;
-      ALTER TABLE memories DROP COLUMN hot;
       ALTER TABLE memories DROP COLUMN summary;
       ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 0.5;
       ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;
@@ -386,7 +398,6 @@ test('v6 migration: hand-corrupted metadata refuses the migration — refuse, do
     raw.exec(`
       UPDATE memories SET metadata = json_set(COALESCE(metadata, '{}'), '$.kind', kind);
       ALTER TABLE memories DROP COLUMN kind;
-      ALTER TABLE memories DROP COLUMN hot;
       ALTER TABLE memories DROP COLUMN summary;
       ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 0.5;
       ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;

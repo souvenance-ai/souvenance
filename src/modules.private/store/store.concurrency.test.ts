@@ -51,6 +51,8 @@ const CHILD_SCRIPT = `
       process.stdout.write(store.merge([rest[0], rest[1]], rest[2]));
     } else if (operation === 'deprecate') {
       store.deprecate(rest[0]);
+    } else if (operation === 'sethot') {
+      store.setHot(rest[0], rest[1] === 'true');
     } else {
       throw new Error('unknown operation: ' + operation);
     }
@@ -272,9 +274,70 @@ test(
         if (child.status === 0) successes++;
       }
 
-      // assertActive and the UPDATE share one transaction: the rest fail on
-      // the non-active status instead of overwriting it.
+      // assertLiving and the UPDATE share one transaction: the rest fail on
+      // the non-living status instead of overwriting it.
       assert.equal(successes, 1, `exactly 1 deprecate should succeed, got ${successes}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'concurrency: setHot racing a supersede — the state machine holds (#38)',
+  { timeout: 120_000 },
+  () => {
+    const dir = tempDir();
+    const dbPath = join(dir, 'memory.db');
+    try {
+      const targetId = spawnChild(dbPath, 'store', 'curate me or replace me').stdout;
+
+      // The curation's check-then-write is ONE transaction, so the
+      // interleavings resolve to consistent ends, never to corruption:
+      // setHot first and the supersede legitimately follows (the transfer —
+      // the head is born hot); the supersede first and the curation refuses
+      // a terminal. What must NEVER land is the broken interleaving — a
+      // superseded memory heated in place, its head left cold.
+      const operations = [
+        spawnChild(dbPath, 'sethot', targetId, 'true'),
+        spawnChild(dbPath, 'supersede', targetId, 'the revision'),
+        spawnChild(dbPath, 'supersede', targetId, 'another revision'),
+        spawnChild(dbPath, 'supersede', targetId, 'a third revision'),
+      ];
+      const setHotWins = operations[0]!.status === 0 ? 1 : 0;
+      const supersedeWins = operations.slice(1).filter((child) => child.status === 0).length;
+
+      // The supersedes are mutually exclusive with each other; and a
+      // first-to-lock always succeeds, so at least one gesture landed.
+      assert.ok(supersedeWins <= 1, `at most 1 supersede wins, got ${supersedeWins}`);
+      assert.ok(setHotWins + supersedeWins >= 1, 'at least one gesture succeeds');
+
+      const store = Store.open({ dbPath });
+      try {
+        const heads = store.list({
+          includeLegacy: true,
+          where: "content LIKE '%revision'",
+        });
+        assert.equal(heads.length, supersedeWins, 'one head per winning supersede');
+        const target = store.get(targetId)!;
+        if (supersedeWins === 1) {
+          assert.equal(
+            target.status,
+            'superseded',
+            'never a hot superseded memory — the single-column machine holds (#38)',
+          );
+          assert.equal(
+            heads[0]!.status,
+            setHotWins === 1 ? 'hot' : 'active',
+            'the transfer follows the race order',
+          );
+        } else {
+          assert.equal(target.status, 'hot', 'the curation won: the target stays hot');
+          assert.equal(setHotWins, 1);
+        }
+      } finally {
+        store.close();
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

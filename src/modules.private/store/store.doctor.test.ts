@@ -31,12 +31,14 @@ function probe(store: Store): DatabaseSync {
 }
 
 /**
- * The healthy baseline: two linked actives, one of them hot. The doctor
- * reports zero findings on it. Every defect test starts here and applies
- * exactly one defect — so the expected findings array is the check's full
- * contract, not just its presence. Hotness is irrelevant to the audit
- * (no_hot is the checkout's gate); the fixture keeps one hot memory as the
- * hot_without_active negative control.
+ * The healthy baseline: two linked living memories, one of them hot. The
+ * doctor reports zero findings on it. Every defect test starts here and
+ * applies exactly one defect — so the expected findings array is the
+ * check's full contract, not just its presence. Curation is irrelevant to
+ * the audit (no_hot is the checkout's gate); the fixture keeps one hot
+ * memory because hot is a status now (#38) — a state the audit never
+ * judges. The retired hot_without_active check has no negative control to
+ * keep: hot-on-a-terminal is unrepresentable in one column.
  */
 function healthyPair(store: Store): { a: string; b: string } {
   const a = store.store('# Memory alpha\n\nBody alpha.\n\nKeywords: alpha, test.', {
@@ -151,44 +153,23 @@ test('doctor: status_without_bridge finds a hand-edited superseded status', () =
   }
 });
 
-test('doctor: hot_without_active finds the v6 invariant broken by hand SQL', () => {
+test('doctor: the transitions keep the state machine coherent — terminations stay silent', () => {
   const { store, cleanup } = tempStore();
   try {
     const { a } = healthyPair(store);
-    // The verbs cannot produce this: every status transition cools in the
-    // same UPDATE. Hand SQL can.
-    const raw = probe(store);
-    raw.prepare("UPDATE memories SET status = 'deprecated' WHERE id = ?").run(a);
-    raw.close();
-    let report = store.doctor();
-    assert.equal(report.findings.length, 1);
-    assert.equal(report.findings[0]!.check, 'hot_without_active');
-    assert.equal(report.findings[0]!.id, a);
-
-    // Repair via SQL (no verb re-heats a terminated memory) — then green.
-    const repair = probe(store);
-    repair.prepare('UPDATE memories SET hot = 0 WHERE id = ?').run(a);
-    repair.close();
-    report = store.doctor();
-    assert.equal(report.healthy, true);
-    assert.deepEqual(report.findings, []);
-  } finally {
-    cleanup();
-  }
-});
-
-test('doctor: the transitions keep the invariant — cooled terminations stay silent', () => {
-  const { store, cleanup } = tempStore();
-  try {
-    const { a } = healthyPair(store);
-    // a is the hot one: supersede transfers the flag to the head, keeping
-    // hot-on-active at the transition.
+    // a is the hot one: supersede transfers the status to the head, keeping
+    // the curation among the living at the transition.
     const head = store.supersede(a, '# Memory alpha-prime\n\nBody rewritten.');
-    assert.equal(store.get(head)!.hot, true, 'supersede transferred the hot flag to the head');
+    assert.equal(
+      store.get(head)!.status,
+      'hot',
+      'supersede transferred the hot status to the head',
+    );
     let report = store.doctor();
     assert.equal(report.healthy, true);
 
-    // And the termination cools — the flag never survives a status change.
+    // And the termination cools for free — the status just moves; there is
+    // no parallel mark to clear and no contradiction left to catch.
     store.deprecate(head);
     report = store.doctor();
     assert.equal(report.healthy, true, 'the audit is blind to curation — no_hot is the gate');

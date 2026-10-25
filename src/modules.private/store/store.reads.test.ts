@@ -32,7 +32,7 @@ function tempStore(): { store: Store; cleanup: () => void } {
 
 // --- get --------------------------------------------------------------------
 
-test('get: returns a memory by id — content, kind, parsed metadata, hot as boolean', () => {
+test('get: returns a memory by id — content, kind, parsed metadata, status', () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store('hello world', { kind: 'note', metadata: { tags: ['a'] } });
@@ -43,9 +43,12 @@ test('get: returns a memory by id — content, kind, parsed metadata, hot as boo
     assert.equal(memory!.kind, 'note', 'kind is a first-class column of the served memory');
     assert.deepEqual(memory!.metadata, { tags: ['a'] });
     assert.ok(typeof memory!.created_at === 'string');
-    assert.equal(memory!.hot, false);
     assert.equal(memory!.summary, null);
-    assert.equal(memory!.status, 'active');
+    assert.equal(
+      memory!.status,
+      'active',
+      'born active — hot is a status, earned via setHot (#38)',
+    );
   } finally {
     cleanup();
   }
@@ -437,7 +440,6 @@ test('stats: zeros on a fresh store', () => {
   try {
     const report = store.stats();
     assert.equal(report.memories, 0);
-    assert.equal(report.hot_memories, 0);
     assert.equal(report.edges, 0);
     assert.deepEqual(report.memories_by_status, {});
     assert.deepEqual(report.memories_by_kind, {});
@@ -447,7 +449,7 @@ test('stats: zeros on a fresh store', () => {
   }
 });
 
-test('stats: memories_by_status, hot_memories and memories_by_kind', () => {
+test('stats: memories_by_status (hot serves through it) and memories_by_kind', () => {
   const { store, cleanup } = tempStore();
   try {
     const a = store.store('memory a', { kind: 'note' });
@@ -462,12 +464,17 @@ test('stats: memories_by_status, hot_memories and memories_by_kind', () => {
 
     const report = store.stats();
     assert.equal(report.memories, 6, 'the supersede head adds a row');
-    assert.equal(report.hot_memories, 1);
     assert.deepEqual(report.memories_by_status, {
-      active: 4,
+      active: 3,
       deprecated: 1,
+      hot: 1,
       superseded: 1,
     });
+    assert.equal(
+      report.memories_by_status['hot'],
+      1,
+      'the curation count reads through the status ledger — hot_memories is gone (#38)',
+    );
     // 100% coverage: the column ledger counts EVERY memory over every
     // status — the superseded log's head still counts log, and the
     // 'unclassified' debt appears like any other kind (#31).
@@ -543,7 +550,7 @@ test('read-only: every read verb serves the store as its owner left it', () => {
       assert.equal(report.hot.length, 1);
       assert.equal(report.hot[0]!.id, found[0]!.id, 'the hot block serves through ro too');
 
-      assert.equal(store.stats().hot_memories, 1);
+      assert.equal(store.stats().memories_by_status['hot'], 1);
     } finally {
       store.close();
     }

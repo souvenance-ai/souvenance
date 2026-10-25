@@ -60,7 +60,7 @@ test('checkin: serves the curated hot block, newest first, relations included', 
   }
 });
 
-test('checkin: the flag is the whole basket — nothing implicit surfaces', () => {
+test('checkin: the hot status is the whole basket — nothing implicit surfaces', () => {
   const { store, cleanup } = tempStore();
   try {
     // kind never implies hot: an uncurated directive is invisible.
@@ -133,7 +133,7 @@ test('checkin: an empty store serves an empty block and zero stats', () => {
     const report = store.checkin();
     assert.deepEqual(report.hot, []);
     assert.equal(report.stats.memories, 0);
-    assert.equal(report.stats.hot_memories, 0);
+    assert.equal(report.stats.memories_by_status['hot'] ?? 0, 0);
     assert.equal(report.stats.edges, 0);
   } finally {
     cleanup();
