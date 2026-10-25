@@ -34,15 +34,15 @@ function probe(store: Store): DatabaseSync {
  * The healthy baseline: two linked actives, one of them hot. The checkout
  * reports zero findings on it. Every defect test starts here and applies
  * exactly one debt — so the expected findings array is the gate's full
- * contract, not just its presence. The kinds are free tags (fixtures use
- * them for flavour, never because a check reads them).
+ * contract, not just its presence. The kind column is fixture flavour:
+ * no check reads it — the gate is kind-free (#31).
  */
 function healthyPair(store: Store): { a: string; b: string } {
   const a = store.store('# Memory alpha\n\nBody alpha.\n\nKeywords: alpha, test.', {
-    metadata: { kind: 'note' },
+    kind: 'note',
   });
   const b = store.store('# Memory beta\n\nBody beta.\n\nKeywords: beta, test.', {
-    metadata: { kind: 'note' },
+    kind: 'note',
   });
   store.link(a, b, 'references');
   store.setHot(a, true);
@@ -104,7 +104,7 @@ test('checkout: no_hot stays silent when there is nothing to serve', () => {
   const { store, cleanup } = tempStore();
   try {
     // A store of corpses only: actives 0, so nothing is owed to checkin.
-    const doomed = store.store('born to die', { metadata: { kind: 'note' } });
+    const doomed = store.store('born to die', { kind: 'note' });
     store.deprecate(doomed);
     let report = store.checkout();
     assert.equal(report.healthy, true, 'only-corpses store: nothing to serve, no finding');
@@ -130,7 +130,7 @@ test('checkout: isolated_active — islands owe consolidation once others exist'
     const { a, b } = healthyPair(store);
     // Two unlinked actives: exactly one aggregated finding listing both.
     const c = store.store('# Memory gamma\n\nBody gamma.\n\nKeywords: gamma.', {
-      metadata: { kind: 'note' },
+      kind: 'note',
     });
     store.setHot(b, false);
     store.setHot(c, true);
@@ -153,7 +153,7 @@ test('checkout: isolated_active stays silent for a one-memory store (an atom)', 
   const { store, cleanup } = tempStore();
   try {
     const single = store.store('# Alone\n\nNothing to relate to yet.', {
-      metadata: { kind: 'note' },
+      kind: 'note',
     });
     store.setHot(single, true);
     const report = store.checkout();
@@ -170,7 +170,7 @@ test('checkout: duplicate_titles groups identical active headings only', () => {
     const { a, b } = healthyPair(store);
     // Positive: a third active with the exact same first-line heading as a.
     const c = store.store('# Memory alpha\n\nBody clone.\n\nKeywords: clone.', {
-      metadata: { kind: 'note' },
+      kind: 'note',
     });
     store.link(b, c, 'references');
     store.setHot(c, true);
@@ -199,10 +199,10 @@ test('checkout: heading-less actives never group as duplicates', () => {
   try {
     const { a, b } = healthyPair(store);
     const plainOne = store.store('Plain first line one.\n\nKeywords: d.', {
-      metadata: { kind: 'note' },
+      kind: 'note',
     });
     const plainTwo = store.store('Plain first line two.\n\nKeywords: e.', {
-      metadata: { kind: 'note' },
+      kind: 'note',
     });
     store.link(plainOne, plainTwo, 'references');
     const report = store.checkout();
@@ -223,10 +223,10 @@ test('checkout: all-or-nothing — pay every consolidation debt, then the light 
     // the same title twice. The verdict names each consolidation debt —
     // and the all-or-nothing contract blocks on any of them.
     const first = store.store('# The plan\n\nDo the thing.\n\nKeywords: plan.', {
-      metadata: { kind: 'note' },
+      kind: 'note',
     });
     const second = store.store('# The plan\n\nDo it better.\n\nKeywords: plan.', {
-      metadata: { kind: 'note' },
+      kind: 'note',
     });
     const report = store.checkout();
     assert.equal(report.healthy, false);

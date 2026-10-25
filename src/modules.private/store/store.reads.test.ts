@@ -32,14 +32,15 @@ function tempStore(): { store: Store; cleanup: () => void } {
 
 // --- get --------------------------------------------------------------------
 
-test('get: returns a memory by id — content, parsed metadata, hot as boolean', () => {
+test('get: returns a memory by id — content, kind, parsed metadata, hot as boolean', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('hello world', { metadata: { tags: ['a'] } });
+    const id = store.store('hello world', { kind: 'note', metadata: { tags: ['a'] } });
     const memory = store.get(id);
     assert.ok(memory);
     assert.equal(memory!.id, id);
     assert.equal(memory!.content, 'hello world');
+    assert.equal(memory!.kind, 'note', 'kind is a first-class column of the served memory');
     assert.deepEqual(memory!.metadata, { tags: ['a'] });
     assert.ok(typeof memory!.created_at === 'string');
     assert.equal(memory!.hot, false);
@@ -54,11 +55,11 @@ test('get: returns the authored summary and null metadata as null', () => {
   const { store, cleanup } = tempStore();
   try {
     const long = 'x'.repeat(401);
-    const id = store.store(long, { summary: 'condensed' });
+    const id = store.store(long, { kind: 'note', summary: 'condensed' });
     const memory = store.get(id);
     assert.equal(memory!.summary, 'condensed');
 
-    const bare = store.store('no metadata');
+    const bare = store.store('no metadata', { kind: 'note' });
     assert.equal(store.get(bare)!.metadata, null);
   } finally {
     cleanup();
@@ -77,9 +78,9 @@ test('get: returns null for unknown id', () => {
 test('get: projects the graph — relations { out, in }, raw rows at depth 1', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a', { metadata: { kind: 'note' } });
-    const b = store.store('memory b', { metadata: { kind: 'note' } });
-    const c = store.store('memory c', { metadata: { kind: 'note' } });
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'note' });
+    const c = store.store('memory c', { kind: 'note' });
     store.link(a, b, 'references'); // b: an incoming edge
     store.link(b, c, 'extends'); // b: an outgoing edge
 
@@ -100,7 +101,7 @@ test('get: projects the graph — relations { out, in }, raw rows at depth 1', (
 test('get: an unlinked memory carries empty relations arrays', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('an island', { metadata: { kind: 'note' } });
+    const id = store.store('an island', { kind: 'note' });
     const memory = store.get(id)!;
     assert.deepEqual(memory.relations, { out: [], in: [] });
   } finally {
@@ -111,7 +112,7 @@ test('get: an unlinked memory carries empty relations arrays', () => {
 test('get: restores corrupted metadata JSON as null metadata', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('hand-corrupted metadata');
+    const id = store.store('hand-corrupted metadata', { kind: 'note' });
     // Corruption via the raw probe — the outside-the-library vantage.
     const raw = probe(store);
     raw.prepare('UPDATE memories SET metadata = ? WHERE id = ?').run('{not json', id);
@@ -134,14 +135,16 @@ function advanceMs(): void {
 
 function seed(store: Store): { a: string; b: string; c: string } {
   const a = store.store('The quick brown fox jumps', {
-    metadata: { tags: ['animal'], kind: 'note' },
+    kind: 'note',
+    metadata: { tags: ['animal'] },
   });
   advanceMs();
   const b = store.store('Hello world from the fox', {
-    metadata: { tags: ['greeting'], kind: 'log' },
+    kind: 'log',
+    metadata: { tags: ['greeting'] },
   });
   advanceMs();
-  const c = store.store('A lazy dog sleeps', { metadata: { tags: ['animal'], kind: 'note' } });
+  const c = store.store('A lazy dog sleeps', { kind: 'note', metadata: { tags: ['animal'] } });
   store.link(a, b, 'references');
   store.link(b, c, 'extends');
   return { a, b, c };
@@ -183,7 +186,7 @@ test('list: default limit is 20', () => {
   const { store, cleanup } = tempStore();
   try {
     for (let i = 0; i < 25; i++) {
-      store.store(`memory ${i}`);
+      store.store(`memory ${i}`, { kind: 'note' });
     }
     assert.equal(store.list().length, 20);
   } finally {
@@ -191,14 +194,14 @@ test('list: default limit is 20', () => {
   }
 });
 
-test('list: applies the where filter on metadata', () => {
+test('list: applies the where filter on the row — the kind column since v6', () => {
   const { store, cleanup } = tempStore();
   try {
     seed(store);
-    const results = store.list({ where: `metadata->>'$.kind' = 'note'` });
+    const results = store.list({ where: `kind = 'note'` });
     assert.equal(results.length, 2);
     for (const result of results) {
-      assert.equal(result.metadata?.['kind'], 'note');
+      assert.equal(result.kind, 'note');
     }
   } finally {
     cleanup();
@@ -208,8 +211,8 @@ test('list: applies the where filter on metadata', () => {
 test('list: defaults to active memories only — includeLegacy widens', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
-    store.store('memory b');
+    const a = store.store('memory a', { kind: 'note' });
+    store.store('memory b', { kind: 'note' });
     store.deprecate(a);
     assert.equal(store.list().length, 1);
     assert.equal(store.list()[0]!.status, 'active');
@@ -268,6 +271,7 @@ test('search: returns ranked FTS5 results', () => {
     for (const result of results) {
       assert.ok('id' in result);
       assert.ok('content' in result);
+      assert.ok('kind' in result, 'the kind column rides every served node');
       assert.ok('summary' in result);
       assert.ok('metadata' in result);
       assert.ok('created_at' in result);
@@ -311,7 +315,7 @@ test('search: default limit is 20', () => {
   const { store, cleanup } = tempStore();
   try {
     for (let i = 0; i < 25; i++) {
-      store.store(`memory number ${i} with fox`);
+      store.store(`memory number ${i} with fox`, { kind: 'note' });
     }
     assert.equal(store.search('fox').length, 20);
   } finally {
@@ -319,13 +323,13 @@ test('search: default limit is 20', () => {
   }
 });
 
-test('search: applies the where filter on metadata', () => {
+test('search: applies the where filter on the row — the kind column since v6', () => {
   const { store, cleanup } = tempStore();
   try {
     seed(store);
-    const results = store.search('fox', { where: `metadata->>'$.kind' = 'note'` });
+    const results = store.search('fox', { where: `kind = 'note'` });
     assert.equal(results.length, 1);
-    assert.equal(results[0]!.metadata?.['kind'], 'note');
+    assert.equal(results[0]!.kind, 'note');
   } finally {
     cleanup();
   }
@@ -343,8 +347,8 @@ test('search: throws on empty query', () => {
 test('search: deserializes metadata JSON — null stays null', () => {
   const { store, cleanup } = tempStore();
   try {
-    store.store('searchable text', { metadata: { tags: ['x'] } });
-    store.store('more searchable text');
+    store.store('searchable text', { kind: 'note', metadata: { tags: ['x'] } });
+    store.store('more searchable text', { kind: 'note' });
     const results = store.search('searchable');
     assert.equal(results.length, 2);
     const tagged = results.find((result) => result.metadata !== null)!;
@@ -359,7 +363,7 @@ test('search: deserializes metadata JSON — null stays null', () => {
 test('search: defaults to active memories only — includeLegacy widens', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('searchable fox content');
+    const a = store.store('searchable fox content', { kind: 'note' });
     store.supersede(a, 'searchable fox replacement');
     const results = store.search('fox');
     assert.equal(results.length, 1);
@@ -376,8 +380,10 @@ test('search: defaults to active memories only — includeLegacy widens', () => 
 test('search: sanitizes FTS5 syntax errors as a fallback', () => {
   const { store, cleanup } = tempStore();
   try {
-    store.store('weight meaning: importance scale 0.9 vs 0.5, a 0.9 weight is a constraint');
-    store.store('token glue: better-sqlite3 and node:sqlite identifiers');
+    store.store('weight meaning: importance scale 0.9 vs 0.5, a 0.9 weight is a constraint', {
+      kind: 'note',
+    });
+    store.store('token glue: better-sqlite3 and node:sqlite identifiers', { kind: 'note' });
 
     // dotted numerics — failed with 'fts5: syntax error near "."' before the fix
     const dotted = store.search('0.9 vs 0.5');
@@ -396,8 +402,8 @@ test('search: sanitizes FTS5 syntax errors as a fallback', () => {
     );
 
     // valid queries keep working untouched (fallback must never run on them)
-    store.store('apple fruit');
-    store.store('banana fruit');
+    store.store('apple fruit', { kind: 'note' });
+    store.store('banana fruit', { kind: 'note' });
     const either = store.search('apple OR banana');
     assert.equal(either.length, 2, 'OR operator preserved');
     const phrase = store.search('"apple fruit"');
@@ -444,23 +450,32 @@ test('stats: zeros on a fresh store', () => {
 test('stats: memories_by_status, hot_memories and memories_by_kind', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a', { metadata: { kind: 'note' } });
-    const b = store.store('memory b', { metadata: { kind: 'log' } });
-    const c = store.store('memory c', { metadata: { kind: 'note' } });
-    store.store('a kind-less memory'); // counts, but never appears in the kind ledger
+    const a = store.store('memory a', { kind: 'note' });
+    const b = store.store('memory b', { kind: 'log' });
+    const c = store.store('memory c', { kind: 'note' });
+    const d = store.store('memory d', { kind: 'note' });
+    store.store('an unclassified memory', { kind: 'unclassified' }); // the migration's marked debt
     store.deprecate(a);
     store.supersede(b, 'memory b replacement');
     store.setHot(c, true);
+    assert.ok(d);
 
     const report = store.stats();
-    assert.equal(report.memories, 5);
+    assert.equal(report.memories, 6, 'the supersede head adds a row');
     assert.equal(report.hot_memories, 1);
     assert.deepEqual(report.memories_by_status, {
-      active: 3,
+      active: 4,
       deprecated: 1,
       superseded: 1,
     });
-    assert.deepEqual(report.memories_by_kind, { log: 2, note: 2 });
+    // 100% coverage: the column ledger counts EVERY memory over every
+    // status — the superseded log's head still counts log, and the
+    // 'unclassified' debt appears like any other kind (#31).
+    assert.deepEqual(report.memories_by_kind, {
+      log: 2,
+      note: 3,
+      unclassified: 1,
+    });
   } finally {
     cleanup();
   }
@@ -494,10 +509,10 @@ function seededStorePath(): { path: string; cleanup: () => void } {
   const path = join(dir, 'memory.db');
   const store = Store.open({ dbPath: path });
   const a = store.store('alpha decision', {
-    metadata: { kind: 'decision' },
+    kind: 'decision',
     summary: 'alpha condensed',
   });
-  const b = store.store('beta note', { metadata: { kind: 'note' } });
+  const b = store.store('beta note', { kind: 'note' });
   store.link(a, b, 'references');
   store.setHot(a, true);
   store.close();

@@ -25,13 +25,11 @@ function tempStore(): { store: Store; dir: string; cleanup: () => void } {
 test('fork is an exact copy — nothing added, nothing missing', () => {
   const { store, dir, cleanup } = tempStore();
   try {
-    const alpha = store.store('The alpha memory: FTS needle kiwi.', { metadata: { kind: 'note' } });
-    const beta = store.store('The beta memory: another doc for the graph.', {
-      metadata: { kind: 'note' },
-    });
+    const alpha = store.store('The alpha memory: FTS needle kiwi.', { kind: 'note' });
+    const beta = store.store('The beta memory: another doc for the graph.', { kind: 'note' });
     store.link(alpha, beta, 'references');
     const summary = store.store('An old handoff summary from the origin.', {
-      metadata: { kind: 'summary' },
+      kind: 'summary',
       summary: 'the old handoff',
     });
     store.setHot(summary, true);
@@ -49,7 +47,7 @@ test('fork is an exact copy — nothing added, nothing missing', () => {
       // forker, via memory store in the child.
       const all = child.list({ includeLegacy: true, limit: 100 });
       assert.equal(all.length, 3);
-      assert.equal(child.list({ where: "metadata->>'$.kind' = 'summary'", limit: 10 }).length, 1);
+      assert.equal(child.list({ where: "kind = 'summary'", limit: 10 }).length, 1);
       // The authored summary and the earned hot flag travel with the copy.
       const served = child.get(summary)!;
       assert.equal(served.summary, 'the old handoff');
@@ -70,18 +68,18 @@ test('fork refuses an existing target without force; force gives the exact copy 
   const { store, dir, cleanup } = tempStore();
   try {
     const target = join(dir, 'fork.db');
-    store.store('A memory worth keeping.', { metadata: { kind: 'note' } });
+    store.store('A memory worth keeping.', { kind: 'note' });
     store.fork(target);
     assert.throws(() => store.fork(target), /already exists/);
 
     // The refresh path: force wipes the old file (and its WAL sidecars)
     // and snapshots the current state — still exactly the origin's rows.
-    store.store('Added before the refresh.', { metadata: { kind: 'note' } });
+    store.store('Added before the refresh.', { kind: 'note' });
     const result = store.fork(target, { force: true });
     const child = Store.open({ dbPath: result.path });
     try {
       assert.equal(child.list({ includeLegacy: true, limit: 100 }).length, 2);
-      assert.equal(child.list({ where: "metadata->>'$.kind' = 'summary'", limit: 10 }).length, 0);
+      assert.equal(child.list({ where: "kind = 'summary'", limit: 10 }).length, 0);
     } finally {
       child.close();
     }
@@ -93,22 +91,22 @@ test('fork refuses an existing target without force; force gives the exact copy 
 test('the child is an individual: writes to either side never touch the other', () => {
   const { store, dir, cleanup } = tempStore();
   try {
-    store.store('Origin memory.', { metadata: { kind: 'note' } });
+    store.store('Origin memory.', { kind: 'note' });
     const result = store.fork(join(dir, 'fork.db'));
 
     const child = Store.open({ dbPath: result.path });
     try {
-      child.store("The child's own lived experience.", { metadata: { kind: 'note' } });
-      child.deprecate(child.list({ where: "metadata->>'$.kind' = 'note'", limit: 1 })[0]!.id);
+      child.store("The child's own lived experience.", { kind: 'note' });
+      child.deprecate(child.list({ where: "kind = 'note'", limit: 1 })[0]!.id);
     } finally {
       child.close();
     }
     // Parent unchanged: still one note + no deprecated statuses.
-    const notes = store.list({ where: "metadata->>'$.kind' = 'note'", limit: 10 });
+    const notes = store.list({ where: "kind = 'note'", limit: 10 });
     assert.equal(notes.length, 1);
     assert.equal(notes[0]!.status, 'active');
     // And a later parent write never appears in the already-born child.
-    store.store('Born after the fork.', { metadata: { kind: 'note' } });
+    store.store('Born after the fork.', { kind: 'note' });
     const child2 = Store.open({ dbPath: result.path });
     try {
       assert.equal(
@@ -128,7 +126,7 @@ test('the child is an individual: writes to either side never touch the other', 
 test('fork works from a read-only open — an archive is forked without waking it', () => {
   const { store, dir, cleanup } = tempStore();
   try {
-    store.store('Archived memory.', { metadata: { kind: 'note' } });
+    store.store('Archived memory.', { kind: 'note' });
     store.close();
 
     const archive = Store.open({ dbPath: join(dir, 'memory.db'), readOnly: true });
@@ -153,7 +151,7 @@ test('fork works from a read-only open — an archive is forked without waking i
 test('fork captures WAL-committed writes immediately — no checkpoint needed', () => {
   const { store, dir, cleanup } = tempStore();
   try {
-    store.store('Committed into the WAL, copied anyway.', { metadata: { kind: 'note' } });
+    store.store('Committed into the WAL, copied anyway.', { kind: 'note' });
     const result = store.fork(join(dir, 'fork.db'));
     const child = Store.open({ dbPath: result.path });
     try {

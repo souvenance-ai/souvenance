@@ -40,10 +40,10 @@ function probe(store: Store): DatabaseSync {
  */
 function healthyPair(store: Store): { a: string; b: string } {
   const a = store.store('# Memory alpha\n\nBody alpha.\n\nKeywords: alpha, test.', {
-    metadata: { kind: 'note' },
+    kind: 'note',
   });
   const b = store.store('# Memory beta\n\nBody beta.\n\nKeywords: beta, test.', {
-    metadata: { kind: 'note' },
+    kind: 'note',
   });
   store.link(a, b, 'references');
   store.setHot(a, true);
@@ -204,7 +204,7 @@ test('doctor: fts_integrity finds drift and the SQL rebuild repairs it', () => {
     // A third memory keeps b linked, so the only defect below is the index:
     // hand-deleting a cascades its edges, but b still holds c -> b.
     const c = store.store('# Memory gamma\n\nBody gamma.\n\nKeywords: gamma.', {
-      metadata: { kind: 'note' },
+      kind: 'note',
     });
     store.link(c, b, 'references');
     // Corrupt like a hand edit: delete bypassing the FTS delete trigger,

@@ -80,6 +80,7 @@ test('the fresh store is at SCHEMA_VERSION, with the v6 column set', () => {
       );
       assert.ok(columns.includes('hot'), 'the v6 curation flag exists');
       assert.ok(columns.includes('summary'), 'the v6 authored condensation exists');
+      assert.ok(columns.includes('kind'), 'the v6 classification column exists (#31)');
       assert.ok(!columns.includes('weight'), 'weight was dropped by the refonte');
       assert.ok(!columns.includes('access_count'), 'the read-signal column was dropped');
     } finally {
@@ -158,11 +159,15 @@ test('FTS5 stays in sync: insert, update, delete', () => {
     const raw = probe(store.dbPath);
     try {
       raw
-        .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
-        .run('a1', 'hello world', null, new Date().toISOString());
+        .prepare(
+          'INSERT INTO memories (id, content, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run('a1', 'hello world', 'note', null, new Date().toISOString());
       raw
-        .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
-        .run('a2', 'goodbye cruel world', null, new Date().toISOString());
+        .prepare(
+          'INSERT INTO memories (id, content, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run('a2', 'goodbye cruel world', 'note', null, new Date().toISOString());
 
       const match = raw
         .prepare(
@@ -202,11 +207,15 @@ test('FK cascade: deleting a memory removes its edges', () => {
     try {
       const now = new Date().toISOString();
       raw
-        .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
-        .run('a1', 'one', null, now);
+        .prepare(
+          'INSERT INTO memories (id, content, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run('a1', 'one', 'note', null, now);
       raw
-        .prepare('INSERT INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)')
-        .run('a2', 'two', null, now);
+        .prepare(
+          'INSERT INTO memories (id, content, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run('a2', 'two', 'note', null, now);
       raw
         .prepare(
           'INSERT INTO edges (from_id, to_id, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -224,44 +233,46 @@ test('FK cascade: deleting a memory removes its edges', () => {
   }
 });
 
-test('v6 migration: the legacy recover basket arrives hot, dead columns dropped', () => {
+test('v6 migration: the legacy recover basket arrives hot, kind becomes a column, dead columns dropped', () => {
   const dir = tempDir();
   const path = join(dir, 'memory.db');
   try {
     // Seed a live store, then rewind it to the v5 shape (weight +
-    // access_count present, hot gone, version 5) so reopening runs the real
-    // V6 migration path.
+    // access_count present, hot/summary/kind gone, the kind back inside
+    // metadata, version 5) so reopening runs the real V6 migration path.
     const seed = Store.open({ dbPath: path });
-    const directive = seed.store('a directive', { metadata: { kind: 'directive' } });
-    const summary = seed.store('a summary', { metadata: { kind: 'summary' } });
+    const directive = seed.store('a directive', { kind: 'directive' });
+    const summary = seed.store('a summary', { kind: 'summary' });
     const openObjective = seed.store('an open objective', {
-      metadata: { kind: 'objective', state: 'open' },
+      kind: 'objective',
+      metadata: { state: 'open' },
     });
     const closedObjective = seed.store('a closed objective', {
-      metadata: { kind: 'objective', state: 'done' },
+      kind: 'objective',
+      metadata: { state: 'done' },
     });
-    const note = seed.store('a plain note', { metadata: { kind: 'note' } });
-    const supersededDirective = seed.store('a retired directive', {
-      metadata: { kind: 'directive' },
-    });
-    seed.supersede(supersededDirective, 'the replacement directive');
+    const note = seed.store('a plain note', { kind: 'note' });
+    const supersededDirective = seed.store('a retired directive', { kind: 'directive' });
+    const replacement = seed.supersede(supersededDirective, 'the replacement directive');
     seed.close();
 
     const raw = new DatabaseSync(path);
     raw.exec(`
-      ALTER TABLE memories DROP COLUMN hot;
-      ALTER TABLE memories DROP COLUMN summary;
-      ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 0.5;
-      ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;
-      DELETE FROM schema_version WHERE version >= 5;
-      INSERT INTO schema_version (version, applied_at) VALUES (5, '2026-01-01T00:00:00.000Z');
-    `);
+        UPDATE memories SET metadata = json_set(COALESCE(metadata, '{}'), '$.kind', kind);
+        ALTER TABLE memories DROP COLUMN kind;
+        ALTER TABLE memories DROP COLUMN hot;
+        ALTER TABLE memories DROP COLUMN summary;
+        ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 0.5;
+        ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;
+        DELETE FROM schema_version WHERE version >= 5;
+        INSERT INTO schema_version (version, applied_at) VALUES (5, '2026-01-01T00:00:00.000Z');
+      `);
     raw.close();
 
     const migrated = Store.open({ dbPath: path });
     try {
       // And the migrated store is writable again (the refonte surface).
-      const id = migrated.store('post-migration write');
+      const id = migrated.store('post-migration write', { kind: 'note' });
       assert.ok(id);
     } finally {
       migrated.close();
@@ -270,14 +281,34 @@ test('v6 migration: the legacy recover basket arrives hot, dead columns dropped'
     // The migration's effect is file state — a raw connection reads it.
     const db = probe(path);
     try {
-      const hot = Object.fromEntries(
-        (
-          db.prepare('SELECT id, hot FROM memories').all() as {
-            id: string;
-            hot: number;
-          }[]
-        ).map((memory) => [memory.id, memory.hot]),
+      const rows = db.prepare('SELECT id, hot, kind, metadata FROM memories').all() as {
+        id: string;
+        hot: number;
+        kind: string;
+        metadata: string | null;
+      }[];
+      const hot = Object.fromEntries(rows.map((row) => [row.id, row.hot]));
+      const kindOf = Object.fromEntries(rows.map((row) => [row.id, row.kind]));
+      const metadataOf = Object.fromEntries(
+        rows.map((row) => [row.id, JSON.parse(row.metadata ?? 'null') as unknown]),
       );
+
+      // The backfill: kind is a column, sourced from the metadata tag.
+      assert.equal(kindOf[directive], 'directive');
+      assert.equal(kindOf[summary], 'summary');
+      assert.equal(kindOf[openObjective], 'objective');
+      assert.equal(kindOf[closedObjective], 'objective');
+      assert.equal(kindOf[note], 'note');
+      assert.equal(kindOf[supersededDirective], 'directive');
+      assert.equal(kindOf[replacement], 'directive', 'the head inherited the source kind');
+
+      // The strip: metadata.kind is gone from every row — one source of
+      // truth from v6 on (no divergence invariant, no doctor check).
+      assert.deepEqual(metadataOf[openObjective], { state: 'open' }, 'kind stripped, state kept');
+      assert.deepEqual(metadataOf[closedObjective], { state: 'done' });
+      assert.equal('kind' in (metadataOf[note] as object), false);
+
+      // The legacy recover basket arrives hot (read BEFORE the strip).
       assert.equal(hot[directive], 1, 'an active directive arrives hot');
       assert.equal(hot[summary], 1, 'an active summary arrives hot');
       assert.equal(hot[openObjective], 1, 'an open objective arrives hot');
@@ -288,10 +319,97 @@ test('v6 migration: the legacy recover basket arrives hot, dead columns dropped'
       const columns = (db.prepare('PRAGMA table_info(memories)').all() as { name: string }[]).map(
         (column) => column.name,
       );
+      assert.ok(columns.includes('kind'));
       assert.ok(!columns.includes('weight'));
       assert.ok(!columns.includes('access_count'));
     } finally {
       db.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('v6 migration: a row without a metadata kind arrives unclassified', () => {
+  const dir = tempDir();
+  const path = join(dir, 'memory.db');
+  try {
+    const seed = Store.open({ dbPath: path });
+    const note = seed.store('a plain note', { kind: 'note' });
+    seed.close();
+
+    const raw = new DatabaseSync(path);
+    raw.exec(`
+      UPDATE memories SET metadata = json_set(COALESCE(metadata, '{}'), '$.kind', kind);
+      ALTER TABLE memories DROP COLUMN kind;
+      ALTER TABLE memories DROP COLUMN hot;
+      ALTER TABLE memories DROP COLUMN summary;
+      ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 0.5;
+      ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;
+      DELETE FROM schema_version WHERE version >= 5;
+      INSERT INTO schema_version (version, applied_at) VALUES (5, '2026-01-01T00:00:00.000Z');
+    `);
+    // The genuine v5 shape of an untagged row: no kind anywhere. The
+    // backfill marks the debt; reclassifying it is a supersede (the
+    // `summary = null` precedent).
+    raw
+      .prepare("UPDATE memories SET metadata = json_remove(metadata, '$.kind') WHERE id = ?")
+      .run(note);
+    raw.close();
+
+    const migrated = Store.open({ dbPath: path });
+    try {
+      const memory = migrated.get(note)!;
+      assert.equal(memory.kind, 'unclassified', 'the untagged row arrives marked');
+      // The rewind's COALESCE round-trip (kind → metadata) leaves an empty
+      // object behind once the strip removes the key — {} , not null.
+      assert.deepEqual(memory.metadata, {});
+      const stats = migrated.stats();
+      assert.deepEqual(stats.memories_by_kind, { unclassified: 1 });
+    } finally {
+      migrated.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('v6 migration: hand-corrupted metadata refuses the migration — refuse, don\u2019t hide', () => {
+  const dir = tempDir();
+  const path = join(dir, 'memory.db');
+  try {
+    const seed = Store.open({ dbPath: path });
+    seed.store('a plain note', { kind: 'note' });
+    seed.close();
+
+    const raw = new DatabaseSync(path);
+    raw.exec(`
+      UPDATE memories SET metadata = json_set(COALESCE(metadata, '{}'), '$.kind', kind);
+      ALTER TABLE memories DROP COLUMN kind;
+      ALTER TABLE memories DROP COLUMN hot;
+      ALTER TABLE memories DROP COLUMN summary;
+      ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 0.5;
+      ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;
+      DELETE FROM schema_version WHERE version >= 5;
+      INSERT INTO schema_version (version, applied_at) VALUES (5, '2026-01-01T00:00:00.000Z');
+    `);
+    raw.prepare('UPDATE memories SET metadata = ?').run('{not json');
+    raw.close();
+
+    // The backfill and the strip read metadata through the json functions,
+    // so the corrupted row fails the migration: the store's truth is never
+    // silently rewritten past corruption (dev ruling, 2026-10-25). The
+    // ROLLBACK leaves the store at v5 — the operator repairs via SQL or
+    // restores a backup, the doctor's vocabulary stays intact.
+    assert.throws(() => Store.open({ dbPath: path }), /malformed JSON/);
+    const after = probe(path);
+    try {
+      const version = (
+        after.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }
+      ).v;
+      assert.equal(version, 5, 'the failed migration rolled back');
+    } finally {
+      after.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -372,12 +490,12 @@ test('every write verb refuses on a read-only store', () => {
   const path = join(dir, 'memory.db');
   try {
     const readWrite = Store.open({ dbPath: path });
-    const a = readWrite.store('memory a');
-    const b = readWrite.store('memory b');
+    const a = readWrite.store('memory a', { kind: 'note' });
+    const b = readWrite.store('memory b', { kind: 'note' });
     readWrite.close();
     const readOnlyStore = Store.open({ dbPath: path, readOnly: true });
     try {
-      assert.throws(() => readOnlyStore.store('new content'), /read-only/);
+      assert.throws(() => readOnlyStore.store('new content', { kind: 'note' }), /read-only/);
       assert.throws(() => readOnlyStore.link(a, b, 'references'), /read-only/);
       assert.throws(() => readOnlyStore.unlink(a, b), /read-only/);
       assert.throws(() => readOnlyStore.deprecate(a), /read-only/);

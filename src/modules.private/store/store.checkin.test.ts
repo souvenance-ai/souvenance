@@ -30,11 +30,12 @@ test('checkin: serves the curated hot block, newest first, relations included', 
   const { store, cleanup } = tempStore();
   try {
     const a = store.store('standing directive', {
-      metadata: { kind: 'note', tags: ['context'] },
+      kind: 'note',
+      metadata: { tags: ['context'] },
       summary: 'the directive, condensed',
     });
     advanceMs();
-    const b = store.store('another hot note');
+    const b = store.store('another hot note', { kind: 'note' });
     advanceMs();
     store.setHot(a, true);
     store.setHot(b, true);
@@ -62,14 +63,14 @@ test('checkin: serves the curated hot block, newest first, relations included', 
 test('checkin: the flag is the whole basket — nothing implicit surfaces', () => {
   const { store, cleanup } = tempStore();
   try {
-    // kind never implies hot: an unsetHot directive is invisible.
-    store.store('a cold directive', { metadata: { kind: 'directive' } });
+    // kind never implies hot: an uncurated directive is invisible.
+    store.store('a cold directive', { kind: 'directive' });
     // deprecation cools.
-    const cooled = store.store('a cooled directive', { metadata: { kind: 'directive' } });
+    const cooled = store.store('a cooled directive', { kind: 'directive' });
     store.setHot(cooled, true);
     store.deprecate(cooled);
     // supersede transfers: the head arrives hot, the tail cools.
-    const stale = store.store('a stale head');
+    const stale = store.store('a stale head', { kind: 'note' });
     store.setHot(stale, true);
     const head = store.supersede(stale, 'the revision');
 
@@ -85,9 +86,9 @@ test('checkin: the flag is the whole basket — nothing implicit surfaces', () =
 test('checkin: merge unions the hot curation', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('memory a');
+    const a = store.store('memory a', { kind: 'note' });
     store.setHot(a, true);
-    const b = store.store('memory b');
+    const b = store.store('memory b', { kind: 'note' });
     const head = store.merge([a, b], 'the fusion');
     assert.deepEqual(
       store.checkin().hot.map((m) => m.id),
@@ -104,7 +105,7 @@ test('checkin: no cap by default — the limit opt guides attention', () => {
     const ids: string[] = [];
     for (let i = 0; i < 5; i++) {
       advanceMs();
-      ids.push(store.store(`hot memory ${i}`));
+      ids.push(store.store(`hot memory ${i}`, { kind: 'note' }));
       store.setHot(ids[i]!, true);
     }
     assert.equal(store.checkin().hot.length, 5);

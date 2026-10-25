@@ -32,7 +32,7 @@ const CHILD_SCRIPT = `
     if (operation === 'gated-store') {
       const gate = Number.parseInt(rest[0], 10);
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, gate - Date.now())));
-      process.stdout.write(store.store(rest[1]));
+      process.stdout.write(store.store(rest[1], { kind: 'note' }));
     } else if (operation === 'gated-supersede') {
       const gate = Number.parseInt(rest[0], 10);
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, gate - Date.now())));
@@ -42,7 +42,7 @@ const CHILD_SCRIPT = `
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, gate - Date.now())));
       store.unlink(rest[1], rest[2], rest[3]);
     } else if (operation === 'store') {
-      process.stdout.write(store.store(rest[0]));
+      process.stdout.write(store.store(rest[0], { kind: 'note' }));
     } else if (operation === 'link') {
       store.link(rest[0], rest[1], rest[2]);
     } else if (operation === 'supersede') {

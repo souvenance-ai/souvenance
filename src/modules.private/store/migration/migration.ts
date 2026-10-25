@@ -68,15 +68,35 @@ ALTER TABLE memories RENAME COLUMN read_count TO access_count;
  * it always did, now by explicit flag instead of kind convention. `summary`
  * joins as the authored condensation of long content (null on migrated
  * rows — the obligation starts with the refonte's writes).
+ *
+ * `kind` reshapes v6 IN PLACE (the version never shipped — the release
+ * fires on merge to main, so no store outside this repo has applied the
+ * original v6): kind is promoted from a free metadata tag to a required
+ * column with a free vocabulary (#31, data-backed — the real v0.1 store
+ * carries metadata.kind on 219/219 rows, and dream/vision rule the enum
+ * out). The backfill reads the metadata tag, 'unclassified' where absent
+ * — the debt is marked, reclassifying it is a supersede (the
+ * `summary = null` precedent). The SAME pass then strips `$.kind` from
+ * every row's metadata — one source of truth from v6 on, no divergence
+ * invariant, no doctor check. ORDER MATTERS: the basket logic reads
+ * `metadata.kind`, so it runs BEFORE the strip. The backfill and the
+ * strip both read metadata through json_extract/json_remove, so a row
+ * whose metadata is not valid JSON (hand-SQL corruption on a v5 store)
+ * makes the migration fail — refuse-don't-hide: the store's truth is
+ * never silently rewritten past corruption (dev ruling, 2026-10-25).
  */
 const V6 = `
 ALTER TABLE memories ADD COLUMN hot INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE memories ADD COLUMN summary TEXT;
+ALTER TABLE memories ADD COLUMN kind TEXT NOT NULL DEFAULT 'unclassified';
+UPDATE memories SET kind = COALESCE(json_extract(metadata, '$.kind'), 'unclassified');
 UPDATE memories SET hot = 1
  WHERE status = 'active'
    AND json_extract(metadata, '$.kind') IN ('directive', 'summary', 'objective')
    AND (json_extract(metadata, '$.kind') != 'objective'
         OR json_extract(metadata, '$.state') = 'open');
+UPDATE memories SET metadata = json_remove(metadata, '$.kind')
+ WHERE metadata IS NOT NULL;
 ALTER TABLE memories DROP COLUMN weight;
 ALTER TABLE memories DROP COLUMN access_count;
 `;
