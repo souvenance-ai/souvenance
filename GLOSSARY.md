@@ -30,6 +30,10 @@ _Avoid_: type, category, tag (that's metadata)
 The authored condensation of a memory's content — what checkin and search serve to hand a fresh session more memories per call. Owed at write time when the content runs past the ceiling; condensed always; revised by supersede, never in place.
 _Avoid_: abstract, digest, tldr
 
+**Metadata**:
+The free JSON an agent authors on a memory, beside the columns — searchable by typed scalar equality on dot-paths. Its keys obey the filter's path grammar at authoring time: one grammar, both surfaces, everything stored stays addressable.
+_Avoid_: properties, custom fields, tags (a data convention, not a surface)
+
 **Hot**:
 The curation status: the sub-state of `active` a fresh session's checkin serves. Not a flag, not a parallel mark — one of the five states, the machine's only reversible edge (setHot: active ↔ hot); supersede transfers it to the head, merge unions it, every termination cools it for free.
 _Avoid_: pinned, starred, important, the hot flag (retired)
@@ -55,6 +59,10 @@ _Avoid_: mount point, attachment
 **Fork**:
 An exact copy of a store as a new store — the act by which one individual becomes two.
 _Avoid_: clone, copy, backup
+
+**Cursor**:
+The serving key of the last memory served — the pair (`created_at`, `id`). `list` takes the next page strictly after it; the server hands it to its clients opaque and rebuilds it from the last served node. The UUID's lexicographic order breaks any millisecond tie.
+_Avoid_: offset (retired), page token, bookmark
 
 ### The surfaces
 
