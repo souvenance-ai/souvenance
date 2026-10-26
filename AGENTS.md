@@ -7,6 +7,7 @@
 
 User preferences for TypeScript code organization — apply them to new code and preserve them when touching existing code:
 
+- File and folder names are dash-cased: `with-busy-retry/with-busy-retry.ts`. Dots are also accepted for test files (`store.reads.test.ts`).
 - One `.ts` file per folder. Name the folder after its file: `serve/serve.ts` + `serve/serve.test.ts`.
 - Colocate tests with the code they cover: the test file sits next to its source file.
 - Each file exposes, when possible, a single public export (one function or class). Related types may be exported alongside the function/class they describe.
