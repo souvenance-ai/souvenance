@@ -17,13 +17,26 @@ function tempStore(): { store: Store; cleanup: () => void } {
   };
 }
 
-/** The store's created_at has millisecond precision — back-to-back link() calls
- * can land in the same ms and make created_at DESC ties undefined (the legacy
- * fast-CI defect). Depth tests only pin order where the visited set makes
- * first-wins observable, so the seeding spins to the next millisecond. */
-function advanceMs(): void {
-  const t0 = Date.now();
-  while (Date.now() === t0) {}
+/** The edges' serving order is deterministic (#40): `created_at DESC`,
+ * then the lexicographic key, then `kind`. The seeding therefore needs no
+ * millisecond spins — the depth tests pin behavior that is order-agnostic
+ * (single-edge blocks) or reads the served order as given. */
+function assertServingOrder(
+  nodes: readonly { readonly created_at: string; readonly id: string }[],
+  detail?: string,
+): void {
+  for (let index = 1; index < nodes.length; index++) {
+    const previous = nodes[index - 1]!;
+    const current = nodes[index]!;
+    const ordered =
+      previous.created_at !== current.created_at
+        ? previous.created_at > current.created_at
+        : previous.id > current.id;
+    assert.ok(
+      ordered,
+      `${detail ? detail + ' — ' : ''}serving order violated: (${previous.created_at}, ${previous.id}) then (${current.created_at}, ${current.id})`,
+    );
+  }
 }
 
 test('get: depth 1 (default) projects raw edges — targets stay null', () => {
@@ -82,7 +95,6 @@ test('get: out expands while in stays a raw list at every depth', () => {
     const d = store.store('watcher', { kind: 'note' });
     store.link(a, b, 'references');
     store.link(b, c, 'extends');
-    advanceMs();
     store.link(d, c, 'cites'); // c's incoming edge never expands
 
     const node = store.get(a, { depth: 5 })!;
@@ -103,25 +115,26 @@ test('get: the visited set expands a diamond target once — later occurrences a
     const b = store.store('memory b', { kind: 'note' });
     const c = store.store('memory c', { kind: 'note' });
     const d = store.store('diamond', { kind: 'note' });
-    store.link(b, d, 'first'); // newest edge
-    advanceMs();
+    store.link(b, d, 'first');
     store.link(c, d, 'second');
-    advanceMs();
-    store.link(a, b, 'references'); // a's out block: [b (older), c (newest)]
-    advanceMs();
+    store.link(a, b, 'references');
     store.link(a, c, 'references');
 
     const node = store.get(a, { depth: 4 })!;
     const outEdges = node.relations.out;
     assert.equal(outEdges.length, 2);
-    // created_at DESC: the c edge is first and expands d (depth remaining 2,
-    // d unvisited); the b edge walks into d afterwards and renders it a leaf.
-    const cNode = outEdges[0]!.target!;
-    const bNode = outEdges[1]!.target!;
-    assert.equal(cNode.relations.out[0]!.kind, 'second');
-    assert.equal(cNode.relations.out[0]!.target!.id, d);
-    assert.equal(bNode.relations.out[0]!.kind, 'first');
-    assert.equal(bNode.relations.out[0]!.target, null, 'd already expanded once');
+    assertServingOrder(
+      outEdges.map((edge) => ({ created_at: edge.created_at, id: edge.to_id })),
+      "a's out block serves in the deterministic edge order (#40)",
+    );
+    // The projection walks the served order: the first-served edge expands
+    // d (depth remaining, d unvisited); the second walks into d afterwards
+    // and the visited set renders it a leaf. WHICH edge goes first is the
+    // serving order's business — the visited-set behavior is the pin.
+    const firstExpanded = outEdges[0]!.target!;
+    const secondWalked = outEdges[1]!.target!;
+    assert.equal(firstExpanded.relations.out[0]!.target!.id, d, 'the first-served edge expands d');
+    assert.equal(secondWalked.relations.out[0]!.target, null, 'd already expanded once — a leaf');
   } finally {
     cleanup();
   }

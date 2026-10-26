@@ -175,7 +175,10 @@ export interface OpenOptions {
  * The graph projection of one memory: the shape every node-returning read
  * (get, list, search, checkin) serves. Out-edges expand into target nodes
  * when depth asks for it; in-edges always stay raw rows — *out expands,
- * in informs*. Both directions carry the edges' `created_at DESC` order.
+ * in informs*. Both directions carry the deterministic edge order —
+ * `created_at DESC`, the lexicographic key breaking the millisecond tie
+ * (`to_id` out, `from_id` in), then `kind` for the multi-kind pairs
+ * (#40): same-millisecond edges serve in a defined order.
  */
 export interface RelationsBlock {
   readonly out: readonly OutEdge[];
@@ -907,13 +910,13 @@ export class Store {
     const out = this.#db
       .prepare(
         'SELECT from_id, to_id, kind, metadata, created_at FROM edges' +
-          ' WHERE from_id = ? ORDER BY created_at DESC',
+          ' WHERE from_id = ? ORDER BY created_at DESC, to_id DESC, kind DESC',
       )
       .all(memory.id) as unknown as RelationRow[];
     const inRows = this.#db
       .prepare(
         'SELECT from_id, to_id, kind, metadata, created_at FROM edges' +
-          ' WHERE to_id = ? ORDER BY created_at DESC',
+          ' WHERE to_id = ? ORDER BY created_at DESC, from_id DESC, kind DESC',
       )
       .all(memory.id) as unknown as RelationRow[];
     const relations: RelationsBlock = {
@@ -953,7 +956,9 @@ export class Store {
    * ranking factors died with their columns). Living-only unless
    * includeTerminals (`active` + `hot`, #38), narrowed by the typed
    * filters (kind IN, metadata equality — #40), limit 20 by default.
-   * Hits are projected nodes (depth-1 relations included).
+   * Rank ties break newest-first (`created_at DESC, id DESC`) — every
+   * served order is deterministic (#40). Hits are projected nodes
+   * (depth-1 relations included).
    *
    * A failed MATCH is not a refusal: when the failure comes from FTS5
    * glue in the query itself (dotted numerics, hyphenated/colonated
@@ -977,7 +982,7 @@ export class Store {
     if (conditions.length > 0) {
       sql += ` AND ${conditions.map((condition) => condition.sql).join(' AND ')}`;
     }
-    sql += ' ORDER BY rank LIMIT ?';
+    sql += ' ORDER BY rank, m.created_at DESC, m.id DESC LIMIT ?';
     const runQuery = (match: string): SearchResult[] => {
       const rows = this.#db
         .prepare(sql)
@@ -1007,8 +1012,10 @@ export class Store {
    * /checkin endpoint and the MCP checkin tool will both serve. The hot
    * block replaces the legacy kind blocks: the hot memories (status
    * 'hot', #38) served as projected nodes, relations included (zero
-   * drill-in), newest first. No cap by default — the limit opt guides
-   * attention without ever dropping anything silently. Reads stay reads.
+   * drill-in), newest first — `created_at DESC, id DESC`, the
+   * deterministic serving order (#40). No cap by default — the limit opt
+   * guides attention without ever dropping anything silently. Reads stay
+   * reads.
    */
   checkin(options: CheckinOptions = {}): CheckinReport {
     // LIMIT -1 is SQLite's no-cap form: the hot set serves whole.
@@ -1016,7 +1023,7 @@ export class Store {
     const rows = this.#db
       .prepare(
         'SELECT id, content, kind, summary, metadata, created_at, status FROM memories' +
-          " WHERE status = 'hot' ORDER BY created_at DESC LIMIT ?",
+          " WHERE status = 'hot' ORDER BY created_at DESC, id DESC LIMIT ?",
       )
       .all(limit) as unknown as MemoryRow[];
     return {

@@ -195,15 +195,17 @@ test(
       // snapshot) and refuse. Exactly one winner.
       assert.equal(successes, 1, `exactly 1 supersede should succeed, got ${successes}`);
 
-      // Verify original is superseded and only 1 replacement exists
+      // Verify original is superseded and only 1 replacement exists — the
+      // winners' own stdout names their heads (the losers printed nothing:
+      // a refused verb never returns).
       const store = Store.open({ dbPath });
       try {
         assert.equal(store.get(original)!.status, 'superseded', 'original should be superseded');
-        const replacements = store.list({
-          includeTerminals: true,
-          where: "content LIKE 'replacement %' AND status = 'active'",
-        });
-        assert.equal(replacements.length, 1, 'exactly 1 replacement should be active');
+        const winners = children.filter((child) => child.status === 0);
+        assert.equal(winners.length, 1, 'exactly 1 supersede should succeed');
+        const head = store.get(winners[0]!.stdout)!;
+        assert.ok(head, "the winning supersede's head exists");
+        assert.equal(head.status, 'active', 'exactly 1 replacement should be active');
       } finally {
         store.close();
       }
@@ -241,11 +243,11 @@ test(
         assert.equal(statusOf(candidateA), 'merged', 'a should be merged');
         assert.equal(statusOf(candidateB), 'merged', 'b should be merged');
 
-        const merged = store.list({
-          includeTerminals: true,
-          where: "content LIKE 'merged result %' AND status = 'active'",
-        });
-        assert.equal(merged.length, 1, 'exactly 1 merged result should be active');
+        const winners = children.filter((child) => child.status === 0);
+        assert.equal(winners.length, 1, 'exactly 1 merge should succeed');
+        const fusion = store.get(winners[0]!.stdout)!;
+        assert.ok(fusion, "the winning merge's fusion exists");
+        assert.equal(fusion.status, 'active', 'exactly 1 merged result should be active');
       } finally {
         store.close();
       }
@@ -314,11 +316,12 @@ test(
 
       const store = Store.open({ dbPath });
       try {
-        const heads = store.list({
-          includeTerminals: true,
-          where: "content LIKE '%revision'",
-        });
+        const winners = operations.slice(1).filter((child) => child.status === 0);
+        const heads = winners.map((child) => child.stdout);
         assert.equal(heads.length, supersedeWins, 'one head per winning supersede');
+        for (const head of heads) {
+          assert.ok(store.get(head), "each winning supersede's head exists");
+        }
         const target = store.get(targetId)!;
         if (supersedeWins === 1) {
           assert.equal(
@@ -327,7 +330,7 @@ test(
             'never a hot superseded memory — the single-column machine holds (#38)',
           );
           assert.equal(
-            heads[0]!.status,
+            store.get(heads[0]!)!.status,
             setHotWins === 1 ? 'hot' : 'active',
             'the transfer follows the race order',
           );

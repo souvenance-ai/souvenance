@@ -47,7 +47,7 @@ test('fork is an exact copy — nothing added, nothing missing', () => {
       // forker, via memory store in the child.
       const all = child.list({ includeTerminals: true, limit: 100 });
       assert.equal(all.length, 3);
-      assert.equal(child.list({ where: "kind = 'summary'", limit: 10 }).length, 1);
+      assert.equal(child.list({ kind: ['summary'], limit: 10 }).length, 1);
       // The authored summary and the earned hot status travel with the copy.
       const served = child.get(summary)!;
       assert.equal(served.summary, 'the old handoff');
@@ -79,7 +79,7 @@ test('fork refuses an existing target without force; force gives the exact copy 
     const child = Store.open({ dbPath: result.path });
     try {
       assert.equal(child.list({ includeTerminals: true, limit: 100 }).length, 2);
-      assert.equal(child.list({ where: "kind = 'summary'", limit: 10 }).length, 0);
+      assert.equal(child.list({ kind: ['summary'], limit: 10 }).length, 0);
     } finally {
       child.close();
     }
@@ -97,12 +97,12 @@ test('the child is an individual: writes to either side never touch the other', 
     const child = Store.open({ dbPath: result.path });
     try {
       child.store("The child's own lived experience.", { kind: 'note' });
-      child.deprecate(child.list({ where: "kind = 'note'", limit: 1 })[0]!.id);
+      child.deprecate(child.list({ kind: ['note'], limit: 1 })[0]!.id);
     } finally {
       child.close();
     }
     // Parent unchanged: still one note + no deprecated statuses.
-    const notes = store.list({ where: "kind = 'note'", limit: 10 });
+    const notes = store.list({ kind: ['note'], limit: 10 });
     assert.equal(notes.length, 1);
     assert.equal(notes[0]!.status, 'active');
     // And a later parent write never appears in the already-born child.
