@@ -1,9 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { migrate, SCHEMA_VERSION, schemaVersion } from './migration/migration.ts';
+import { compileReadFilters } from './utils/compile-read-filters/compile-read-filters.ts';
+import { execPragma } from './utils/exec-pragma/exec-pragma.ts';
+import { execSharedPragmas } from './utils/exec-shared-pragmas/exec-shared-pragmas.ts';
+import { ftsErrorFromQuery } from './utils/fts-error-from-query/fts-error-from-query.ts';
+import { normaliseDepth } from './utils/normalise-depth/normalise-depth.ts';
+import { normaliseLimit } from './utils/normalise-limit/normalise-limit.ts';
+import { parseMemoryRow } from './utils/parse-memory-row/parse-memory-row.ts';
+import { parseRawMetadata } from './utils/parse-raw-metadata/parse-raw-metadata.ts';
+import { parseRelationRow } from './utils/parse-relation-row/parse-relation-row.ts';
+import { sanitizeFtsQuery } from './utils/sanitize-fts-query/sanitize-fts-query.ts';
+import { sidecarPaths } from './utils/sidecar-paths/sidecar-paths.ts';
+import { tightenPermissions } from './utils/tighten-permissions/tighten-permissions.ts';
+import { validateMetadataKeys } from './utils/validate-metadata-keys/validate-metadata-keys.ts';
+import { withBusyRetry } from './utils/with-busy-retry/with-busy-retry.ts';
+import type { SqlCondition } from './utils/compile-read-filters/compile-read-filters.ts';
+import type { MemoryRow } from './utils/parse-memory-row/parse-memory-row.ts';
+import type { RelationRow } from './utils/parse-relation-row/parse-relation-row.ts';
 
 export type UUID = string;
 
@@ -399,272 +416,6 @@ export interface ForkResult {
 }
 
 /**
- * The db file and its WAL sidecars — the trio every permission pass and a
- * forced fork refresh must treat together.
- */
-function sidecarPaths(dbPath: string): string[] {
-  return [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
-}
-
-/**
- * Tightens a store file and its WAL sidecars to owner-only permissions.
- * The store IS the agent's identity (directives, decisions, transcripts) —
- * the same argument that makes a group-readable token file a refusal
- * applies to the store file. Best-effort: a failed chmod never bricks the
- * open; the checkout's file_permissions check is the visible enforcer for
- * anything this pass cannot reach (win32 skipped — stat mode is unreliable).
- */
-function tightenPermissions(dbPath: string): void {
-  if (process.platform === 'win32') return;
-  for (const path of sidecarPaths(dbPath)) {
-    try {
-      if (existsSync(path)) chmodSync(path, 0o600);
-    } catch {
-      // best effort — checkout's file_permissions check reports drift
-    }
-  }
-}
-
-/** The busy handler both open paths share, in milliseconds. */
-const BUSY_TIMEOUT_MS = 5000;
-
-/**
- * The pragmas both open paths share: the busy handler and FK enforcement.
- * The read-only open stops here — the store is served as its owner left
- * it, and no journal_mode may switch under it.
- */
-function execSharedPragmas(db: DatabaseSync): void {
-  // busy_timeout MUST come first: PRAGMA journal_mode = WAL grabs an exclusive
-  // file-header lock when the store is fresh (or unwal'd). With the busy handler
-  // unset, any racing open loses that grab immediately with SQLITE_BUSY.
-  db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
-  db.exec('PRAGMA foreign_keys = ON');
-}
-
-function execPragma(db: DatabaseSync): void {
-  execSharedPragmas(db);
-  db.exec('PRAGMA journal_mode = WAL');
-}
-
-const SQLITE_BUSY = 5;
-const BUSY_RETRIES = 50;
-const BUSY_DELAY_MS = 20;
-
-/**
- * Raw shape of one memories row — parsed into `Memory` by `parseMemoryRow`.
- */
-interface MemoryRow {
-  readonly id: string;
-  readonly content: string;
-  readonly kind: string;
-  readonly summary: string | null;
-  readonly metadata: string | null;
-  readonly created_at: string;
-  readonly status: string;
-}
-
-/**
- * Raw shape of one edges row — parsed into `Relation` by `parseRelationRow`.
- */
-interface RelationRow {
-  readonly from_id: string;
-  readonly to_id: string;
-  readonly kind: string;
-  readonly metadata: string | null;
-  readonly created_at: string;
-}
-
-function parseRawMetadata(metadata: string | null): Record<string, unknown> | null {
-  if (metadata === null) return null;
-  try {
-    return JSON.parse(metadata) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function parseMemoryRow(row: MemoryRow): Memory {
-  return {
-    id: row.id,
-    content: row.content,
-    kind: row.kind,
-    summary: row.summary,
-    metadata: parseRawMetadata(row.metadata),
-    created_at: row.created_at,
-    status: row.status as MemoryStatus,
-  };
-}
-
-function parseRelationRow(row: RelationRow): Relation {
-  return {
-    from_id: row.from_id,
-    to_id: row.to_id,
-    kind: row.kind,
-    metadata: parseRawMetadata(row.metadata),
-    created_at: row.created_at,
-  };
-}
-
-/**
- * Depth validation for `get`: absent means 1 (raw edges), anything else
- * must be an integer >= 1. No upper bound — the visited set guards cycles,
- * the caller owns the pace.
- */
-function normaliseDepth(depth: number | undefined): number {
-  if (depth === undefined) return 1;
-  if (!Number.isInteger(depth) || depth < 1) {
-    throw new Error('depth must be an integer >= 1');
-  }
-  return depth;
-}
-
-/**
- * Limit validation shared by list/search/checkin: absent means the verb's
- * own default (checkin: no cap), anything else must be an integer >= 1.
- */
-function normaliseLimit(limit: number | undefined, fallback: number): number {
-  if (limit === undefined) return fallback;
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw new Error('limit must be an integer >= 1');
-  }
-  return limit;
-}
-
-/**
- * One compiled WHERE condition: the SQL fragment and the parameters it
- * binds. Callers only ever AND whole conditions — no fragment of caller
- * input is interpolated anywhere (paths are validated to a fixed grammar
- * before composition, values are bound).
- */
-interface SqlCondition {
-  readonly sql: string;
-  readonly params: readonly (string | number)[];
-}
-
-/**
- * One metadata path segment: an object-key level (letters, digits, `-`,
- * `_`) with an optional array index. The grammar the read filter
- * composes paths from — and the same one the write surface enforces on
- * stored keys (#40), so everything stored stays addressable.
- */
-const PATH_SEGMENT = /^([A-Za-z0-9_-]+)(\[(\d+)\])?$/;
-
-/**
- * Validates one metadata filter path and composes its JSON path from the
- * validated segments (`project.owner` → `$.project.owner`,
- * `tags[0]` → `$.tags[0]`). Refusals teach the grammar — wildcards and
- * dotted keys have no spelling here: an unbounded containment would be a
- * query language, and a dotted key would be unreachable by a dot-path
- * filter (the write surface refuses it at authoring time, #40).
- */
-function compileMetadataPath(path: string): string {
-  if (!path) {
-    throw new Error(
-      'metadata filter paths must be non-empty dot-paths ("project.owner", "tags[0]")',
-    );
-  }
-  const composed = path
-    .split('.')
-    .map((segment) => {
-      const match = segment.match(PATH_SEGMENT);
-      if (!match) {
-        throw new Error(
-          `metadata filter paths accept letters, digits, "-" and "_" per segment, with optional [n] indices` +
-            ` — refused: ${JSON.stringify(path)}`,
-        );
-      }
-      return `.${match[1]}${match[2] ?? ''}`;
-    })
-    .join('');
-  return `$${composed}`;
-}
-
-/**
- * Compiles the typed read filters into WHERE conditions over the
- * memories row (aliased `m`): `kind` as a bound IN list, `metadata` as
- * typed scalar equality per path — json_valid-guarded, so a
- * hand-corrupted metadata column matches nothing instead of failing the
- * scan (the reads' forgiveness precedent, #12; the doctor is where the
- * corruption speaks). JSON booleans bind as 1/0 — node:sqlite refuses
- * boolean parameters. Empty filters refuse with the shape: a filter set
- * without intention is a caller bug, not a no-op.
- */
-function compileReadFilters(filters: ReadFilters): readonly SqlCondition[] {
-  const conditions: SqlCondition[] = [];
-  if (filters.kind !== undefined) {
-    const kinds = filters.kind;
-    if (!Array.isArray(kinds) || kinds.length === 0) {
-      throw new Error(
-        'kind filter refuses an empty list — pass kind names ("note", "log", …) or omit kind',
-      );
-    }
-    for (const kind of kinds) {
-      if (typeof kind !== 'string' || !kind) {
-        throw new Error('kind filter entries must be non-empty kind names');
-      }
-    }
-    conditions.push({
-      sql: `m.kind IN (${kinds.map(() => '?').join(', ')})`,
-      params: [...kinds],
-    });
-  }
-  if (filters.metadata !== undefined) {
-    const entries = Object.entries(filters.metadata);
-    if (entries.length === 0) {
-      throw new Error(
-        'metadata filter refuses an empty object — pass at least one path/value pair or omit metadata',
-      );
-    }
-    for (const [path, value] of entries) {
-      const jsonPath = compileMetadataPath(path);
-      let bound: string | number;
-      if (typeof value === 'boolean') {
-        bound = value ? 1 : 0;
-      } else if (typeof value === 'string' || typeof value === 'number') {
-        bound = value;
-      } else {
-        throw new Error('metadata filter values must be strings, numbers or booleans');
-      }
-      // The path interpolates VALIDATED segments only — no caller input
-      // reaches the SQL text; the value rides as a bound parameter.
-      conditions.push({
-        sql:
-          "json_extract(CASE WHEN json_valid(m.metadata) THEN m.metadata END, '" +
-          jsonPath +
-          "') = ?",
-        params: [bound],
-      });
-    }
-  }
-  return conditions;
-}
-
-/**
- * The keyset cursor's contract: absent means the first page; present, it
- * must be a real `{ created_at, id }` pair — the serving key of the last
- * node, both non-empty strings. Taken raw (the HTTP surface wraps it
- * opaque, #19); anything else refuses with the shape.
- */
-function normaliseAfter(
-  after: ListCursor | undefined,
-): { readonly created_at: string; readonly id: string } | null {
-  if (after === undefined) return null;
-  if (
-    typeof after !== 'object' ||
-    after === null ||
-    typeof after.created_at !== 'string' ||
-    !after.created_at ||
-    typeof after.id !== 'string' ||
-    !after.id
-  ) {
-    throw new Error(
-      'after must be { created_at, id } — the serving key of the last node, both non-empty strings',
-    );
-  }
-  return after;
-}
-
-/**
  * The LIVING set (#38): `active` + `hot`. Living is a glossary concept —
  * the refusal set of the write verbs (supersede, merge, deprecate, unlink
  * endpoints), setHot's transition domain, and the checkout's read; this
@@ -706,56 +457,6 @@ function refuseMetadataKind(metadata: Record<string, unknown> | undefined | null
   if (metadata && 'kind' in metadata) {
     throw new Error('kind is a column — pass kind, not metadata.kind');
   }
-}
-
-/**
- * Decides whether a search failure came from malformed FTS5 query glue
- * (punctuation inside bare tokens) rather than from a plain SQL problem.
- * FTS5 signals it in two ways: a "fts5: syntax error" from characters it
- * cannot parse, or "no such column: X" when a hyphenated/colonated
- * compound makes it read X as a column filter — only trusted when X
- * appears in the query itself.
- */
-function ftsErrorFromQuery(err: unknown, query: string): boolean {
-  if (!(err instanceof Error)) return false;
-  if (/fts5:\s*syntax error/i.test(err.message)) return true;
-  const match = err.message.match(/no such column:\s*"([^"]+)"|no such column:\s*([A-Za-z0-9_]+)/i);
-  if (!match) return false;
-  const name = (match[1] ?? match[2]).toLowerCase();
-  return query.toLowerCase().includes(name);
-}
-
-/**
- * Fallback query builder for FTS5 syntax failures. Keeps operators and
- * quoted phrases, strips every other punctuation character so dotted
- * numerics and hyphenated/colonated identifiers become plain tokens
- * ("better-sqlite3" -> "better sqlite3"). Returns null when nothing
- * searchable remains; the caller then rethrows the original error.
- */
-function sanitizeFtsQuery(query: string): string | null {
-  const parts = query.match(/"[^"]*"|[^\s"]+/g);
-  if (!parts) return null;
-  const cleaned: string[] = [];
-  for (const part of parts) {
-    if (part.startsWith('"')) {
-      const inner = part
-        .slice(1, -1)
-        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (inner) cleaned.push(`"${inner}"`);
-      continue;
-    }
-    if (/^(OR|AND|NOT)$/i.test(part)) {
-      cleaned.push(part.toUpperCase());
-      continue;
-    }
-    const pieces = part.replace(/[^\p{L}\p{N}]/gu, ' ').split(/\s+/);
-    for (const piece of pieces) {
-      if (piece) cleaned.push(piece);
-    }
-  }
-  return cleaned.length > 0 ? cleaned.join(' ') : null;
 }
 
 export class Store {
@@ -804,7 +505,7 @@ export class Store {
 
   /**
    * Write verbs refuse on a read-only store. NOT enforced inside
-   * #withBusyRetry(): it also carries legitimate non-write uses (the
+   * withBusyRetry(): it also carries legitimate non-write uses (the
    * checkout's VACUUM INTO snapshot — a file-level write to a NEW file,
    * never to the store itself — lands there).
    */
@@ -844,7 +545,7 @@ export class Store {
    * exists.
    */
   #transaction<GOutput>(operation: () => GOutput): GOutput {
-    return this.#withBusyRetry(() => {
+    return withBusyRetry(() => {
       this.#db.exec('BEGIN');
       try {
         const result = operation();
@@ -887,6 +588,7 @@ export class Store {
     if (!content) throw new Error('content must be non-empty');
     assertStoreKind(options.kind);
     refuseMetadataKind(options.metadata);
+    validateMetadataKeys(options.metadata, '$');
     this.#checkSummary(content, options.summary ?? null);
     const id = randomUUID();
     const summary = options.summary ?? null;
@@ -923,6 +625,7 @@ export class Store {
     if (!content) throw new Error('content must be non-empty');
     assertOptionalKind(options.kind);
     refuseMetadataKind(options.metadata);
+    validateMetadataKeys(options.metadata, '$');
     this.#checkSummary(content, options.summary ?? null);
     const newId = randomUUID();
     const created_at = new Date().toISOString();
@@ -985,6 +688,7 @@ export class Store {
     if (!content) throw new Error('content must be non-empty');
     assertOptionalKind(options.kind);
     refuseMetadataKind(options.metadata);
+    validateMetadataKeys(options.metadata, '$');
     this.#checkSummary(content, options.summary ?? null);
     const seen = new Set<string>();
     for (const id of ids) {
@@ -1089,18 +793,18 @@ export class Store {
     if (fromId === toId) {
       throw new Error('self-edge refused: from and to must be different memories');
     }
-    const fromExists = this.#withBusyRetry(() =>
+    const fromExists = withBusyRetry(() =>
       this.#db.prepare('SELECT 1 FROM memories WHERE id = ?').get(fromId),
     );
     if (!fromExists) throw new Error(`memory not found: ${fromId}`);
-    const toExists = this.#withBusyRetry(() =>
+    const toExists = withBusyRetry(() =>
       this.#db.prepare('SELECT 1 FROM memories WHERE id = ?').get(toId),
     );
     if (!toExists) throw new Error(`memory not found: ${toId}`);
 
     const metadata = options.metadata ? JSON.stringify(options.metadata) : null;
     const created_at = new Date().toISOString();
-    this.#withBusyRetry(() => this.#insertEdge(fromId, toId, kind, metadata, created_at));
+    withBusyRetry(() => this.#insertEdge(fromId, toId, kind, metadata, created_at));
   }
 
   /**
@@ -1275,11 +979,13 @@ export class Store {
     }
     sql += ' ORDER BY rank LIMIT ?';
     const runQuery = (match: string): SearchResult[] => {
-      const rows = this.#db.prepare(sql).all(
-        match,
-        ...conditions.flatMap((condition) => [...condition.params]),
-        limit,
-      ) as unknown as Array<MemoryRow & { readonly rank: number }>;
+      const rows = this.#db
+        .prepare(sql)
+        .all(
+          match,
+          ...conditions.flatMap((condition) => [...condition.params]),
+          limit,
+        ) as unknown as Array<MemoryRow & { readonly rank: number }>;
       return rows.map((row) => ({
         ...this.#projectNode(parseMemoryRow(row), 1, new Set<string>()),
         rank: row.rank,
@@ -1331,7 +1037,7 @@ export class Store {
    */
   list(options: ListOptions = {}): MemoryWithRelations[] {
     const limit = normaliseLimit(options.limit, 20);
-    const after = normaliseAfter(options.after);
+    const after = options.after;
     let sql =
       'SELECT m.id, m.content, m.kind, m.summary, m.metadata, m.created_at, m.status' +
       ' FROM memories m';
@@ -1354,7 +1060,10 @@ export class Store {
     sql += ' ORDER BY m.created_at DESC, m.id DESC LIMIT ?';
     const rows = this.#db
       .prepare(sql)
-      .all(...conditions.flatMap((condition) => [...condition.params]), limit) as unknown as MemoryRow[];
+      .all(
+        ...conditions.flatMap((condition) => [...condition.params]),
+        limit,
+      ) as unknown as MemoryRow[];
     return rows.map((row) => this.#projectNode(parseMemoryRow(row), 1, new Set<string>()));
   }
 
@@ -1659,7 +1368,7 @@ export class Store {
     const memories = this.#count('SELECT count(*) AS c FROM memories');
     const edges = this.#count('SELECT count(*) AS c FROM edges');
     const quoted = target.replace(/'/g, "''");
-    this.#withBusyRetry(() => this.#db.exec(`VACUUM INTO '${quoted}'`));
+    withBusyRetry(() => this.#db.exec(`VACUUM INTO '${quoted}'`));
     tightenPermissions(target);
     return { path: target, memories, edges };
   }
@@ -1682,7 +1391,7 @@ export class Store {
     const snapshotDir = mkdtempSync(join(tmpdir(), 'souvenance-checkout-'));
     try {
       const snapshotPath = join(snapshotDir, 'snapshot.db').replace(/'/g, "''");
-      this.#withBusyRetry(() => this.#db.exec(`VACUUM INTO '${snapshotPath}'`));
+      withBusyRetry(() => this.#db.exec(`VACUUM INTO '${snapshotPath}'`));
       const snapshot = new DatabaseSync(snapshotPath);
       try {
         snapshot.exec("CREATE VIRTUAL TABLE fts_vocab USING fts5vocab('memories_fts', 'instance')");
@@ -1730,7 +1439,7 @@ export class Store {
    * one where the retry stays a plain read (setHot).
    */
   #readStatus(id: string): MemoryStatus | undefined {
-    const row = this.#withBusyRetry(() =>
+    const row = withBusyRetry(() =>
       this.#db.prepare('SELECT status FROM memories WHERE id = ?').get(id),
     ) as { status: MemoryStatus } | undefined;
     return row?.status;
@@ -1819,32 +1528,5 @@ export class Store {
 
   close(): void {
     this.#db.close();
-  }
-
-  /**
-   * Run an operation that may hit SQLITE_BUSY under concurrent WAL access.
-   * Retries with a short delay until `BUSY_RETRIES` is exhausted.
-   */
-  #withBusyRetry<GOutput>(operation: () => GOutput): GOutput {
-    let lastError: unknown;
-    for (let attempt = 0; attempt < BUSY_RETRIES; attempt++) {
-      try {
-        return operation();
-      } catch (err) {
-        if (
-          err instanceof Error &&
-          'errcode' in err &&
-          (err as { errcode: number }).errcode === SQLITE_BUSY
-        ) {
-          lastError = err;
-          // Synchronous sleep on purpose: #withBusyRetry must stay sync —
-          // an async sleep would change every caller's contract.
-          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, BUSY_DELAY_MS);
-          continue;
-        }
-        throw err;
-      }
-    }
-    throw lastError;
   }
 }
