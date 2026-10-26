@@ -202,28 +202,54 @@ export interface GetOptions {
   readonly depth?: number;
 }
 
-export interface ListOptions {
+/**
+ * The typed read filters the set-serving verbs share (#19): `kind`
+ * narrows by the required column — IN semantics, any of the list — and
+ * `tag` narrows by the metadata `tags` array — AND semantics, every tag
+ * present. Both compile to bound parameters inside the facade: the raw
+ * SQL `where` grant is dead, one language, no fragments through the
+ * surface.
+ */
+export interface ReadFilters {
+  readonly kind?: readonly string[];
+  readonly tag?: readonly string[];
+}
+
+/**
+ * The keyset key `list` pages by: the serving coordinates of the last
+ * node served — `created_at DESC, id DESC`, the UUID's lexicographic
+ * order breaking the millisecond tie (#19; no `rowid` involved). Taken
+ * raw; the HTTP surface wraps it in an opaque base64 token, rebuilt from
+ * the last served node.
+ */
+export interface ListCursor {
+  readonly created_at: string;
+  readonly id: string;
+}
+
+export interface ListOptions extends ReadFilters {
   readonly limit?: number;
-  readonly offset?: number;
+  /**
+   * Serve strictly after this key in the serving order — the next page.
+   * Absent: the first page. Replaces `offset` (the HTTP server was its
+   * only consumer, #19).
+   */
+  readonly after?: ListCursor;
   /**
    * Include the terminals (superseded/deprecated/merged) — the --all
    * surface (living-only by default: active + hot, #38).
    */
   readonly includeTerminals?: boolean;
-  /**
-   * A raw SQL condition on the memories row (`kind = 'note'` and
-   * friends) — the grant opt-in that the server surface gates. Since v6
-   * kind is a column: the idiom is a plain column comparison, not a
-   * `metadata->>'$.kind'` JSON path.
-   */
-  readonly where?: string;
 }
 
-export interface SearchOptions {
+/**
+ * Limit-only — no cursor: bm25 `rank` is unstable across corpus changes,
+ * so deeper recall narrows with the filters instead of paging (#19).
+ */
+export interface SearchOptions extends ReadFilters {
   readonly limit?: number;
   /** Same contract as ListOptions.includeTerminals: the terminals join the living default. */
   readonly includeTerminals?: boolean;
-  readonly where?: string;
 }
 
 export interface CheckinOptions {
