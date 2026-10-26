@@ -203,16 +203,38 @@ export interface GetOptions {
 }
 
 /**
- * The typed read filters the set-serving verbs share (#19): `kind`
- * narrows by the required column — IN semantics, any of the list — and
- * `tag` narrows by the metadata `tags` array — AND semantics, every tag
- * present. Both compile to bound parameters inside the facade: the raw
- * SQL `where` grant is dead, one language, no fragments through the
+ * The metadata filter's shape: dot-path keys — segments `[A-Za-z0-9_-]+`,
+ * an optional `[n]` index per level (`project.owner`, `tags[0]`) — to
+ * scalar values. No wildcards: an unbounded containment would turn
+ * equality into a query language (the richer search registers in the
+ * backlog on observed need). Corrupted metadata — hand SQL, out of band —
+ * matches nothing (the reads' forgiveness precedent, #12); the doctor is
+ * where the corruption speaks.
+ */
+export interface MetadataFilters {
+  readonly [path: string]: string | number | boolean;
+}
+
+/**
+ * The typed read filters the set-serving verbs share (#19, revised in
+ * #40 — the `tags` filter died unloved, never observed in the corpus):
+ * `kind` narrows by the required column — IN semantics, any of the list —
+ * and `metadata` narrows by typed equality on JSON paths — AND semantics
+ * across paths. Both compile to bound parameters inside the facade: the
+ * raw SQL `where` grant is dead, one language, no fragments through the
  * surface.
  */
 export interface ReadFilters {
   readonly kind?: readonly string[];
-  readonly tag?: readonly string[];
+  /**
+   * Scalar equality on metadata paths: `{ project: 'souvenance' }` keeps
+   * the memories whose metadata carries `project = 'souvenance'` — typed
+   * equality (the JSON number 42 does not match the string '42'; JSON
+   * booleans compare as 1/0), a path the memory does not carry excludes
+   * it. The write surface validates every authored metadata key against
+   * the same path grammar (#40): everything stored stays addressable.
+   */
+  readonly metadata?: MetadataFilters;
 }
 
 /**
