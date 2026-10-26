@@ -17,13 +17,28 @@ function tempStore(): { store: Store; cleanup: () => void } {
   };
 }
 
-/** The store's created_at has millisecond precision — back-to-back store()
- * calls can land in the same ms and make created_at DESC ties undefined
- * (see store.reads.test.ts). Checkin pins the serving order, so seeding
- * spins to the next millisecond between writes. */
-function advanceMs(): void {
-  const t0 = Date.now();
-  while (Date.now() === t0) {}
+/**
+ * The serving-order contract (#40), pinned here for the hot block: the
+ * sequence is strictly decreasing in the (created_at, id) lexicographic
+ * key — the ms-tie broken by the UUID. Whatever the clock did between two
+ * store() calls, the order is defined.
+ */
+function assertServingOrder(
+  nodes: readonly { readonly created_at: string; readonly id: string }[],
+  detail?: string,
+): void {
+  for (let index = 1; index < nodes.length; index++) {
+    const previous = nodes[index - 1]!;
+    const current = nodes[index]!;
+    const ordered =
+      previous.created_at !== current.created_at
+        ? previous.created_at > current.created_at
+        : previous.id > current.id;
+    assert.ok(
+      ordered,
+      `${detail ? detail + ' — ' : ''}serving order violated: (${previous.created_at}, ${previous.id}) then (${current.created_at}, ${current.id})`,
+    );
+  }
 }
 
 test('checkin: serves the curated hot block, newest first, relations included', () => {
@@ -34,21 +49,19 @@ test('checkin: serves the curated hot block, newest first, relations included', 
       metadata: { tags: ['context'] },
       summary: 'the directive, condensed',
     });
-    advanceMs();
     const b = store.store('another hot note', { kind: 'note' });
-    advanceMs();
     store.setHot(a, true);
     store.setHot(b, true);
     store.link(a, b, 'extends');
 
     const report = store.checkin();
     assert.equal(report.hot.length, 2);
-    assert.equal(report.hot[0]!.id, b, 'newest first');
-    assert.equal(report.hot[1]!.id, a);
+    assertServingOrder(report.hot);
+    assert.ok(report.hot.some((memory) => memory.id === b));
 
     // Zero drill-in: the block carries content, the authored summary and
     // the depth-1 relations out of the box.
-    const aNode = report.hot[1]!;
+    const aNode = report.hot.find((memory) => memory.id === a)!;
     assert.equal(aNode.content, 'standing directive');
     assert.equal(aNode.summary, 'the directive, condensed');
     assert.equal(aNode.relations.out[0]!.kind, 'extends');
@@ -104,14 +117,18 @@ test('checkin: no cap by default — the limit opt guides attention', () => {
   try {
     const ids: string[] = [];
     for (let i = 0; i < 5; i++) {
-      advanceMs();
       ids.push(store.store(`hot memory ${i}`, { kind: 'note' }));
       store.setHot(ids[i]!, true);
     }
-    assert.equal(store.checkin().hot.length, 5);
+    const full = store.checkin().hot;
+    assert.equal(full.length, 5);
+    assertServingOrder(full);
     const capped = store.checkin({ limit: 2 });
-    assert.equal(capped.hot.length, 2);
-    assert.equal(capped.hot[0]!.id, ids[4]!, 'still newest first under the cap');
+    assert.deepEqual(
+      capped.hot.map((memory) => memory.id),
+      full.slice(0, 2).map((memory) => memory.id),
+      "the cap serves the block's head — never a different subset",
+    );
   } finally {
     cleanup();
   }

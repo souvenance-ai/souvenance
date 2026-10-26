@@ -30,6 +30,46 @@ function tempStore(): { store: Store; cleanup: () => void } {
   };
 }
 
+/**
+ * The serving-order contract (#40): every served sequence is strictly
+ * decreasing in the (created_at, id) lexicographic key — the ms-tie
+ * broken by the UUID. Whatever the clock did between two store() calls,
+ * the order is defined; this pin fails the read if any tie serves out of
+ * id DESC order.
+ */
+function assertServingOrder(
+  nodes: readonly { readonly created_at: string; readonly id: string }[],
+  detail?: string,
+): void {
+  for (let index = 1; index < nodes.length; index++) {
+    const previous = nodes[index - 1]!;
+    const current = nodes[index]!;
+    const ordered =
+      previous.created_at !== current.created_at
+        ? previous.created_at > current.created_at
+        : previous.id > current.id;
+    assert.ok(
+      ordered,
+      `${detail ? detail + ' — ' : ''}serving order violated: (${previous.created_at}, ${previous.id}) then (${current.created_at}, ${current.id})`,
+    );
+  }
+}
+
+function seed(store: Store): { a: string; b: string; c: string } {
+  const a = store.store('The quick brown fox jumps', {
+    kind: 'note',
+    metadata: { tags: ['animal'] },
+  });
+  const b = store.store('Hello world from the fox', {
+    kind: 'log',
+    metadata: { tags: ['greeting'] },
+  });
+  const c = store.store('A lazy dog sleeps', { kind: 'note', metadata: { tags: ['animal'] } });
+  store.link(a, b, 'references');
+  store.link(b, c, 'extends');
+  return { a, b, c };
+}
+
 // --- get --------------------------------------------------------------------
 
 test('get: returns a memory by id — content, kind, parsed metadata, status', () => {
@@ -127,85 +167,208 @@ test('get: restores corrupted metadata JSON as null metadata', () => {
   }
 });
 
-/** The store'report created_at has millisecond precision — back-to-back store()
- * calls can land in the same ms and make created_at DESC ties undefined
- * (caught live on a fast CI runner by the legacy port). Seeding spins to
- * the next millisecond between writes whose order the tests pin. */
-function advanceMs(): void {
-  const t0 = Date.now();
-  while (Date.now() === t0) {}
-}
-
-function seed(store: Store): { a: string; b: string; c: string } {
-  const a = store.store('The quick brown fox jumps', {
-    kind: 'note',
-    metadata: { tags: ['animal'] },
-  });
-  advanceMs();
-  const b = store.store('Hello world from the fox', {
-    kind: 'log',
-    metadata: { tags: ['greeting'] },
-  });
-  advanceMs();
-  const c = store.store('A lazy dog sleeps', { kind: 'note', metadata: { tags: ['animal'] } });
-  store.link(a, b, 'references');
-  store.link(b, c, 'extends');
-  return { a, b, c };
-}
-
 // --- list -------------------------------------------------------------------
 
-test('list: returns memories ordered by created_at DESC', () => {
+test('list: serves in the deterministic order — created_at DESC, id DESC (#40)', () => {
   const { store, cleanup } = tempStore();
   try {
-    const { a, c } = seed(store);
+    seed(store);
     const results = store.list();
     assert.equal(results.length, 3);
-    assert.equal(results[0]!.id, c, 'most recent should be first');
-    assert.equal(results[2]!.id, a, 'oldest should be last');
+    assertServingOrder(results);
   } finally {
     cleanup();
   }
 });
 
-test('list: respects limit and offset', () => {
+test('list: same-millisecond memories serve in id DESC order — the tie is defined (#40)', () => {
   const { store, cleanup } = tempStore();
   try {
-    const { a, b, c } = seed(store);
-    const page1 = store.list({ limit: 2, offset: 0 });
-    assert.equal(page1.length, 2);
-    assert.equal(page1[0]!.id, c);
-    assert.equal(page1[1]!.id, b);
-
-    const page2 = store.list({ limit: 2, offset: 2 });
-    assert.equal(page2.length, 1);
-    assert.equal(page2[0]!.id, a);
+    const ids: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      ids.push(store.store(`tie memory ${i}`, { kind: 'note' }));
+    }
+    const served = store.list();
+    assert.equal(served.length, 12);
+    assertServingOrder(served);
+    // Every same-millisecond group — however many the clock produced —
+    // serves in id DESC order.
+    const groups = new Map<string, string[]>();
+    for (const memory of served) {
+      const group = groups.get(memory.created_at) ?? [];
+      group.push(memory.id);
+      groups.set(memory.created_at, group);
+    }
+    for (const [created_at, group] of groups) {
+      assert.deepEqual(group, [...group].sort().reverse(), `ties at ${created_at} serve id DESC`);
+    }
   } finally {
     cleanup();
   }
 });
 
-test('list: default limit is 20', () => {
+test('list: the keyset cursor walks the full order page by page (#40)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    for (let i = 0; i < 7; i++) {
+      store.store(`paged memory ${i}`, { kind: 'note' });
+    }
+    const full = store.list();
+    const firstPage = store.list({ limit: 3 });
+    assert.deepEqual(
+      firstPage.map((memory) => memory.id),
+      full.slice(0, 3).map((memory) => memory.id),
+      'the first page is the head of the serving order',
+    );
+
+    const walked = firstPage.map((memory) => memory.id);
+    let cursor = firstPage[firstPage.length - 1]!;
+    for (;;) {
+      const page = store.list({
+        limit: 3,
+        after: { created_at: cursor.created_at, id: cursor.id },
+      });
+      if (page.length === 0) break;
+      walked.push(...page.map((memory) => memory.id));
+      cursor = page[page.length - 1]!;
+    }
+    assert.deepEqual(
+      walked,
+      full.map((memory) => memory.id),
+      'the walk reproduces the full order — no skip, no overlap',
+    );
+    assert.deepEqual(
+      store.list({ after: { created_at: cursor.created_at, id: cursor.id } }),
+      [],
+      'after the last node: the empty page',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('list: respects limit — absent means 20', () => {
   const { store, cleanup } = tempStore();
   try {
     for (let i = 0; i < 25; i++) {
       store.store(`memory ${i}`, { kind: 'note' });
     }
     assert.equal(store.list().length, 20);
+    assert.equal(store.list({ limit: 2 }).length, 2);
   } finally {
     cleanup();
   }
 });
 
-test('list: applies the where filter on the row — the kind column since v6', () => {
+test('list: the kind filter narrows by the column — IN semantics (#40)', () => {
   const { store, cleanup } = tempStore();
   try {
     seed(store);
-    const results = store.list({ where: `kind = 'note'` });
-    assert.equal(results.length, 2);
-    for (const result of results) {
-      assert.equal(result.kind, 'note');
+    const notes = store.list({ kind: ['note'] });
+    assert.equal(notes.length, 2);
+    for (const memory of notes) {
+      assert.equal(memory.kind, 'note');
     }
+    assert.equal(store.list({ kind: ['note', 'log'] }).length, 3);
+    assert.deepEqual(store.list({ kind: ['nope'] }), []);
+  } finally {
+    cleanup();
+  }
+});
+
+test('list: the metadata filter narrows by typed equality on paths (#40)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const noted = store.store('the noted one', {
+      kind: 'note',
+      metadata: { project: 'souvenance', effort: 3, pinned: true, owner: { name: 'val' } },
+    });
+    store.store('another project', { kind: 'note', metadata: { project: 'other' } });
+    store.store('bare', { kind: 'note' }); // null metadata
+
+    assert.deepEqual(
+      store.list({ metadata: { project: 'souvenance' } }).map((memory) => memory.id),
+      [noted],
+    );
+    assert.deepEqual(
+      store.list({ metadata: { 'owner.name': 'val' } }).map((memory) => memory.id),
+      [noted],
+      'nested dot-paths reach the object graph',
+    );
+    assert.deepEqual(
+      store.list({ metadata: { effort: 3 } }).map((memory) => memory.id),
+      [noted],
+      'numbers compare numerically',
+    );
+    assert.deepEqual(
+      store.list({ metadata: { pinned: true } }).map((memory) => memory.id),
+      [noted],
+      'JSON booleans compare as 1/0',
+    );
+    assert.deepEqual(
+      store.list({ metadata: { effort: '3' } }),
+      [],
+      "typed equality: the number 3 does not match the string '3'",
+    );
+    assert.deepEqual(
+      store.list({ metadata: { nothing: 'x' } }),
+      [],
+      'a path the memory does not carry excludes it',
+    );
+    assert.deepEqual(
+      store.list({ metadata: { project: 'souvenance', 'owner.name': 'someone else' } }),
+      [],
+      'paths AND together',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('list: a hand-corrupted metadata column matches no filter — the others serve (#40)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const clean = store.store('clean', { kind: 'note', metadata: { mark: 'x' } });
+    const corrupted = store.store('corrupted', { kind: 'note', metadata: { mark: 'x' } });
+    const raw = probe(store);
+    raw.prepare('UPDATE memories SET metadata = ? WHERE id = ?').run('{not json', corrupted);
+    raw.close();
+
+    assert.deepEqual(
+      store.list({ metadata: { mark: 'x' } }).map((memory) => memory.id),
+      [clean],
+      'the corrupted row is silently excluded by the filter — json_valid guards',
+    );
+    assert.equal(
+      store.list().length,
+      2,
+      'the unfiltered read still serves the corrupted row (metadata collapses to null)',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('list: empty or malformed filters refuse with the shape (#40)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    assert.throws(() => store.list({ kind: [] }), /kind filter refuses an empty list/);
+    assert.throws(() => store.list({ metadata: {} }), /metadata filter refuses an empty object/);
+    assert.throws(
+      () => store.list({ metadata: { 'bad key': 'x' } }),
+      /refused: "bad key"/,
+      'the path grammar teaches',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('list: limit must be an integer >= 1', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    assert.throws(() => store.list({ limit: 0 }), /limit must be an integer >= 1/);
+    assert.throws(() => store.list({ limit: 1.5 }), /limit must be an integer >= 1/);
   } finally {
     cleanup();
   }
@@ -243,6 +406,14 @@ test('list: projects relations at depth 1 — nodes, not bare rows', () => {
     const edges = results.flatMap((memory) => memory.relations.out);
     assert.equal(edges.length, 2);
     assert.equal(edges[0]!.target, null, 'depth 1 stays raw');
+    for (const memory of results) {
+      assertServingOrder(
+        memory.relations.out.map((edge) => ({ created_at: edge.created_at, id: edge.to_id })),
+      );
+      assertServingOrder(
+        memory.relations.in.map((edge) => ({ created_at: edge.created_at, id: edge.from_id })),
+      );
+    }
   } finally {
     cleanup();
   }
@@ -252,18 +423,6 @@ test('list: returns empty array when no memories', () => {
   const { store, cleanup } = tempStore();
   try {
     assert.deepEqual(store.list(), []);
-  } finally {
-    cleanup();
-  }
-});
-
-test('list: limit must be an integer >= 1, offset an integer >= 0', () => {
-  const { store, cleanup } = tempStore();
-  try {
-    assert.throws(() => store.list({ limit: 0 }), /limit must be an integer >= 1/);
-    assert.throws(() => store.list({ limit: 1.5 }), /limit must be an integer >= 1/);
-    assert.throws(() => store.list({ offset: -1 }), /offset must be an integer >= 0/);
-    assert.throws(() => store.list({ offset: 0.5 }), /offset must be an integer >= 0/);
   } finally {
     cleanup();
   }
@@ -289,6 +448,7 @@ test('search: returns ranked FTS5 results', () => {
       assert.ok(typeof result.rank === 'number');
       assert.ok('relations' in result, 'hits are projected nodes');
     }
+    assertServingOrder(results);
   } finally {
     cleanup();
   }
@@ -305,6 +465,26 @@ test('search: bm25 ranking puts the best match first', () => {
       first.content.toLowerCase().includes('fox'),
       'top result should contain the query term',
     );
+  } finally {
+    cleanup();
+  }
+});
+
+test('search: applies the typed filters — kind IN, metadata equality (#40)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    store.store('the fox sleeps', { kind: 'note', metadata: { project: 'wild' } });
+    store.store('the fox hunts', { kind: 'log', metadata: { project: 'farm' } });
+    store.store('the fox dreams', { kind: 'note', metadata: { project: 'farm' } });
+
+    assert.equal(store.search('fox', { kind: ['note'] }).length, 2);
+    assert.equal(store.search('fox', { metadata: { project: 'farm' } }).length, 2);
+    assert.equal(
+      store.search('fox', { kind: ['note'], metadata: { project: 'farm' } }).length,
+      1,
+      'the filters AND together',
+    );
+    assert.equal(store.search('fox', { kind: ['log'], metadata: { project: 'wild' } }).length, 0);
   } finally {
     cleanup();
   }
@@ -327,18 +507,6 @@ test('search: default limit is 20', () => {
       store.store(`memory number ${i} with fox`, { kind: 'note' });
     }
     assert.equal(store.search('fox').length, 20);
-  } finally {
-    cleanup();
-  }
-});
-
-test('search: applies the where filter on the row — the kind column since v6', () => {
-  const { store, cleanup } = tempStore();
-  try {
-    seed(store);
-    const results = store.search('fox', { where: `kind = 'note'` });
-    assert.equal(results.length, 1);
-    assert.equal(results[0]!.kind, 'note');
   } finally {
     cleanup();
   }
