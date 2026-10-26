@@ -530,12 +530,138 @@ function normaliseLimit(limit: number | undefined, fallback: number): number {
   return limit;
 }
 
-function normaliseOffset(offset: number | undefined): number {
-  if (offset === undefined) return 0;
-  if (!Number.isInteger(offset) || offset < 0) {
-    throw new Error('offset must be an integer >= 0');
+/**
+ * One compiled WHERE condition: the SQL fragment and the parameters it
+ * binds. Callers only ever AND whole conditions — no fragment of caller
+ * input is interpolated anywhere (paths are validated to a fixed grammar
+ * before composition, values are bound).
+ */
+interface SqlCondition {
+  readonly sql: string;
+  readonly params: readonly (string | number)[];
+}
+
+/**
+ * One metadata path segment: an object-key level (letters, digits, `-`,
+ * `_`) with an optional array index. The grammar the read filter
+ * composes paths from — and the same one the write surface enforces on
+ * stored keys (#40), so everything stored stays addressable.
+ */
+const PATH_SEGMENT = /^([A-Za-z0-9_-]+)(\[(\d+)\])?$/;
+
+/**
+ * Validates one metadata filter path and composes its JSON path from the
+ * validated segments (`project.owner` → `$.project.owner`,
+ * `tags[0]` → `$.tags[0]`). Refusals teach the grammar — wildcards and
+ * dotted keys have no spelling here: an unbounded containment would be a
+ * query language, and a dotted key would be unreachable by a dot-path
+ * filter (the write surface refuses it at authoring time, #40).
+ */
+function compileMetadataPath(path: string): string {
+  if (!path) {
+    throw new Error(
+      'metadata filter paths must be non-empty dot-paths ("project.owner", "tags[0]")',
+    );
   }
-  return offset;
+  const composed = path
+    .split('.')
+    .map((segment) => {
+      const match = segment.match(PATH_SEGMENT);
+      if (!match) {
+        throw new Error(
+          `metadata filter paths accept letters, digits, "-" and "_" per segment, with optional [n] indices` +
+            ` — refused: ${JSON.stringify(path)}`,
+        );
+      }
+      return `.${match[1]}${match[2] ?? ''}`;
+    })
+    .join('');
+  return `$${composed}`;
+}
+
+/**
+ * Compiles the typed read filters into WHERE conditions over the
+ * memories row (aliased `m`): `kind` as a bound IN list, `metadata` as
+ * typed scalar equality per path — json_valid-guarded, so a
+ * hand-corrupted metadata column matches nothing instead of failing the
+ * scan (the reads' forgiveness precedent, #12; the doctor is where the
+ * corruption speaks). JSON booleans bind as 1/0 — node:sqlite refuses
+ * boolean parameters. Empty filters refuse with the shape: a filter set
+ * without intention is a caller bug, not a no-op.
+ */
+function compileReadFilters(filters: ReadFilters): readonly SqlCondition[] {
+  const conditions: SqlCondition[] = [];
+  if (filters.kind !== undefined) {
+    const kinds = filters.kind;
+    if (!Array.isArray(kinds) || kinds.length === 0) {
+      throw new Error(
+        'kind filter refuses an empty list — pass kind names ("note", "log", …) or omit kind',
+      );
+    }
+    for (const kind of kinds) {
+      if (typeof kind !== 'string' || !kind) {
+        throw new Error('kind filter entries must be non-empty kind names');
+      }
+    }
+    conditions.push({
+      sql: `m.kind IN (${kinds.map(() => '?').join(', ')})`,
+      params: [...kinds],
+    });
+  }
+  if (filters.metadata !== undefined) {
+    const entries = Object.entries(filters.metadata);
+    if (entries.length === 0) {
+      throw new Error(
+        'metadata filter refuses an empty object — pass at least one path/value pair or omit metadata',
+      );
+    }
+    for (const [path, value] of entries) {
+      const jsonPath = compileMetadataPath(path);
+      let bound: string | number;
+      if (typeof value === 'boolean') {
+        bound = value ? 1 : 0;
+      } else if (typeof value === 'string' || typeof value === 'number') {
+        bound = value;
+      } else {
+        throw new Error('metadata filter values must be strings, numbers or booleans');
+      }
+      // The path interpolates VALIDATED segments only — no caller input
+      // reaches the SQL text; the value rides as a bound parameter.
+      conditions.push({
+        sql:
+          "json_extract(CASE WHEN json_valid(m.metadata) THEN m.metadata END, '" +
+          jsonPath +
+          "') = ?",
+        params: [bound],
+      });
+    }
+  }
+  return conditions;
+}
+
+/**
+ * The keyset cursor's contract: absent means the first page; present, it
+ * must be a real `{ created_at, id }` pair — the serving key of the last
+ * node, both non-empty strings. Taken raw (the HTTP surface wraps it
+ * opaque, #19); anything else refuses with the shape.
+ */
+function normaliseAfter(
+  after: ListCursor | undefined,
+): { readonly created_at: string; readonly id: string } | null {
+  if (after === undefined) return null;
+  if (
+    typeof after !== 'object' ||
+    after === null ||
+    typeof after.created_at !== 'string' ||
+    !after.created_at ||
+    typeof after.id !== 'string' ||
+    !after.id
+  ) {
+    throw new Error(
+      'after must be { created_at, id } — the serving key of the last node, both non-empty strings',
+    );
+  }
+  return after;
 }
 
 /**
@@ -1121,9 +1247,9 @@ export class Store {
    * Search memories by FTS5 match, ranked by pure bm25 — search wants to
    * search everywhere: no weight, recency or access terms (the legacy
    * ranking factors died with their columns). Living-only unless
-   * includeTerminals (`active` + `hot`, #38), narrowed by the where grant,
-   * limit 20 by default. Hits are projected nodes (depth-1 relations
-   * included).
+   * includeTerminals (`active` + `hot`, #38), narrowed by the typed
+   * filters (kind IN, metadata equality — #40), limit 20 by default.
+   * Hits are projected nodes (depth-1 relations included).
    *
    * A failed MATCH is not a refusal: when the failure comes from FTS5
    * glue in the query itself (dotted numerics, hyphenated/colonated
@@ -1139,17 +1265,21 @@ export class Store {
       ' (bm25(memories_fts)) AS rank' +
       ' FROM memories_fts f JOIN memories m ON m.rowid = f.rowid' +
       ' WHERE memories_fts MATCH ?';
+    const conditions: SqlCondition[] = [];
     if (options.includeTerminals !== true) {
-      sql += ` AND m.status IN ('active', 'hot')`;
+      conditions.push({ sql: "m.status IN ('active', 'hot')", params: [] });
     }
-    if (options.where) {
-      sql += ` AND ${options.where}`;
+    conditions.push(...compileReadFilters(options));
+    if (conditions.length > 0) {
+      sql += ` AND ${conditions.map((condition) => condition.sql).join(' AND ')}`;
     }
     sql += ' ORDER BY rank LIMIT ?';
     const runQuery = (match: string): SearchResult[] => {
-      const rows = this.#db.prepare(sql).all(match, limit) as unknown as Array<
-        MemoryRow & { readonly rank: number }
-      >;
+      const rows = this.#db.prepare(sql).all(
+        match,
+        ...conditions.flatMap((condition) => [...condition.params]),
+        limit,
+      ) as unknown as Array<MemoryRow & { readonly rank: number }>;
       return rows.map((row) => ({
         ...this.#projectNode(parseMemoryRow(row), 1, new Set<string>()),
         rank: row.rank,
@@ -1190,28 +1320,41 @@ export class Store {
   }
 
   /**
-   * List memories as projected nodes: newest first, living-only unless
-   * includeTerminals (`active` + `hot`, #38), paged by limit/offset,
-   * narrowed by the where grant. Every row carries its depth-1 relations
-   * block — list is the set-serving verb, and the projection rides free
-   * next to the content read.
+   * List memories as projected nodes: newest first — `created_at DESC,
+   * id DESC`, the UUID's lexicographic key breaking the millisecond tie
+   * (#40) — living-only unless includeTerminals (`active` + `hot`,
+   * #38), narrowed by the typed filters (kind IN, metadata equality),
+   * paged by the keyset cursor (`after` — the last node's serving key;
+   * `offset` is dead: the HTTP server was its only consumer, #19). Every
+   * row carries its depth-1 relations block — list is the set-serving
+   * verb, and the projection rides free next to the content read.
    */
   list(options: ListOptions = {}): MemoryWithRelations[] {
     const limit = normaliseLimit(options.limit, 20);
-    const offset = normaliseOffset(options.offset);
-    let sql = 'SELECT id, content, kind, summary, metadata, created_at, status FROM memories';
-    const conditions: string[] = [];
+    const after = normaliseAfter(options.after);
+    let sql =
+      'SELECT m.id, m.content, m.kind, m.summary, m.metadata, m.created_at, m.status' +
+      ' FROM memories m';
+    const conditions: SqlCondition[] = [];
     if (options.includeTerminals !== true) {
-      conditions.push("status IN ('active', 'hot')");
+      conditions.push({ sql: "m.status IN ('active', 'hot')", params: [] });
     }
-    if (options.where) {
-      conditions.push(options.where);
+    conditions.push(...compileReadFilters(options));
+    if (after) {
+      // The keyset predicate: strictly after the cursor's serving key in
+      // the serving order — the ms-tie broken by the lexicographic id.
+      conditions.push({
+        sql: '(m.created_at < ? OR (m.created_at = ? AND m.id < ?))',
+        params: [after.created_at, after.created_at, after.id],
+      });
     }
     if (conditions.length > 0) {
-      sql += ` WHERE ${conditions.join(' AND ')}`;
+      sql += ` WHERE ${conditions.map((condition) => condition.sql).join(' AND ')}`;
     }
-    sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    const rows = this.#db.prepare(sql).all(limit, offset) as unknown as MemoryRow[];
+    sql += ' ORDER BY m.created_at DESC, m.id DESC LIMIT ?';
+    const rows = this.#db
+      .prepare(sql)
+      .all(...conditions.flatMap((condition) => [...condition.params]), limit) as unknown as MemoryRow[];
     return rows.map((row) => this.#projectNode(parseMemoryRow(row), 1, new Set<string>()));
   }
 
