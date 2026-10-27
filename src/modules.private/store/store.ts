@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { migrate, SCHEMA_VERSION, schemaVersion } from './migration/migration.ts';
+import { andConditions } from './utils/and-conditions/and-conditions.ts';
 import { compileReadFilters } from './utils/compile-read-filters/compile-read-filters.ts';
 import { execPragma } from './utils/exec-pragma/exec-pragma.ts';
 import { execSharedPragmas } from './utils/exec-shared-pragmas/exec-shared-pragmas.ts';
@@ -18,7 +19,10 @@ import { sidecarPaths } from './utils/sidecar-paths/sidecar-paths.ts';
 import { tightenPermissions } from './utils/tighten-permissions/tighten-permissions.ts';
 import { validateMetadataKeys } from './utils/validate-metadata-keys/validate-metadata-keys.ts';
 import { withBusyRetry } from './utils/with-busy-retry/with-busy-retry.ts';
-import type { SqlCondition } from './utils/compile-read-filters/compile-read-filters.ts';
+import type {
+  ReadFilters,
+  SqlCondition,
+} from './utils/compile-read-filters/compile-read-filters.ts';
 import type { MemoryRow } from './utils/parse-memory-row/parse-memory-row.ts';
 import type { RelationRow } from './utils/parse-relation-row/parse-relation-row.ts';
 
@@ -220,41 +224,6 @@ export interface GetOptions {
    * upper bound — the visited set guards cycles, the caller owns the pace.
    */
   readonly depth?: number;
-}
-
-/**
- * The metadata filter's shape: dot-path keys — segments `[A-Za-z0-9_-]+`,
- * an optional `[n]` index per level (`project.owner`, `tags[0]`) — to
- * scalar values. No wildcards: an unbounded containment would turn
- * equality into a query language (the richer search registers in the
- * backlog on observed need). Corrupted metadata — hand SQL, out of band —
- * matches nothing (the reads' forgiveness precedent, #12); the doctor is
- * where the corruption speaks.
- */
-export interface MetadataFilters {
-  readonly [path: string]: string | number | boolean;
-}
-
-/**
- * The typed read filters the set-serving verbs share (#19, revised in
- * #40 — the `tags` filter died unloved, never observed in the corpus):
- * `kind` narrows by the required column — IN semantics, any of the list —
- * and `metadata` narrows by typed equality on JSON paths — AND semantics
- * across paths. Both compile to bound parameters inside the facade: the
- * raw SQL `where` grant is dead, one language, no fragments through the
- * surface.
- */
-export interface ReadFilters {
-  readonly kind?: readonly string[];
-  /**
-   * Scalar equality on metadata paths: `{ project: 'souvenance' }` keeps
-   * the memories whose metadata carries `project = 'souvenance'` — typed
-   * equality (the JSON number 42 does not match the string '42'; JSON
-   * booleans compare as 1/0), a path the memory does not carry excludes
-   * it. The write surface validates every authored metadata key against
-   * the same path grammar (#40): everything stored stays addressable.
-   */
-  readonly metadata?: MetadataFilters;
 }
 
 /**
@@ -979,18 +948,15 @@ export class Store {
       conditions.push({ sql: "m.status IN ('active', 'hot')", params: [] });
     }
     conditions.push(...compileReadFilters(options));
-    if (conditions.length > 0) {
-      sql += ` AND ${conditions.map((condition) => condition.sql).join(' AND ')}`;
+    const where = andConditions(conditions);
+    if (where.sql) {
+      sql += ` AND ${where.sql}`;
     }
     sql += ' ORDER BY rank, m.created_at DESC, m.id DESC LIMIT ?';
     const runQuery = (match: string): SearchResult[] => {
-      const rows = this.#db
-        .prepare(sql)
-        .all(
-          match,
-          ...conditions.flatMap((condition) => [...condition.params]),
-          limit,
-        ) as unknown as Array<MemoryRow & { readonly rank: number }>;
+      const rows = this.#db.prepare(sql).all(match, ...where.params, limit) as unknown as Array<
+        MemoryRow & { readonly rank: number }
+      >;
       return rows.map((row) => ({
         ...this.#projectNode(parseMemoryRow(row), 1, new Set<string>()),
         rank: row.rank,
@@ -1061,16 +1027,12 @@ export class Store {
         params: [after.created_at, after.created_at, after.id],
       });
     }
-    if (conditions.length > 0) {
-      sql += ` WHERE ${conditions.map((condition) => condition.sql).join(' AND ')}`;
+    const where = andConditions(conditions);
+    if (where.sql) {
+      sql += ` WHERE ${where.sql}`;
     }
     sql += ' ORDER BY m.created_at DESC, m.id DESC LIMIT ?';
-    const rows = this.#db
-      .prepare(sql)
-      .all(
-        ...conditions.flatMap((condition) => [...condition.params]),
-        limit,
-      ) as unknown as MemoryRow[];
+    const rows = this.#db.prepare(sql).all(...where.params, limit) as unknown as MemoryRow[];
     return rows.map((row) => this.#projectNode(parseMemoryRow(row), 1, new Set<string>()));
   }
 
