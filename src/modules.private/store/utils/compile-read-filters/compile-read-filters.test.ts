@@ -54,6 +54,20 @@ test('empty or non-string kind entries refuse', () => {
   );
 });
 
+test('a non-array kind list refuses — the cast the types forbid', () => {
+  assert.throws(
+    () => compileReadFilters({ kind: 'note' as unknown as readonly string[] }),
+    /kind filter refuses an empty list/,
+  );
+});
+
+test('a non-string kind entry refuses — the cast the types forbid', () => {
+  assert.throws(
+    () => compileReadFilters({ kind: [42 as unknown as string] }),
+    /kind filter entries must be non-empty kind names/,
+  );
+});
+
 test('non-scalar metadata values refuse', () => {
   assert.throws(
     () => compileReadFilters({ metadata: { project: undefined as unknown as string } }),
