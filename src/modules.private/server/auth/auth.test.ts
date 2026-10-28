@@ -5,6 +5,7 @@ import type { TokenGrant } from '../../config/config.ts';
 import {
   auth,
   bearerOf,
+  grantReaches,
   isLoopback,
   isLoopbackHost,
   OPERATOR_STORE,
@@ -44,6 +45,29 @@ test('the loopback notion covers the v4, v6 and mapped forms — never the wildc
   assert.equal(isLoopback('192.168.1.10'), false);
   assert.equal(isLoopbackHost('localhost'), true);
   assert.equal(isLoopbackHost('0.0.0.0'), false, 'binding every interface is not local');
+});
+
+test('grantReaches: the operator reaches every store, a grant its one', () => {
+  const operator = {
+    agent: 'operator',
+    store: OPERATOR_STORE,
+    mode: 'rw',
+    manage: true,
+    operator: true,
+    key: 'operator',
+  } as const;
+  const atlasGrant = {
+    agent: 'atlas',
+    store: 'atlas',
+    mode: 'rw',
+    manage: false,
+    operator: false,
+    key: 'k',
+  } as const;
+  assert.equal(grantReaches(operator, 'atlas'), true);
+  assert.equal(grantReaches(operator, 'nowhere'), true);
+  assert.equal(grantReaches(atlasGrant, 'atlas'), true);
+  assert.equal(grantReaches(atlasGrant, 'other'), false);
 });
 
 test('no header on a seen loopback peer resolves to the operator', async () => {

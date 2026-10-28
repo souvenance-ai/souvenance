@@ -16,7 +16,17 @@ import { StoreError } from '../store/store-error/store-error.ts';
 import { auth, requireManage, type ServerEnv } from './auth/auth.ts';
 import { rateLimit } from './rate-limit/rate-limit.ts';
 import { registerManagementRoutes } from './management/management.ts';
+import { registerReadRoutes } from './reads/reads.ts';
+import { registerRitualRoutes } from './rituals/rituals.ts';
 import type { Registry } from './registry/registry.ts';
+import { HTTPException } from 'hono/http-exception';
+import {
+  CheckinReportSchema,
+  CheckoutReportSchema,
+  MemoryNodeSchema,
+  OutEdgeSchema,
+  SearchHitSchema,
+} from './wire/wire.ts';
 
 export const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -60,6 +70,19 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   });
   app.get('/docs', swaggerUI({ url: '/doc' }));
 
+  // The recursive wire shapes must be NAMED components: the OpenAPI
+  // generator inlines every schema it walks, and a recursion inlined is
+  // an infinite walk — registered, the cycle emits $ref instead.
+  for (const [name, schema] of [
+    ['MemoryNode', MemoryNodeSchema],
+    ['OutEdge', OutEdgeSchema],
+    ['SearchHit', SearchHitSchema],
+    ['CheckinReport', CheckinReportSchema],
+    ['CheckoutReport', CheckoutReportSchema],
+  ] as const) {
+    app.openAPIRegistry.register(name, schema);
+  }
+
   // The envelope: every refusal one JSON doc, {error: message} (#19).
   // 500 never carries details (#19): read_only (the manager's case — the
   // server never opens read-only) and every non-StoreError land in the
@@ -69,6 +92,11 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
     return c.json({ error: 'internal error' }, 500);
   };
   app.onError((err, c) => {
+    // Hono's own HTTP exceptions — the data routes' reach refusals — ride
+    // the envelope with their status.
+    if (err instanceof HTTPException) {
+      return c.json({ error: err.message }, err.status as 400 | 403 | 404);
+    }
     if (!(err instanceof StoreError)) return internal(err, c);
     const status = STATUS_BY_CODE[err.code];
     if (status === 500) return internal(err, c);
@@ -96,6 +124,8 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   app.use('/stores/:name/fork', requireManage());
 
   registerManagementRoutes(app, deps.registry);
+  registerReadRoutes(app, deps.registry);
+  registerRitualRoutes(app, deps.registry);
 
   return app;
 }

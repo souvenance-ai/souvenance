@@ -40,6 +40,11 @@ export interface ResolvedGrant {
 
 export const OPERATOR_STORE = '*';
 
+/** Whether the grant may serve this store: the operator reaches every store, a grant its one. */
+export function grantReaches(grant: ResolvedGrant, storeName: string): boolean {
+  return grant.store === OPERATOR_STORE || grant.store === storeName;
+}
+
 export function isLoopback(peer: string): boolean {
   return peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
 }
