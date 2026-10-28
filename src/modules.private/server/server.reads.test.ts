@@ -48,6 +48,12 @@ async function get(
   return { status: res.status, body: text ? JSON.parse(text) : null };
 }
 
+/** The #34-family guard: the next write lands in a strictly later millisecond. */
+async function nextMillisecond(): Promise<void> {
+  const gate = Date.now() + 2;
+  await new Promise((resolve) => setTimeout(resolve, Math.max(0, gate - Date.now())));
+}
+
 function jsonQuery(params: Record<string, string | string[]>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -69,7 +75,12 @@ test('the list pages by the opaque cursor — {memories, next_after}, null when 
   const dir = tempDir();
   try {
     const { app, registry, atlas } = boot(dir);
-    for (const content of ['one', 'two', 'three', 'four']) seed(atlas, content, { kind: 'note' });
+    // The seeds must not share a millisecond: same-ms ties order by id —
+    // random UUIDs, a coin toss per runner (#34 family, fired on CI).
+    for (const content of ['one', 'two', 'three', 'four']) {
+      seed(atlas, content, { kind: 'note' });
+      await nextMillisecond();
+    }
     const first = await get(app, `/stores/atlas/memories?limit=2`);
     assert.equal(first.status, 200);
     assert.equal(first.body.memories.length, 2);

@@ -70,7 +70,12 @@ test('checkin honors the limit — order guides attention, the cap truncates', a
   const dir = tempDir();
   try {
     const { app, registry, atlas } = boot(dir);
+    // The two hot memories must not share a millisecond: the hot block
+    // serves newest first, and same-ms ties order by id — random UUIDs,
+    // a coin toss per runner (#34 family).
     const first = atlas.store('first hot', { kind: 'note' });
+    const gate = Date.now() + 2;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, gate - Date.now())));
     const second = atlas.store('second hot', { kind: 'note' });
     atlas.setHot(first, true);
     atlas.setHot(second, true);
