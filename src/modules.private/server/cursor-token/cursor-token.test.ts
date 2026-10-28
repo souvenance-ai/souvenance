@@ -22,3 +22,14 @@ test('anything not ours decodes to undefined — garbage, wrong shape, tampered 
     'a non-string created_at is not ours',
   );
 });
+
+test('extra keys refuse — a token carrying the whole node is not ours (the draft mistake)', () => {
+  const leaked = Buffer.from(
+    JSON.stringify({
+      created_at: '2026-10-28T10:00:00.000Z',
+      id: 'abc',
+      content: 'the whole memory riding the cursor',
+    }),
+  ).toString('base64url');
+  assert.equal(decodeCursor(leaked), undefined);
+});

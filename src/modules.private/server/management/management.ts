@@ -15,11 +15,9 @@
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
-import { STORE_NAME } from '../../config/config.ts';
 import type { Registry } from '../registry/registry.ts';
 import type { ServerEnv } from '../auth/auth.ts';
-
-const StoreNameSchema = z.string().regex(STORE_NAME);
+import { refusal, StoreNameSchema } from '../wire/wire.ts';
 
 const StatsSchema = z.object({
   memories: z.number(),
@@ -29,19 +27,9 @@ const StatsSchema = z.object({
   edges_by_kind: z.record(z.string(), z.number()).readonly(),
 });
 
-const ErrorSchema = z.object({ error: z.string() });
-
 const NameSchema = z.object({ name: StoreNameSchema });
 const ForkBodySchema = z.object({ name: StoreNameSchema.optional() });
 const DescriptorSchema = z.object({ name: z.string(), stats: StatsSchema });
-
-/** One documented refusal, typed so the response keys stay literal. */
-function refusal(description: string) {
-  return {
-    description,
-    content: { 'application/json': { schema: ErrorSchema } },
-  };
-}
 
 const CAP_REFUSAL = () => refusal('the grant carries no manage cap');
 const UNKNOWN_REFUSAL = () => refusal('no such store');
