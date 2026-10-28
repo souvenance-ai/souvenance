@@ -11,9 +11,10 @@
  * The secret comparison is timing-safe the honest way: both sides are
  * hashed to fixed-length digests before timingSafeEqual — no length
  * leak, no early exit. The peer is read off the node socket
- * (@hono/node-server env); no socket info (unit tests' synthetic
- * requests) counts as loopback — the tests exercise operator mode by
- * default and pin the remote refusal on the header path.
+ * (@hono/node-server env) and the check fails closed: no socket info is
+ * not loopback — it is unverifiable, and unverifiable callers refuse.
+ * The socket-less tests inject a loopback peer explicitly (app.request's
+ * env parameter); the remote refusal is pinned on that same path.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createMiddleware } from 'hono/factory';
@@ -73,7 +74,16 @@ function resolveToken(tokens: readonly TokenGrant[], secret: string): TokenGrant
 
 export function auth(tokens: readonly TokenGrant[]) {
   return createMiddleware<ServerEnv>(async (c, next) => {
-    const secret = bearerOf(c.req.header('authorization'));
+    const header = c.req.header('authorization');
+    const secret = bearerOf(header);
+    if (header !== undefined && secret === undefined) {
+      // A presented credential must at least speak Bearer — a malformed
+      // one is a refusal, never a silent downgrade to the operator.
+      return c.json(
+        { error: 'only Bearer credentials are spoken — pass Authorization: Bearer <secret>' },
+        401,
+      );
+    }
     if (secret !== undefined) {
       const grant = resolveToken(tokens, secret);
       if (grant === undefined) {
@@ -89,10 +99,13 @@ export function auth(tokens: readonly TokenGrant[]) {
       });
       return next();
     }
+    // Fail closed: a peer we cannot see is a peer we cannot vouch for —
+    // the operator grant is never handed to an unverifiable caller. The
+    // node adapter always provides the socket; its absence refuses.
     const peer = peerAddress(c);
-    if (peer !== undefined && !isLoopback(peer)) {
+    if (peer === undefined || !isLoopback(peer)) {
       return c.json(
-        { error: 'tokens required off loopback — pass Authorization: Bearer <secret>' },
+        { error: 'tokens required — no loopback peer seen; pass Authorization: Bearer <secret>' },
         401,
       );
     }

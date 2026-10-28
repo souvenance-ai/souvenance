@@ -58,7 +58,7 @@ test('a store file breaking the grammar kills the boot — half a registry is a 
   const dir = tempDir();
   try {
     writeFileSync(join(dir, 'Atlas.db'), 'not a store');
-    assert.throws(() => Registry.open(dir), /breaks the store-name grammar/);
+    assert.throws(() => Registry.open(dir), /breaks the grammar/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

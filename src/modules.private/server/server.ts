@@ -10,6 +10,7 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { swaggerUI } from '@hono/swagger-ui';
 import { bodyLimit } from 'hono/body-limit';
+import type { Context } from 'hono';
 import type { TokenGrant } from '../config/config.ts';
 import { StoreError } from '../store/store-error/store-error.ts';
 import { auth, type ServerEnv } from './auth/auth.ts';
@@ -46,16 +47,18 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   app.get('/docs', swaggerUI({ url: '/doc' }));
 
   // The envelope: every refusal one JSON doc, {error: message} (#19).
-  app.onError((err, c) => {
-    if (err instanceof StoreError) {
-      // read_only never serves over HTTP — the server opens read-write
-      // or not at all; if it ever surfaces here it IS an internal error.
-      if (err.code === 'read_only') return c.json({ error: 'internal error' }, 500);
-      return c.json({ error: err.message }, STATUS_BY_CODE[err.code]);
-    }
-    // Internals to the operator's stderr — the client gets the verdict only.
+  // 500 never carries details (#19): read_only (the manager's case — the
+  // server never opens read-only) and every non-StoreError land in the
+  // same opaque internal; the detail goes to the operator's stderr.
+  const internal = (err: unknown, c: Context): Response => {
     process.stderr.write(`internal error: ${err instanceof Error ? err.stack : String(err)}\n`);
     return c.json({ error: 'internal error' }, 500);
+  };
+  app.onError((err, c) => {
+    if (!(err instanceof StoreError)) return internal(err, c);
+    const status = STATUS_BY_CODE[err.code];
+    if (status === 500) return internal(err, c);
+    return c.json({ error: err.message }, status);
   });
   app.notFound((c) => c.json({ error: 'no such route' }, 404));
 

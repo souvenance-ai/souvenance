@@ -7,6 +7,7 @@
  */
 import { loadConfig } from '../../../modules.private/config/config.ts';
 import { startServer } from '../../../modules.private/server/serve/serve.ts';
+import pkg from '../../../../package.json' with { type: 'json' };
 
 export interface ServeOptions {
   readonly port?: number;
@@ -26,6 +27,7 @@ export async function serve(options: ServeOptions): Promise<void> {
     host: config.host,
     storesDir: config.storesDir,
     tokens: config.tokens,
+    version: pkg.version,
   });
   const shutdown = (): void => {
     void running.close().then(() => process.exit(0));

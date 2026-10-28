@@ -41,39 +41,42 @@ export class Registry {
    */
   static open(storesDir: string): Registry {
     mkdirSync(storesDir, { recursive: true });
-    const registered = new Map<string, Registered>();
+    const registry = new Registry(storesDir, new Map());
     for (const entry of readdirSync(storesDir)) {
       if (!entry.endsWith('.db')) continue;
       const name = entry.slice(0, -3);
-      if (!STORE_NAME.test(name)) {
-        throw new StoreError(
-          'invalid',
-          `store file "${entry}" breaks the store-name grammar — ` +
-            `rename it or move it out of the registry`,
-        );
-      }
-      registered.set(name, Registry.#claimAndOpen(storesDir, name));
+      Registry.#assertName(name, `the registry file "${entry}"`);
+      registry.#claim(name, (dbPath) => Store.open({ dbPath }));
     }
-    return new Registry(storesDir, registered);
+    return registry;
   }
 
-  static #claimAndOpen(storesDir: string, name: string): Registered {
-    const lock = OwnershipLock.acquire(join(storesDir, `${name}.lock`));
-    try {
-      return { store: Store.open({ dbPath: join(storesDir, `${name}.db`) }), lock };
-    } catch (err) {
-      lock.release();
-      throw err;
-    }
-  }
-
-  static #assertName(name: string): void {
+  static #assertName(name: string, context?: string): void {
     if (!STORE_NAME.test(name)) {
       throw new StoreError(
         'invalid',
-        `store name "${name}" breaks the grammar ${STORE_NAME.source} — ` +
-          `lowercase letter first, then lowercase letters, digits, hyphens, 32 chars total`,
+        `store name "${name}"${context !== undefined ? ` (${context})` : ''} breaks the grammar ` +
+          `${STORE_NAME.source} — lowercase letter first, then lowercase letters, digits, hyphens, 32 chars total` +
+          (context !== undefined ? '; rename it or move it out of the registry' : ''),
       );
+    }
+  }
+
+  /**
+   * The one claim ceremony: lock the name, build the store into it,
+   * register; any refusal releases the lock before it bubbles. Every
+   * path that adds a store to the registry walks through here — boot's
+   * cold-open, create, fork.
+   */
+  #claim(name: string, build: (dbPath: string) => Store): Store {
+    const lock = OwnershipLock.acquire(join(this.#storesDir, `${name}.lock`));
+    try {
+      const store = build(join(this.#storesDir, `${name}.db`));
+      this.#registered.set(name, { store, lock });
+      return store;
+    } catch (err) {
+      lock.release();
+      throw err;
     }
   }
 
@@ -92,9 +95,7 @@ export class Registry {
     if (this.#registered.has(name)) {
       throw new StoreError('conflict', `store "${name}" already exists`);
     }
-    const claimed = Registry.#claimAndOpen(this.#storesDir, name);
-    this.#registered.set(name, claimed);
-    return claimed.store;
+    return this.#claim(name, (dbPath) => Store.open({ dbPath }));
   }
 
   /**
@@ -112,16 +113,11 @@ export class Registry {
     if (this.#registered.has(name)) {
       throw new StoreError('conflict', `store "${name}" already exists`);
     }
-    // Lock first: the claim is the collision guard; the fork fills it in.
-    const lock = OwnershipLock.acquire(join(this.#storesDir, `${name}.lock`));
-    try {
-      sourceStore.fork(join(this.#storesDir, `${name}.db`));
-    } catch (err) {
-      lock.release();
-      throw err;
-    }
-    const store = Store.open({ dbPath: join(this.#storesDir, `${name}.db`) });
-    this.#registered.set(name, { store, lock });
+    // The claim is the collision guard; the fork fills the claimed name in.
+    this.#claim(name, (dbPath) => {
+      sourceStore.fork(dbPath);
+      return Store.open({ dbPath });
+    });
     return name;
   }
 
@@ -151,8 +147,11 @@ export class Registry {
     }
     this.#registered.delete(name);
     registered.store.close();
+    // The lock releases first (pid-checked, its timer stops), then the
+    // files: db + WAL sidecars — the lock file is gone with the release.
+    registered.lock.release();
     const dbPath = join(this.#storesDir, `${name}.db`);
-    for (const path of [...sidecarPaths(dbPath), join(this.#storesDir, `${name}.lock`)]) {
+    for (const path of sidecarPaths(dbPath)) {
       rmSync(path, { force: true });
     }
   }

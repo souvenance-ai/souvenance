@@ -11,6 +11,11 @@ function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'souvenance-server-test-'));
 }
 
+/** The env a real loopback connection carries (the node adapter's shape). */
+function loopbackEnv(): { incoming: { socket: { remoteAddress: string } } } {
+  return { incoming: { socket: { remoteAddress: '127.0.0.1' } } };
+}
+
 function boot(dir: string) {
   const registry = Registry.open(dir);
   const app = createApp({ registry, tokens: [], version: 'test' });
@@ -69,12 +74,23 @@ test('an unknown store under the guarded namespace is a 404 once authenticated',
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
-    // The synthetic peer counts as loopback: the operator passes auth,
-    // walks the rate limit and the cap, and hits the (slice-1 empty)
-    // namespace — 404, in the envelope.
-    const res = await app.request('/stores/nowhere');
+    // The loopback peer passes auth, walks the rate limit and the cap,
+    // and hits the (slice-1 empty) namespace — 404, in the envelope.
+    const res = await app.request('/stores/nowhere', {}, loopbackEnv());
     assert.equal(res.status, 404);
     assert.deepEqual((await res.json()) as { error: string }, { error: 'no such route' });
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a guarded request with no peer seen refuses 401 — the check fails closed', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    const res = await app.request('/stores/nowhere');
+    assert.equal(res.status, 401);
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -91,7 +107,7 @@ test('a StoreError thrown inside the guard maps by code into the envelope', asyn
     app.get('/stores/probe', () => {
       throw new StoreError('conflict', 'the memory fights its state');
     });
-    const res = await app.request('/stores/probe');
+    const res = await app.request('/stores/probe', {}, loopbackEnv());
     assert.equal(res.status, 409);
     assert.deepEqual((await res.json()) as { error: string }, {
       error: 'the memory fights its state',
@@ -110,7 +126,7 @@ test('a non-StoreError is an internal error — the client never sees internals'
     app.get('/stores/probe', () => {
       throw new Error('the sqlite file screams in stack-trace');
     });
-    const res = await app.request('/stores/probe');
+    const res = await app.request('/stores/probe', {}, loopbackEnv());
     assert.equal(res.status, 500);
     const body = (await res.json()) as { error: string };
     assert.equal(body.error, 'internal error');

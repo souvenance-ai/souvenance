@@ -40,8 +40,8 @@ export function rateLimit(options: RateLimitOptions = {}) {
     buckets.set(grant.key, { windowStart, count });
 
     if (count > limit) {
-      const retryAfterS = Math.ceil((windowStart + windowMs - now()) / 1000);
-      c.header('retry-after', String(Math.max(retryAfterS, 1)));
+      const retryAfterSeconds = Math.ceil((windowStart + windowMs - now()) / 1000);
+      c.header('retry-after', String(Math.max(retryAfterSeconds, 1)));
       return c.json(
         { error: `rate limit exceeded — ${limit} requests per ${windowMs / 1000}s window` },
         429,

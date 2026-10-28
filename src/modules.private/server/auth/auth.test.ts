@@ -16,6 +16,11 @@ const TOKENS: readonly TokenGrant[] = [
   { agent: 'atlas', secret: SECRET, store: 'atlas', mode: 'rw' },
 ];
 
+/** The env a real loopback connection carries (the node adapter's shape). */
+function loopbackEnv(): { incoming: { socket: { remoteAddress: string } } } {
+  return { incoming: { socket: { remoteAddress: '127.0.0.1' } } };
+}
+
 /** A one-route harness: the handler answers with the resolved grant. */
 function harness(tokens: readonly TokenGrant[]): Hono<ServerEnv> {
   const app = new Hono<ServerEnv>();
@@ -41,8 +46,8 @@ test('the loopback notion covers the v4, v6 and mapped forms — never the wildc
   assert.equal(isLoopbackHost('0.0.0.0'), false, 'binding every interface is not local');
 });
 
-test('no header resolves to the operator — the synthetic peer counts as loopback', async () => {
-  const res = await harness([]).request('/probe');
+test('no header on a seen loopback peer resolves to the operator', async () => {
+  const res = await harness([]).request('/probe', {}, loopbackEnv());
   assert.equal(res.status, 200);
   const grant = (await res.json()) as {
     agent: string;
@@ -56,7 +61,23 @@ test('no header resolves to the operator — the synthetic peer counts as loopba
   assert.equal(grant.operator, true);
 });
 
-test('a matching bearer resolves to its grant — one agent, one store', async () => {
+test('no header with NO peer seen refuses — the check fails closed', async () => {
+  const res = await harness([]).request('/probe');
+  assert.equal(res.status, 401);
+  const body = (await res.json()) as { error: string };
+  assert.match(body.error, /no loopback peer seen/);
+});
+
+test('no header on a remote peer refuses 401 — tokens only off loopback', async () => {
+  const res = await harness([]).request(
+    '/probe',
+    {},
+    { incoming: { socket: { remoteAddress: '192.168.1.10' } } },
+  );
+  assert.equal(res.status, 401);
+});
+
+test('a matching bearer resolves to its grant — one agent, one store, no peer needed', async () => {
   const res = await harness(TOKENS).request('/probe', {
     headers: { authorization: `Bearer ${SECRET}` },
   });
@@ -82,11 +103,13 @@ test('a bearer matching no row refuses 401', async () => {
   assert.match(body.error, /unknown grant/);
 });
 
-test('a malformed scheme is treated as no header — operator on loopback', async () => {
-  const res = await harness([]).request('/probe', {
-    headers: { authorization: `Basic ${SECRET}` },
-  });
-  assert.equal(res.status, 200);
-  const grant = (await res.json()) as { agent: string };
-  assert.equal(grant.agent, 'operator');
+test('a presented non-Bearer credential refuses 401 — never a downgrade to operator', async () => {
+  const res = await harness([]).request(
+    '/probe',
+    { headers: { authorization: `Basic ${SECRET}` } },
+    loopbackEnv(),
+  );
+  assert.equal(res.status, 401);
+  const body = (await res.json()) as { error: string };
+  assert.match(body.error, /only Bearer credentials/);
 });

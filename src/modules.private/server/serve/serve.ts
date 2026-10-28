@@ -28,6 +28,8 @@ export interface ServeOptions {
   readonly host: string;
   readonly storesDir: string;
   readonly tokens: readonly TokenGrant[];
+  /** The package version, surfaced in the OpenAPI document. */
+  readonly version: string;
 }
 
 export interface RunningServer {
@@ -44,7 +46,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     );
   }
   const registry = Registry.open(options.storesDir);
-  const app = createApp({ registry, tokens: options.tokens });
+  const app = createApp({ registry, tokens: options.tokens, version: options.version });
   // The listening is awaited: the boot resolves only once the bound port
   // is known (the smoke test asks for 0 and reads the real one).
   let server!: ServerType;
