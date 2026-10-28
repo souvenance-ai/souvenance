@@ -18,6 +18,7 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createMiddleware } from 'hono/factory';
+import { HTTPException } from 'hono/http-exception';
 import type { TokenGrant } from '../../config/config.ts';
 
 export interface ServerEnv {
@@ -140,4 +141,18 @@ export function requireManage() {
     }
     return next();
   });
+}
+
+/**
+ * The write-mode gate (slice 4, Q8): a ro grant reads everything it
+ * reaches and writes nothing — every write handler calls this first
+ * (after the reach gate: reach, then mode). Inline per handler, never a
+ * blanket middleware: the write paths share their prefixes with reads.
+ */
+export function assertWritable(grant: ResolvedGrant): void {
+  if (grant.mode !== 'rw') {
+    throw new HTTPException(403, {
+      message: 'this grant is read-only — writes need a grant with mode rw',
+    });
+  }
 }

@@ -18,6 +18,7 @@ import { rateLimit } from './rate-limit/rate-limit.ts';
 import { registerManagementRoutes } from './management/management.ts';
 import { registerReadRoutes } from './reads/reads.ts';
 import { registerRitualRoutes } from './rituals/rituals.ts';
+import { registerWriteRoutes } from './writes/writes.ts';
 import type { Registry } from './registry/registry.ts';
 import { HTTPException } from 'hono/http-exception';
 import {
@@ -126,6 +127,7 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   registerManagementRoutes(app, deps.registry);
   registerReadRoutes(app, deps.registry);
   registerRitualRoutes(app, deps.registry);
+  registerWriteRoutes(app, deps.registry);
 
   return app;
 }
