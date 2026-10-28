@@ -7,26 +7,31 @@
  * projection at the asked depth (unknown → 404, teaching); search is
  * limit-only — bare hits with their bm25 `rank`, no cursor (the rank is
  * unstable across corpus changes, #40). An explicit `limit` past the cap
- * refuses 400 (the cap judges only the explicit, Q18); the reach gate
- * refuses a foreign store before existence is spoken (Q8).
+ * refuses 400; ABSENT takes the server's DEFAULT_LIMIT (Q18 revised with
+ * the dev, 2026-10-28: the unbounded verbatim let the facade's own
+ * default truncate silently — an explicit page every time keeps the peek
+ * honest); the reach gate refuses a foreign store before existence is
+ * spoken (Q8).
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
 import { HTTPException } from 'hono/http-exception';
-import { MAX_LIMIT } from '../limits/limits.ts';
+import { DEFAULT_LIMIT } from '../limits/limits.ts';
 import { decodeCursor, encodeCursor } from '../cursor-token/cursor-token.ts';
 import { reachedStore } from '../reached-store/reached-store.ts';
 import type { ServerEnv } from '../auth/auth.ts';
 import type { Registry } from '../registry/registry.ts';
 import type { MetadataFilters } from '../../store/utils/compile-read-filters/compile-read-filters.ts';
-import { MemoryNodeSchema, SearchHitSchema } from '../wire/wire.ts';
-import { STORE_NAME } from '../../config/config.ts';
+import {
+  ErrorSchema,
+  limitShape,
+  MemoryNodeSchema,
+  refusal,
+  SearchHitSchema,
+  StoreNameSchema,
+  StoreParamsSchema,
+} from '../wire/wire.ts';
 
-const StoreNameSchema = z.string().regex(STORE_NAME);
-const StoreParamsSchema = z.object({ name: StoreNameSchema });
-const ErrorSchema = z.object({ error: z.string() });
-
-const limitShape = z.coerce.number().int().min(1).max(MAX_LIMIT).optional();
 const kindShape = z.array(z.string()).optional();
 const metadataShape = z.string().optional();
 const includeTerminalsShape = z.string().optional();
@@ -51,18 +56,9 @@ function metadataFilters(raw: string | undefined): MetadataFilters | undefined {
   return parsed as MetadataFilters;
 }
 
-const foreignRefusal = () => ({
-  description: 'the grant reaches another store',
-  content: { 'application/json': { schema: ErrorSchema } },
-});
-const unknownStoreRefusal = () => ({
-  description: 'no such store',
-  content: { 'application/json': { schema: ErrorSchema } },
-});
-const invalidRefusal = (description: string) => ({
-  description,
-  content: { 'application/json': { schema: ErrorSchema } },
-});
+const foreignRefusal = () => refusal('the grant reaches another store');
+const unknownStoreRefusal = () => refusal('no such store');
+const invalidRefusal = (description: string) => refusal(description);
 
 export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
   const listMemories = createRoute({
@@ -109,17 +105,19 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
     }
     // The peek: one row past the page answers "is there more" — the
     // cursor is non-null exactly when a next page EXISTS, never an empty
-    // probe for the client. Unbounded stays unbounded (Q18): everything
-    // came back, there is no next page.
+    // probe for the client. Absent limit takes the server's page default
+    // (Q18 revised): an explicit limit every time keeps the peek honest
+    // and the facade's own default out of the wire.
+    const limit = query.limit ?? DEFAULT_LIMIT;
     const rows = store.list({
       after,
-      limit: query.limit !== undefined ? query.limit + 1 : undefined,
+      limit: limit + 1,
       kind: query.kind,
       metadata: metadataFilters(query.metadata),
       includeTerminals: query.include_terminals !== undefined,
     });
-    const hasMore = query.limit !== undefined && rows.length > query.limit;
-    const memories = hasMore ? rows.slice(0, query.limit) : rows;
+    const hasMore = rows.length > limit;
+    const memories = hasMore ? rows.slice(0, limit) : rows;
     const last = hasMore ? memories.at(-1) : undefined;
     // The token carries ONLY the keyset key — the whole node would leak
     // its content into an "opaque" token (MemoryWithRelations embeds the
@@ -195,7 +193,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
     const store = reachedStore(c, registry, name);
     const query = c.req.valid('query');
     const hits = store.search(query.q, {
-      limit: query.limit,
+      limit: query.limit ?? DEFAULT_LIMIT,
       kind: query.kind,
       metadata: metadataFilters(query.metadata),
       includeTerminals: query.include_terminals !== undefined,

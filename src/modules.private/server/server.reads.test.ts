@@ -91,14 +91,25 @@ test('the list pages by the opaque cursor — {memories, next_after}, null when 
   }
 });
 
-test('limit absent serves everything (Q18) — and there is no next page', async () => {
+test('limit absent takes the server default (Q18 revised) — 100, and the cursor stays honest past it', async () => {
   const dir = tempDir();
   try {
     const { app, registry, atlas } = boot(dir);
-    for (const content of ['one', 'two', 'three']) seed(atlas, content, { kind: 'note' });
-    const { body } = await get(app, `/stores/atlas/memories`);
-    assert.equal(body.memories.length, 3);
-    assert.equal(body.next_after, null, 'everything came back — nothing follows');
+    for (let index = 0; index < 101; index++) seed(atlas, `memory ${index}`, { kind: 'note' });
+    // Silent page: 100, NOT the facade's own default of 20, and the
+    // cursor admits there is more (the review probe, pinned).
+    const first = await get(app, `/stores/atlas/memories`);
+    assert.equal(first.body.memories.length, 100);
+    assert.equal(typeof first.body.next_after, 'string');
+    const second = await get(
+      app,
+      `/stores/atlas/memories?after=${encodeURIComponent(first.body.next_after)}`,
+    );
+    assert.equal(second.body.memories.length, 1);
+    assert.equal(second.body.next_after, null);
+    // The cap still judges only the explicit.
+    assert.equal((await get(app, `/stores/atlas/memories?limit=1001`)).status, 400);
+    assert.equal((await get(app, `/stores/atlas/memories?limit=1000`)).status, 200);
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

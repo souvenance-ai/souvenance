@@ -7,16 +7,16 @@
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
-import { MAX_LIMIT } from '../limits/limits.ts';
 import { reachedStore } from '../reached-store/reached-store.ts';
 import type { ServerEnv } from '../auth/auth.ts';
 import type { Registry } from '../registry/registry.ts';
-import { CheckinReportSchema, CheckoutReportSchema } from '../wire/wire.ts';
-import { STORE_NAME } from '../../config/config.ts';
-
-const ErrorSchema = z.object({ error: z.string() });
-const StoreNameSchema = z.string().regex(STORE_NAME);
-const StoreParamsSchema = z.object({ name: StoreNameSchema });
+import {
+  CheckinReportSchema,
+  CheckoutReportSchema,
+  limitShape,
+  refusal,
+  StoreParamsSchema,
+} from '../wire/wire.ts';
 
 export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
   const checkin = createRoute({
@@ -25,25 +25,16 @@ export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Regi
     tags: ['rituals'],
     request: {
       params: StoreParamsSchema,
-      query: z.object({ limit: z.coerce.number().int().min(1).max(MAX_LIMIT).optional() }),
+      query: z.object({ limit: limitShape }),
     },
     responses: {
       200: {
         description: 'the hot block (newest first) and the store stats — the session opens here',
         content: { 'application/json': { schema: CheckinReportSchema } },
       },
-      400: {
-        description: 'the limit is not ours',
-        content: { 'application/json': { schema: ErrorSchema } },
-      },
-      403: {
-        description: 'the grant reaches another store',
-        content: { 'application/json': { schema: ErrorSchema } },
-      },
-      404: {
-        description: 'no such store',
-        content: { 'application/json': { schema: ErrorSchema } },
-      },
+      400: refusal('the limit is not ours'),
+      403: refusal('the grant reaches another store'),
+      404: refusal('no such store'),
     },
   });
   app.openapi(checkin, (c) => {
@@ -63,14 +54,8 @@ export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Regi
         description: 'the consolidation verdict — healthy or the payable findings',
         content: { 'application/json': { schema: CheckoutReportSchema } },
       },
-      403: {
-        description: 'the grant reaches another store',
-        content: { 'application/json': { schema: ErrorSchema } },
-      },
-      404: {
-        description: 'no such store',
-        content: { 'application/json': { schema: ErrorSchema } },
-      },
+      403: refusal('the grant reaches another store'),
+      404: refusal('no such store'),
     },
   });
   app.openapi(checkout, (c) => {

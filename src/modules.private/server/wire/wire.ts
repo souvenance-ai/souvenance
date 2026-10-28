@@ -16,6 +16,30 @@ import type {
   Relation,
   SearchResult,
 } from '../../store/store.ts';
+import { STORE_NAME } from '../../config/config.ts';
+import { MAX_LIMIT } from '../limits/limits.ts';
+
+// ——— The routes' shared vocabulary: the shapes every route file speaks
+// (the error envelope, the store-name param, the capped limit) live here
+// once — three route files declared them apart before the review caught
+// the drift waiting to happen.
+
+export const ErrorSchema = z.object({ error: z.string() });
+
+export const StoreNameSchema = z.string().regex(STORE_NAME);
+
+export const StoreParamsSchema = z.object({ name: StoreNameSchema });
+
+/** The explicit limit's shape: the cap judges only the explicit (Q18). */
+export const limitShape = z.coerce.number().int().min(1).max(MAX_LIMIT).optional();
+
+/** One documented refusal — the response keys stay literal at the call sites. */
+export function refusal(description: string) {
+  return {
+    description,
+    content: { 'application/json': { schema: ErrorSchema } },
+  };
+}
 
 const relationShape = {
   from_id: z.string(),
