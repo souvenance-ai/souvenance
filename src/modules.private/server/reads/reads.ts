@@ -24,11 +24,13 @@ import type { Registry } from '../registry/registry.ts';
 import type { MetadataFilters } from '../../store/utils/compile-read-filters/compile-read-filters.ts';
 import {
   ErrorSchema,
+  foreignRefusal,
+  invalidRefusal,
   limitShape,
   MemoryNodeSchema,
-  refusal,
   SearchHitSchema,
   StoreNameSchema,
+  unknownStoreRefusal,
   StoreParamsSchema,
 } from '../wire/wire.ts';
 
@@ -55,10 +57,6 @@ function metadataFilters(raw: string | undefined): MetadataFilters | undefined {
   }
   return parsed as MetadataFilters;
 }
-
-const foreignRefusal = () => refusal('the grant reaches another store');
-const unknownStoreRefusal = () => refusal('no such store');
-const invalidRefusal = (description: string) => refusal(description);
 
 export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
   const listMemories = createRoute({

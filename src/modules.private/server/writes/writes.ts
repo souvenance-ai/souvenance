@@ -12,10 +12,18 @@
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
-import { reachedStore } from '../reached-store/reached-store.ts';
-import { assertWritable, type ServerEnv } from '../auth/auth.ts';
+import { writableStore } from '../reached-store/reached-store.ts';
+import type { ServerEnv } from '../auth/auth.ts';
 import type { Registry } from '../registry/registry.ts';
-import { refusal, StoreNameSchema, StoreParamsSchema } from '../wire/wire.ts';
+import {
+  foreignRefusal,
+  invalidRefusal,
+  refusal,
+  StoreNameSchema,
+  StoreParamsSchema,
+  unknownMemoryRefusal,
+  unknownStoreRefusal,
+} from '../wire/wire.ts';
 
 const IdParamsSchema = z.object({ name: StoreNameSchema, id: z.uuid() });
 
@@ -57,10 +65,6 @@ const UnlinkBodySchema = z.object({ to: z.uuid(), kind: z.string().optional() })
 const CreatedSchema = z.object({ id: z.string() });
 const EdgeEchoSchema = z.object({ from_id: z.string(), to_id: z.string(), kind: z.string() });
 
-const foreignRefusal = () => refusal('the grant reaches another store');
-const unknownStoreRefusal = () => refusal('no such store');
-const invalidRefusal = (description: string) => refusal(description);
-const unknownMemoryRefusal = () => refusal('no such memory');
 const statusRefusal = () => refusal('the memory fights its status');
 
 export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
@@ -85,8 +89,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   });
   app.openapi(createMemory, (c) => {
     const { name } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
-    assertWritable(c.get('grant'));
+    const store = writableStore(c, registry, name);
     const body = c.req.valid('json');
     const id = store.store(body.content, {
       kind: body.kind,
@@ -118,8 +121,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   });
   app.openapi(supersedeMemory, (c) => {
     const { name, id } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
-    assertWritable(c.get('grant'));
+    const store = writableStore(c, registry, name);
     const body = c.req.valid('json');
     const successor = store.supersede(id, body.content, {
       kind: body.kind,
@@ -144,8 +146,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   });
   app.openapi(deprecateMemory, (c) => {
     const { name, id } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
-    assertWritable(c.get('grant'));
+    const store = writableStore(c, registry, name);
     store.deprecate(id);
     return c.body(null, 204);
   });
@@ -168,8 +169,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   });
   app.openapi(setHot, (c) => {
     const { name, id } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
-    assertWritable(c.get('grant'));
+    const store = writableStore(c, registry, name);
     const { hot } = c.req.valid('json');
     store.setHot(id, hot);
     return c.body(null, 204);
@@ -196,8 +196,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   });
   app.openapi(linkMemories, (c) => {
     const { name, id } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
-    assertWritable(c.get('grant'));
+    const store = writableStore(c, registry, name);
     const body = c.req.valid('json');
     store.link(id, body.to, body.kind, { metadata: body.metadata });
     return c.json({ from_id: id, to_id: body.to, kind: body.kind }, 201);
@@ -221,8 +220,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   });
   app.openapi(unlinkMemories, (c) => {
     const { name, id } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
-    assertWritable(c.get('grant'));
+    const store = writableStore(c, registry, name);
     const body = c.req.valid('json');
     store.unlink(id, body.to, body.kind);
     return c.body(null, 204);
@@ -249,8 +247,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   });
   app.openapi(mergeMemories, (c) => {
     const { name } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
-    assertWritable(c.get('grant'));
+    const store = writableStore(c, registry, name);
     const body = c.req.valid('json');
     const fused = store.merge(body.ids, body.content, {
       kind: body.kind,

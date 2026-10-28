@@ -13,9 +13,11 @@ import type { Registry } from '../registry/registry.ts';
 import {
   CheckinReportSchema,
   CheckoutReportSchema,
+  foreignRefusal,
   limitShape,
   refusal,
   StoreParamsSchema,
+  unknownStoreRefusal,
 } from '../wire/wire.ts';
 
 export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
@@ -33,8 +35,8 @@ export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Regi
         content: { 'application/json': { schema: CheckinReportSchema } },
       },
       400: refusal('the limit is not ours'),
-      403: refusal('the grant reaches another store'),
-      404: refusal('no such store'),
+      403: foreignRefusal(),
+      404: unknownStoreRefusal(),
     },
   });
   app.openapi(checkin, (c) => {
@@ -54,8 +56,8 @@ export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Regi
         description: 'the consolidation verdict — healthy or the payable findings',
         content: { 'application/json': { schema: CheckoutReportSchema } },
       },
-      403: refusal('the grant reaches another store'),
-      404: refusal('no such store'),
+      403: foreignRefusal(),
+      404: unknownStoreRefusal(),
     },
   });
   app.openapi(checkout, (c) => {

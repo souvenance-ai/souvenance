@@ -41,6 +41,14 @@ export function refusal(description: string) {
   };
 }
 
+// ——— The refusals every route family shares, named once: the drift the
+// reviews keep catching is the same teaching re-typed apart.
+
+export const foreignRefusal = () => refusal('the grant reaches another store');
+export const unknownStoreRefusal = () => refusal('no such store');
+export const unknownMemoryRefusal = () => refusal('no such memory');
+export const invalidRefusal = (description: string) => refusal(description);
+
 const relationShape = {
   from_id: z.string(),
   to_id: z.string(),
