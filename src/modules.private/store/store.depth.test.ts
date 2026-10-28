@@ -86,7 +86,7 @@ test('get: depth 2 expands the out tree — the target node carries its own bloc
   }
 });
 
-test('get: out expands while in stays a raw list at every depth', () => {
+test('get: out expands while in stays a raw list at every depth', async () => {
   const { store, cleanup } = tempStore();
   try {
     const a = store.store('memory a', { kind: 'note' });
@@ -95,6 +95,11 @@ test('get: out expands while in stays a raw list at every depth', () => {
     const d = store.store('watcher', { kind: 'note' });
     store.link(a, b, 'references');
     store.link(b, c, 'extends');
+    // c's two in-edges must not share a millisecond: same-ms ties order
+    // by from_id — random UUIDs, a coin toss per runner (#34 family, and
+    // it fired on CI). The newer edge must be newer for real.
+    const gate = Date.now() + 2;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, gate - Date.now())));
     store.link(d, c, 'cites'); // c's incoming edge never expands
 
     const node = store.get(a, { depth: 5 })!;
