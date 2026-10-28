@@ -15,8 +15,8 @@ The caller that animates an individual's store — through the server, never thr
 _Avoid_: user, bot, client (that's the CLI)
 
 **Operator**:
-The human who runs the manager and owns the host — the only audience of `souvenance`.
-_Avoid_: user, admin
+The human who runs the manager and owns the host — the only audience of `souvenance`. On the wire, the loopback caller with no bearer at all: read-write plus manage on every store. Off loopback there is no operator — tokens only.
+_Avoid_: user, admin, anonymous access
 
 **Memory**:
 One record in a store: content, its kind, its authored summary, metadata, and a status (active, hot, superseded, deprecated, merged).
@@ -53,8 +53,8 @@ One SQLite memory database — an individual's memory. The unit of ownership (on
 _Avoid_: database, memory bank, bucket
 
 **Mount**:
-A store the server serves under a URL segment (`/<name>/…`).
-_Avoid_: mount point, attachment
+The `/stores/<name>/…` URL scheme: a store the server serves under its name in the one guarded namespace — management and data alike. No root store, no routes outside it.
+_Avoid_: mount point, attachment, root store, top-level routes
 
 **Fork**:
 An exact copy of a store as a new store — the act by which one individual becomes two.
@@ -100,10 +100,6 @@ _Avoid_: direct verb, local verb
 A bearer token's authority: one agent, one store, one mode (`ro`/`rw`), and an optional manage cap. A row of the config's `tokens[]` — nothing else exists to present.
 _Avoid_: token file (retired), credential, API key
 
-**Operator**:
-The loopback caller with no bearer at all: read-write plus manage on every store — the local hand that runs the server. Off loopback, there is no operator: tokens only.
-_Avoid_: admin, root user, anonymous access
-
 **Manage cap**:
 The default-deny grant capability to create, fork, list, and delete stores.
 _Avoid_: admin cap, root token
@@ -111,10 +107,6 @@ _Avoid_: admin cap, root token
 **Registry**:
 The stores dir as the store inventory: every `<name>.db` in it is a store, none is declared, and boot opens them all or refuses to serve. The dir is the truth — no list beside it to drift.
 _Avoid_: declared stores, store list, catalog
-
-**Mount**:
-The `/stores/<name>/…` URL scheme: every store, management or data, reached by name under the one guarded namespace. No root store, no routes outside it.
-_Avoid_: root store, top-level routes, per-store port
 
 ### The rituals
 

@@ -15,7 +15,13 @@ test('the server listens on the wire and answers healthz', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'souvenance-socket-test-'));
   let server: Awaited<ReturnType<typeof startServer>> | undefined;
   try {
-    server = await startServer({ port: 0, host: '127.0.0.1', storesDir: dir, tokens: [] });
+    server = await startServer({
+      port: 0,
+      host: '127.0.0.1',
+      storesDir: dir,
+      tokens: [],
+      version: 'test',
+    });
     assert.ok(server.port > 0, 'the ephemeral port resolved');
     const res = await fetch(`http://127.0.0.1:${server.port}/healthz`);
     assert.equal(res.status, 200);
@@ -30,7 +36,7 @@ test('a non-loopback bind without tokens refuses at boot — before anything ope
   const dir = mkdtempSync(join(tmpdir(), 'souvenance-socket-test-'));
   try {
     await assert.rejects(
-      startServer({ port: 0, host: '0.0.0.0', storesDir: dir, tokens: [] }),
+      startServer({ port: 0, host: '0.0.0.0', storesDir: dir, tokens: [], version: 'test' }),
       /refusing to bind/,
     );
   } finally {
@@ -41,9 +47,21 @@ test('a non-loopback bind without tokens refuses at boot — before anything ope
 test('close releases the locks — the next boot claims the stores again', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'souvenance-socket-test-'));
   try {
-    const first = await startServer({ port: 0, host: '127.0.0.1', storesDir: dir, tokens: [] });
+    const first = await startServer({
+      port: 0,
+      host: '127.0.0.1',
+      storesDir: dir,
+      tokens: [],
+      version: 'test',
+    });
     await first.close();
-    const second = await startServer({ port: 0, host: '127.0.0.1', storesDir: dir, tokens: [] });
+    const second = await startServer({
+      port: 0,
+      host: '127.0.0.1',
+      storesDir: dir,
+      tokens: [],
+      version: 'test',
+    });
     assert.ok(second.port > 0);
     await second.close();
   } finally {

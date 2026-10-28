@@ -1,6 +1,6 @@
 /**
  * The ownership lock (ADR 0001): one owner per store, claimed by a lock
- * file beside the db — `<name>.lock`, JSON `{pid, acquired_at,
+ * file beside the db — `<name>.lock`, JSON `{pid, claim, acquired_at,
  * heartbeat_at}`. While the server owns a store, every operation flows
  * through it; a second would-be owner is refused while the heartbeat
  * beats. A lock whose heartbeat has gone silent for STALE_MS is the
@@ -10,10 +10,14 @@
  * live-lock "is it really running?" doubt, not this).
  *
  * The claim itself is atomic: the document is written to a scratch name
- * and renamed over the lock path — a reader never sees a half-written
- * lock. A lock that does not parse is refused with the teaching (a hand
- can delete it; the code does not guess).
+ * and linked (never renamed) over the lock path — a reader never sees a
+ * half-written lock. A lock that does not parse is refused with the
+ * teaching (a hand can delete it; the code does not guess). The claim's
+ * identity rides the document: a beat or a release against a foreign
+ * claim refuses — the owner was replaced, and a replaced owner neither
+ * refreshes nor deletes its successor.
  */
+import { randomUUID } from 'node:crypto';
 import {
   closeSync,
   linkSync,
@@ -41,6 +45,8 @@ export interface OwnershipLockOptions {
 
 interface LockDocument {
   readonly pid: number;
+  /** The claim's identity: one per acquire — two locks of one process are still two owners. */
+  readonly claim: string;
   readonly acquired_at: number;
   readonly heartbeat_at: number;
 }
@@ -50,11 +56,13 @@ export class OwnershipLock {
   readonly #lockPath: string;
   readonly #heartbeatMs: number;
   readonly #now: () => number;
+  readonly #claim: string;
 
-  private constructor(lockPath: string, options: OwnershipLockOptions) {
+  private constructor(lockPath: string, options: OwnershipLockOptions, claim: string) {
     this.#lockPath = lockPath;
     this.#heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
     this.#now = options.now ?? Date.now;
+    this.#claim = claim;
   }
 
   /**
@@ -67,7 +75,7 @@ export class OwnershipLock {
     const staleMs = options.staleMs ?? STALE_MS;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        return OwnershipLock.#claim(lockPath, options);
+        return OwnershipLock.#stake(lockPath, options);
       } catch (err) {
         const code = (err as { code?: string }).code;
         if (code !== 'EEXIST' && code !== 'ENOENT') throw err;
@@ -88,17 +96,21 @@ export class OwnershipLock {
     throw new Error(`store is owned by pid ${held.pid} — lock contention lost twice, refusing`);
   }
 
-  static #claim(lockPath: string, options: OwnershipLockOptions): OwnershipLock {
+  static #stake(lockPath: string, options: OwnershipLockOptions): OwnershipLock {
     const now = options.now ?? Date.now;
     mkdirSync(dirname(lockPath), { recursive: true });
     // The claim is atomic twice over: the document is fully written to a
     // scratch name, then LINKED (never renamed) onto the lock path — link
     // fails with EEXIST when a live lock is already there, where rename
     // would silently replace it and steal the ownership.
+    const claim = randomUUID();
     const scratch = `${lockPath}.claim-${process.pid}-${Math.random().toString(36).slice(2)}`;
     const fd = openSync(scratch, 'wx');
     try {
-      writeSync(fd, JSON.stringify({ pid: process.pid, acquired_at: now(), heartbeat_at: now() }));
+      writeSync(
+        fd,
+        JSON.stringify({ pid: process.pid, claim, acquired_at: now(), heartbeat_at: now() }),
+      );
     } finally {
       closeSync(fd);
     }
@@ -109,7 +121,7 @@ export class OwnershipLock {
       throw err;
     }
     unlinkSync(scratch);
-    return new OwnershipLock(lockPath, options).#beat();
+    return new OwnershipLock(lockPath, options, claim).#beat();
   }
 
   static #readHeld(lockPath: string): LockDocument {
@@ -135,6 +147,19 @@ export class OwnershipLock {
   #beat(): this {
     this.#heartbeatTimer = setInterval(() => {
       const held = OwnershipLock.#readHeld(this.#lockPath);
+      // The claim is the ownership's witness (pid alone cannot tell two
+      // locks of one process apart): a foreign document means the lock
+      // was judged stale and taken over while we were silent — two live
+      // read-write owners is the exact state the lock exists to forbid,
+      // so this owner stops beating and dies loudly rather than refresh
+      // its successor's claim or outlive its own.
+      if (held.claim !== this.#claim) {
+        clearInterval(this.#heartbeatTimer);
+        throw new Error(
+          `ownership of ${this.#lockPath} was taken over by pid ${held.pid} — ` +
+            `this process was judged dead; it refuses to serve a store it no longer owns`,
+        );
+      }
       const fd = openSync(`${this.#lockPath}.claim-${process.pid}`, 'w');
       try {
         writeSync(fd, JSON.stringify({ ...held, heartbeat_at: this.#now() }));
@@ -151,6 +176,16 @@ export class OwnershipLock {
 
   release(): void {
     if (this.#heartbeatTimer !== undefined) clearInterval(this.#heartbeatTimer);
+    // A foreign claim under our hand means the same takeover: this hand
+    // lost the store, and its release must not delete the successor's
+    // claim — it refuses instead.
+    const held = OwnershipLock.#readHeld(this.#lockPath);
+    if (held.claim !== this.#claim) {
+      throw new Error(
+        `cannot release ${this.#lockPath}: ownership moved to pid ${held.pid} — ` +
+          `this lock is no longer ours to release`,
+      );
+    }
     rmSync(this.#lockPath, { force: true });
   }
 }

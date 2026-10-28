@@ -52,8 +52,10 @@ test('a stale lock is broken and taken over — silence is the evidence', () => 
     writeFileSync(lockPath, JSON.stringify({ ...doc, heartbeat_at: doc.heartbeat_at - 60_000 }));
     const takeover = OwnershipLock.acquire(lockPath, { heartbeatMs: 60_000, staleMs: 30_000 });
     assert.equal(readDoc(lockPath).pid, process.pid);
+    // The broken hand's release must refuse — the lock is the successor's
+    // now, and a dead hand must not delete a living claim.
+    assert.throws(() => dead.release(), /ownership moved to pid/);
     takeover.release();
-    dead.release(); // a dead hand's release must not crash — force unlink
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
