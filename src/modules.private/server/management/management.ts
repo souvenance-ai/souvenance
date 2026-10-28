@@ -1,0 +1,164 @@
+/**
+ * The store-management routes (slice 2, #19's management block): the
+ * registry made HTTP, every route behind the manage cap — `POST /stores`
+ * (201, 409 on collision), `GET /stores` (the descriptors, never the
+ * paths — the v0.1 dbPath leak stays dead), `GET /stores/:name`
+ * (`{name, stats}`), `POST /stores/:name/fork` (201 with the child's
+ * name — composed when the body stays silent, Q15), `DELETE
+ * /stores/:name` (204, hard — the cap is the confirmation, Q13).
+ *
+ * Refusals ride the envelope: grammar → 400 (the zod schemas carry the
+ * store-name grammar; the defaultHook formats), foreign cap → 403
+ * (mounted on the exact management paths in the assembly), unknown store
+ * → 404, collisions → 409. One route group per file; the slices keep
+ * landing as siblings (reads, writes) on the same assembly.
+ */
+import { createRoute, z } from '@hono/zod-openapi';
+import type { OpenAPIHono } from '@hono/zod-openapi';
+import { STORE_NAME } from '../../config/config.ts';
+import type { Registry } from '../registry/registry.ts';
+import type { ServerEnv } from '../auth/auth.ts';
+
+const StoreNameSchema = z.string().regex(STORE_NAME);
+
+const StatsSchema = z.object({
+  memories: z.number(),
+  memories_by_status: z.record(z.string(), z.number()),
+  memories_by_kind: z.record(z.string(), z.number()),
+  edges: z.number(),
+  edges_by_kind: z.record(z.string(), z.number()),
+});
+
+const ErrorSchema = z.object({ error: z.string() });
+
+const NameSchema = z.object({ name: StoreNameSchema });
+const ChildNameSchema = z.object({ name: StoreNameSchema.optional() });
+const DescriptorSchema = z.object({ name: z.string(), stats: StatsSchema });
+
+/** One documented refusal, typed so the response keys stay literal. */
+function refusal(description: string) {
+  return {
+    description,
+    content: { 'application/json': { schema: ErrorSchema } },
+  };
+}
+
+const CAP_REFUSAL = () => refusal('the grant carries no manage cap');
+const UNKNOWN_REFUSAL = () => refusal('no such store');
+const COLLISION_REFUSAL = () => refusal('the store name is taken');
+const GRAMMAR_REFUSAL = () => refusal('a name breaks the grammar');
+
+export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
+  const createStore = createRoute({
+    method: 'post',
+    path: '/stores',
+    tags: ['stores'],
+    request: { body: { content: { 'application/json': { schema: NameSchema } }, required: true } },
+    responses: {
+      201: {
+        description: 'the store exists',
+        content: { 'application/json': { schema: NameSchema } },
+      },
+      400: GRAMMAR_REFUSAL(),
+      403: CAP_REFUSAL(),
+      409: COLLISION_REFUSAL(),
+    },
+  });
+  app.openapi(createStore, (c) => {
+    const { name } = c.req.valid('json');
+    registry.create(name);
+    return c.json({ name }, 201);
+  });
+
+  const listStores = createRoute({
+    method: 'get',
+    path: '/stores',
+    tags: ['stores'],
+    responses: {
+      200: {
+        description: 'every open store, by name with its stats',
+        content: { 'application/json': { schema: z.array(DescriptorSchema) } },
+      },
+      403: CAP_REFUSAL(),
+    },
+  });
+  app.openapi(listStores, (c) => {
+    const descriptors = registry.names().map((name) => {
+      const store = registry.get(name);
+      if (store === undefined)
+        throw new Error(`registry served the name "${name}" without its store`);
+      // The spread answers the schema: the facade's Readonly records are
+      // the stored truth, the wire speaks plain mutable JSON.
+      return { name, stats: { ...store.stats() } };
+    });
+    return c.json(descriptors, 200);
+  });
+
+  const describeStore = createRoute({
+    method: 'get',
+    path: '/stores/:name',
+    tags: ['stores'],
+    request: { params: z.object({ name: StoreNameSchema }) },
+    responses: {
+      200: {
+        description: 'the descriptor',
+        content: { 'application/json': { schema: DescriptorSchema } },
+      },
+      400: GRAMMAR_REFUSAL(),
+      403: CAP_REFUSAL(),
+      404: UNKNOWN_REFUSAL(),
+    },
+  });
+  app.openapi(describeStore, (c) => {
+    const { name } = c.req.valid('param');
+    const store = registry.get(name);
+    if (store === undefined) {
+      return c.json({ error: `no store "${name}" in the registry` }, 404);
+    }
+    return c.json({ name, stats: { ...store.stats() } }, 200);
+  });
+
+  const forkStore = createRoute({
+    method: 'post',
+    path: '/stores/:name/fork',
+    tags: ['stores'],
+    request: {
+      params: z.object({ name: StoreNameSchema }),
+      body: { content: { 'application/json': { schema: ChildNameSchema } }, required: true },
+    },
+    responses: {
+      201: {
+        description: 'the fork exists — the child name is the payload',
+        content: { 'application/json': { schema: NameSchema } },
+      },
+      400: GRAMMAR_REFUSAL(),
+      403: CAP_REFUSAL(),
+      404: UNKNOWN_REFUSAL(),
+      409: COLLISION_REFUSAL(),
+    },
+  });
+  app.openapi(forkStore, (c) => {
+    const { name } = c.req.valid('param');
+    const { name: child } = c.req.valid('json');
+    const forked = registry.fork(name, child);
+    return c.json({ name: forked }, 201);
+  });
+
+  const deleteStore = createRoute({
+    method: 'delete',
+    path: '/stores/:name',
+    tags: ['stores'],
+    request: { params: z.object({ name: StoreNameSchema }) },
+    responses: {
+      204: { description: 'gone — db, WAL sidecars and lock' },
+      400: GRAMMAR_REFUSAL(),
+      403: CAP_REFUSAL(),
+      404: UNKNOWN_REFUSAL(),
+    },
+  });
+  app.openapi(deleteStore, (c) => {
+    const { name } = c.req.valid('param');
+    registry.remove(name);
+    return c.body(null, 204);
+  });
+}

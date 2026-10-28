@@ -75,10 +75,12 @@ test('an unknown store under the guarded namespace is a 404 once authenticated',
   try {
     const { app, registry } = boot(dir);
     // The loopback peer passes auth, walks the rate limit and the cap,
-    // and hits the (slice-1 empty) namespace — 404, in the envelope.
+    // and reaches the describe route — 404 in the envelope, teaching.
     const res = await app.request('/stores/nowhere', {}, loopbackEnv());
     assert.equal(res.status, 404);
-    assert.deepEqual((await res.json()) as { error: string }, { error: 'no such route' });
+    assert.deepEqual((await res.json()) as { error: string }, {
+      error: 'no store "nowhere" in the registry',
+    });
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -102,12 +104,12 @@ test('a StoreError thrown inside the guard maps by code into the envelope', asyn
   try {
     const { registry } = boot(dir);
     const app = createApp({ registry, tokens: [] });
-    // A probe route standing in for the slices to come: the mapping is
-    // the subject here, not the route.
-    app.get('/stores/probe', () => {
+    // A probe route at a depth no real route claims: the mapping is the
+    // subject here, not the route.
+    app.get('/stores/probe-deep/inner', () => {
       throw new StoreError('conflict', 'the memory fights its state');
     });
-    const res = await app.request('/stores/probe', {}, loopbackEnv());
+    const res = await app.request('/stores/probe-deep/inner', {}, loopbackEnv());
     assert.equal(res.status, 409);
     assert.deepEqual((await res.json()) as { error: string }, {
       error: 'the memory fights its state',
@@ -123,10 +125,10 @@ test('a non-StoreError is an internal error — the client never sees internals'
   try {
     const { registry } = boot(dir);
     const app = createApp({ registry, tokens: [] });
-    app.get('/stores/probe', () => {
+    app.get('/stores/probe-deep/inner', () => {
       throw new Error('the sqlite file screams in stack-trace');
     });
-    const res = await app.request('/stores/probe', {}, loopbackEnv());
+    const res = await app.request('/stores/probe-deep/inner', {}, loopbackEnv());
     assert.equal(res.status, 500);
     const body = (await res.json()) as { error: string };
     assert.equal(body.error, 'internal error');
