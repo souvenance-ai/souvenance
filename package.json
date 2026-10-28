@@ -46,6 +46,8 @@
   "bin": "src/cli/cli.ts",
   "dependencies": {
     "@hono/node-server": "^2.1.5",
+    "@hono/swagger-ui": "^0.6.1",
+    "@hono/zod-openapi": "^1.6.3",
     "@inquirer/prompts": "^8.7.4",
     "chalk": "^6.0.1",
     "commander": "^15.0.0",

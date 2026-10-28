@@ -1,3 +1,5 @@
+import { StoreError } from '../../store-error/store-error.ts';
+
 /**
  * The authored metadata's key contract (#40): every object key, at every
  * depth, must be one path segment — the same grammar the metadata filter
@@ -25,7 +27,8 @@ export function validateMetadataKeys(value: unknown, path: string): void {
     // `[n]` index — indices address arrays, never keys.
     const parsed = parseMetadataSegment(key);
     if (!parsed || parsed.index !== undefined) {
-      throw new Error(
+      throw new StoreError(
+        'invalid',
         `metadata keys accept letters, digits, "-" and "_" — the metadata filter's path grammar (#40)` +
           ` — refused: ${JSON.stringify(key)} at ${path}`,
       );

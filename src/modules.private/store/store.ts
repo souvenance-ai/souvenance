@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { migrate, SCHEMA_VERSION, schemaVersion } from './migration/migration.ts';
+import { StoreError } from './store-error/store-error.ts';
 import { andConditions } from './utils/and-conditions/and-conditions.ts';
 import { compileReadFilters } from './utils/compile-read-filters/compile-read-filters.ts';
 import { execPragma } from './utils/exec-pragma/exec-pragma.ts';
@@ -404,7 +405,10 @@ function isLiving(status: MemoryStatus): boolean {
  */
 function assertStoreKind(kind: string): void {
   if (typeof kind !== 'string' || !kind) {
-    throw new Error('kind is required: pass kind ("note", "decision", …) — the vocabulary is free');
+    throw new StoreError(
+      'invalid',
+      'kind is required: pass kind ("note", "decision", …) — the vocabulary is free',
+    );
   }
 }
 
@@ -414,7 +418,7 @@ function assertStoreKind(kind: string): void {
  */
 function assertOptionalKind(kind: string | undefined): void {
   if (kind !== undefined && (typeof kind !== 'string' || !kind)) {
-    throw new Error('kind must be non-empty');
+    throw new StoreError('invalid', 'kind must be non-empty');
   }
 }
 
@@ -427,7 +431,7 @@ function assertOptionalKind(kind: string | undefined): void {
  */
 function refuseMetadataKind(metadata: Record<string, unknown> | undefined | null): void {
   if (metadata && 'kind' in metadata) {
-    throw new Error('kind is a column — pass kind, not metadata.kind');
+    throw new StoreError('invalid', 'kind is a column — pass kind, not metadata.kind');
   }
 }
 
@@ -453,13 +457,14 @@ export class Store {
       // served exactly as its owner left it, and refused if it is missing
       // or speaks an older schema than this library.
       if (!existsSync(dbPath)) {
-        throw new Error(`no store at ${dbPath}`);
+        throw new StoreError('not_found', `no store at ${dbPath}`);
       }
       const db = new DatabaseSync(dbPath, { readOnly: true });
       execSharedPragmas(db);
       const version = schemaVersion(db);
       if (version < SCHEMA_VERSION) {
-        throw new Error(
+        throw new StoreError(
+          'conflict',
           `store at ${dbPath} is at schema version ${version}` +
             ` (the library expects ${SCHEMA_VERSION});` +
             ` open it read-write once to migrate`,
@@ -483,7 +488,10 @@ export class Store {
    */
   #assertWritable(): void {
     if (this.readOnly) {
-      throw new Error('store is read-only (opened with readOnly: true); writes are refused');
+      throw new StoreError(
+        'read_only',
+        'store is read-only (opened with readOnly: true); writes are refused',
+      );
     }
   }
 
@@ -502,9 +510,9 @@ export class Store {
   ): { readonly status: MemoryStatus; readonly kind: string } {
     const row = this.#db.prepare('SELECT status, kind FROM memories WHERE id = ?').get(id) as
       { status: MemoryStatus; kind: string } | undefined;
-    if (!row) throw new Error(`memory not found: ${id}`);
+    if (!row) throw new StoreError('not_found', `memory not found: ${id}`);
     if (!isLiving(row.status)) {
-      throw new Error(`cannot ${verb} a memory with status '${row.status}'`);
+      throw new StoreError('conflict', `cannot ${verb} a memory with status '${row.status}'`);
     }
     return row;
   }
@@ -539,12 +547,16 @@ export class Store {
    */
   #checkSummary(content: string, summary: string | null): void {
     if (content.length > MAX_SUMMARY_LENGTH && !summary) {
-      throw new Error(
+      throw new StoreError(
+        'invalid',
         `content exceeds ${MAX_SUMMARY_LENGTH} characters; provide a summary condensing it`,
       );
     }
     if (summary && summary.length > MAX_SUMMARY_LENGTH) {
-      throw new Error(`summary exceeds ${MAX_SUMMARY_LENGTH} characters; condense it further`);
+      throw new StoreError(
+        'invalid',
+        `summary exceeds ${MAX_SUMMARY_LENGTH} characters; condense it further`,
+      );
     }
   }
 
@@ -557,7 +569,7 @@ export class Store {
    */
   store(content: string, options: StoreOptions): string {
     this.#assertWritable();
-    if (!content) throw new Error('content must be non-empty');
+    if (!content) throw new StoreError('invalid', 'content must be non-empty');
     assertStoreKind(options.kind);
     refuseMetadataKind(options.metadata);
     validateMetadataKeys(options.metadata, '$');
@@ -594,7 +606,7 @@ export class Store {
    */
   supersede(oldId: string, content: string, options: SupersedeOptions = {}): string {
     this.#assertWritable();
-    if (!content) throw new Error('content must be non-empty');
+    if (!content) throw new StoreError('invalid', 'content must be non-empty');
     assertOptionalKind(options.kind);
     refuseMetadataKind(options.metadata);
     validateMetadataKeys(options.metadata, '$');
@@ -627,7 +639,7 @@ export class Store {
           // precisely instead of failing an FK message, and the
           // ROLLBACK keeps the old memory active and unbridged.
           if (!memoryExists.get(edge.to_id)) {
-            throw new Error(`memory not found: ${edge.to_id}`);
+            throw new StoreError('not_found', `memory not found: ${edge.to_id}`);
           }
           this.#insertEdge(newId, edge.to_id, edge.kind, edge.metadata, edge.created_at);
         }
@@ -656,15 +668,15 @@ export class Store {
    */
   merge(ids: readonly string[], content: string, options: MergeOptions = {}): string {
     this.#assertWritable();
-    if (ids.length < 2) throw new Error('merge requires at least 2 memories');
-    if (!content) throw new Error('content must be non-empty');
+    if (ids.length < 2) throw new StoreError('invalid', 'merge requires at least 2 memories');
+    if (!content) throw new StoreError('invalid', 'content must be non-empty');
     assertOptionalKind(options.kind);
     refuseMetadataKind(options.metadata);
     validateMetadataKeys(options.metadata, '$');
     this.#checkSummary(content, options.summary ?? null);
     const seen = new Set<string>();
     for (const id of ids) {
-      if (seen.has(id)) throw new Error(`duplicate id in merge: ${id}`);
+      if (seen.has(id)) throw new StoreError('invalid', `duplicate id in merge: ${id}`);
       seen.add(id);
     }
     const newId = randomUUID();
@@ -686,7 +698,8 @@ export class Store {
         kind = [...kinds][0]!;
       } else {
         const candidates = [...kinds].sort().join(', ');
-        throw new Error(
+        throw new StoreError(
+          'conflict',
           `merge refused: sources disagree on kind (${candidates}) — pass kind to classify the fusion`,
         );
       }
@@ -741,9 +754,9 @@ export class Store {
     this.#assertWritable();
     this.#transaction(() => {
       const row = this.#readStatus(id);
-      if (!row) throw new Error(`memory not found: ${id}`);
+      if (!row) throw new StoreError('not_found', `memory not found: ${id}`);
       if (!isLiving(row)) {
-        throw new Error(`cannot setHot a memory with status '${row}'`);
+        throw new StoreError('conflict', `cannot setHot a memory with status '${row}'`);
       }
       this.#db
         .prepare('UPDATE memories SET status = ? WHERE id = ?')
@@ -758,21 +771,21 @@ export class Store {
    */
   link(fromId: string, toId: string, kind: string, options: LinkOptions = {}): void {
     this.#assertWritable();
-    if (!kind) throw new Error('kind must be non-empty');
+    if (!kind) throw new StoreError('invalid', 'kind must be non-empty');
     // Refuse-don't-hide: an edge from a memory to itself names no
     // relationship. The one-gesture paths are a construction impossibility
     // (the new id is unknown to the caller), so this verb is the only door.
     if (fromId === toId) {
-      throw new Error('self-edge refused: from and to must be different memories');
+      throw new StoreError('invalid', 'self-edge refused: from and to must be different memories');
     }
     const fromExists = withBusyRetry(() =>
       this.#db.prepare('SELECT 1 FROM memories WHERE id = ?').get(fromId),
     );
-    if (!fromExists) throw new Error(`memory not found: ${fromId}`);
+    if (!fromExists) throw new StoreError('not_found', `memory not found: ${fromId}`);
     const toExists = withBusyRetry(() =>
       this.#db.prepare('SELECT 1 FROM memories WHERE id = ?').get(toId),
     );
-    if (!toExists) throw new Error(`memory not found: ${toId}`);
+    if (!toExists) throw new StoreError('not_found', `memory not found: ${toId}`);
 
     const metadata = options.metadata ? JSON.stringify(options.metadata) : null;
     const created_at = new Date().toISOString();
@@ -804,23 +817,23 @@ export class Store {
       // transposed-id mistake (the lived failure behind this verb) reads as a
       // precise endpoint error instead of a bare "edge not found".
       const fromStatus = this.#readStatus(fromId);
-      if (!fromStatus) throw new Error(`memory not found: ${fromId}`);
+      if (!fromStatus) throw new StoreError('not_found', `memory not found: ${fromId}`);
       const toStatus = this.#readStatus(toId);
-      if (!toStatus) throw new Error(`memory not found: ${toId}`);
+      if (!toStatus) throw new StoreError('not_found', `memory not found: ${toId}`);
       if (!isLiving(fromStatus)) {
-        throw new Error(`cannot unlink a memory with status '${fromStatus}'`);
+        throw new StoreError('conflict', `cannot unlink a memory with status '${fromStatus}'`);
       }
       if (!isLiving(toStatus)) {
-        throw new Error(`cannot unlink a memory with status '${toStatus}'`);
+        throw new StoreError('conflict', `cannot unlink a memory with status '${toStatus}'`);
       }
 
       if (kind !== undefined) {
-        if (!kind) throw new Error('kind must be non-empty');
+        if (!kind) throw new StoreError('invalid', 'kind must be non-empty');
         const result = this.#db
           .prepare('DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?')
           .run(fromId, toId, kind);
         if (result.changes === 0) {
-          throw new Error(`edge not found: ${fromId} -> ${toId} (${kind})`);
+          throw new StoreError('not_found', `edge not found: ${fromId} -> ${toId} (${kind})`);
         }
         return;
       }
@@ -840,14 +853,16 @@ export class Store {
           .all(toId, fromId) as unknown as Array<{ kind: string }>;
         if (reverse.length > 0) {
           const list = reverse.map((edge) => `${toId} -> ${fromId} (${edge.kind})`).join(', ');
-          throw new Error(
+          throw new StoreError(
+            'not_found',
             `edge not found: ${fromId} -> ${toId}; edges exist in the reverse direction: ${list}`,
           );
         }
-        throw new Error(`edge not found: ${fromId} -> ${toId}`);
+        throw new StoreError('not_found', `edge not found: ${fromId} -> ${toId}`);
       }
       const kinds = directed.map((edge) => edge.kind).join(', ');
-      throw new Error(
+      throw new StoreError(
+        'invalid',
         `ambiguous: ${directed.length} edges between ${fromId} and ${toId}, pass --kind: ${kinds}`,
       );
     });
@@ -936,7 +951,7 @@ export class Store {
    * original error.
    */
   search(query: string, options: SearchOptions = {}): SearchResult[] {
-    if (!query) throw new Error('query must be non-empty');
+    if (!query) throw new StoreError('invalid', 'query must be non-empty');
     const limit = normaliseLimit(options.limit, 20);
     let sql =
       'SELECT m.id, m.content, m.kind, m.summary, m.metadata, m.created_at, m.status,' +
@@ -1321,7 +1336,10 @@ export class Store {
   fork(targetPath: string, options: ForkOptions = {}): ForkResult {
     const target = resolve(targetPath);
     if (existsSync(target) && options.force !== true) {
-      throw new Error(`fork target already exists: ${target} (pass force to overwrite)`);
+      throw new StoreError(
+        'conflict',
+        `fork target already exists: ${target} (pass force to overwrite)`,
+      );
     }
     if (options.force === true) {
       // VACUUM INTO refuses an existing target; a forced refresh removes
@@ -1424,10 +1442,10 @@ export class Store {
    */
   #insertRelations(fromId: string, relations: readonly RelationSpec[], createdAt: string): void {
     for (const relation of relations) {
-      if (!relation.kind) throw new Error('kind must be non-empty');
-      if (!relation.to) throw new Error('to must be a memory id');
+      if (!relation.kind) throw new StoreError('invalid', 'kind must be non-empty');
+      if (!relation.to) throw new StoreError('invalid', 'to must be a memory id');
       const targetExists = this.#db.prepare('SELECT 1 FROM memories WHERE id = ?').get(relation.to);
-      if (!targetExists) throw new Error(`memory not found: ${relation.to}`);
+      if (!targetExists) throw new StoreError('not_found', `memory not found: ${relation.to}`);
     }
     for (const relation of relations) {
       this.#insertEdge(fromId, relation.to, relation.kind, null, createdAt);

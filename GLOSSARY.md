@@ -97,12 +97,24 @@ A manager operation that opens the store directly; refuses while the server owns
 _Avoid_: direct verb, local verb
 
 **Grant**:
-A bearer token's authority: its store, its write opt-in (rw), and its `where` opt-in.
-_Avoid_: token file (retired), credential
+A bearer token's authority: one agent, one store, one mode (`ro`/`rw`), and an optional manage cap. A row of the config's `tokens[]` — nothing else exists to present.
+_Avoid_: token file (retired), credential, API key
+
+**Operator**:
+The loopback caller with no bearer at all: read-write plus manage on every store — the local hand that runs the server. Off loopback, there is no operator: tokens only.
+_Avoid_: admin, root user, anonymous access
 
 **Manage cap**:
 The default-deny grant capability to create, fork, list, and delete stores.
 _Avoid_: admin cap, root token
+
+**Registry**:
+The stores dir as the store inventory: every `<name>.db` in it is a store, none is declared, and boot opens them all or refuses to serve. The dir is the truth — no list beside it to drift.
+_Avoid_: declared stores, store list, catalog
+
+**Mount**:
+The `/stores/<name>/…` URL scheme: every store, management or data, reached by name under the one guarded namespace. No root store, no routes outside it.
+_Avoid_: root store, top-level routes, per-store port
 
 ### The rituals
 

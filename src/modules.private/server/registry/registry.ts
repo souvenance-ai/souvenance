@@ -1,0 +1,168 @@
+/**
+ * The registry (#19): the stores dir IS the registry — nothing is
+ * declared, every `<name>.db` in the dir is a store, and boot cold-opens
+ * every one of them (the ADR 0001 ownership ceremony: lock first, then
+ * open read-write — the lock arbitrates, the open may migrate). Fail-fast
+ * on every refusal: a store that will not open or a name that breaks the
+ * grammar kills the boot, because half-a-registry is a lie the surface
+ * would serve as truth.
+ *
+ * The registry's own refusals carry StoreError codes too — create/fork/
+ * remove speak the same vocabulary the facade does, and the server maps
+ * codes to statuses once, honestly.
+ */
+import { mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { STORE_NAME } from '../../config/config.ts';
+import { Store } from '../../store/store.ts';
+import { StoreError } from '../../store/store-error/store-error.ts';
+import { sidecarPaths } from '../../store/utils/sidecar-paths/sidecar-paths.ts';
+import { OwnershipLock } from '../ownership-lock/ownership-lock.ts';
+
+/** One open store and the lock that proves who owns it. */
+interface Registered {
+  readonly store: Store;
+  readonly lock: OwnershipLock;
+}
+
+export class Registry {
+  readonly #storesDir: string;
+  readonly #registered: Map<string, Registered>;
+
+  private constructor(storesDir: string, registered: Map<string, Registered>) {
+    this.#storesDir = storesDir;
+    this.#registered = registered;
+  }
+
+  /**
+   * Opens the registry: every `*.db` in the dir is claimed (lock) and
+   * opened read-write — the boot is the migration window. Any refusal
+   * bubbles: the boot fails, nothing serves half a registry.
+   */
+  static open(storesDir: string): Registry {
+    mkdirSync(storesDir, { recursive: true });
+    const registered = new Map<string, Registered>();
+    for (const entry of readdirSync(storesDir)) {
+      if (!entry.endsWith('.db')) continue;
+      const name = entry.slice(0, -3);
+      if (!STORE_NAME.test(name)) {
+        throw new StoreError(
+          'invalid',
+          `store file "${entry}" breaks the store-name grammar — ` +
+            `rename it or move it out of the registry`,
+        );
+      }
+      registered.set(name, Registry.#claimAndOpen(storesDir, name));
+    }
+    return new Registry(storesDir, registered);
+  }
+
+  static #claimAndOpen(storesDir: string, name: string): Registered {
+    const lock = OwnershipLock.acquire(join(storesDir, `${name}.lock`));
+    try {
+      return { store: Store.open({ dbPath: join(storesDir, `${name}.db`) }), lock };
+    } catch (err) {
+      lock.release();
+      throw err;
+    }
+  }
+
+  static #assertName(name: string): void {
+    if (!STORE_NAME.test(name)) {
+      throw new StoreError(
+        'invalid',
+        `store name "${name}" breaks the grammar ${STORE_NAME.source} — ` +
+          `lowercase letter first, then lowercase letters, digits, hyphens, 32 chars total`,
+      );
+    }
+  }
+
+  /** The open store, or undefined — the routes turn that into a 404. */
+  get(name: string): Store | undefined {
+    return this.#registered.get(name)?.store;
+  }
+
+  names(): readonly string[] {
+    return [...this.#registered.keys()].sort();
+  }
+
+  /** Creates an empty store: grammar-checked, collision-refused, locked, open. */
+  create(name: string): Store {
+    Registry.#assertName(name);
+    if (this.#registered.has(name)) {
+      throw new StoreError('conflict', `store "${name}" already exists`);
+    }
+    const claimed = Registry.#claimAndOpen(this.#storesDir, name);
+    this.#registered.set(name, claimed);
+    return claimed.store;
+  }
+
+  /**
+   * Forks a store into a new one. When the child name is absent the
+   * server composes one — `<source>-fork`, then `-fork-2`, … — the first
+   * grammar-valid name free of collisions. Returns the child's name.
+   */
+  fork(source: string, child?: string): string {
+    const sourceStore = this.get(source);
+    if (sourceStore === undefined) {
+      throw new StoreError('not_found', `no store "${source}" in the registry`);
+    }
+    if (child !== undefined) Registry.#assertName(child);
+    const name = child ?? this.#composeForkName(source);
+    if (this.#registered.has(name)) {
+      throw new StoreError('conflict', `store "${name}" already exists`);
+    }
+    // Lock first: the claim is the collision guard; the fork fills it in.
+    const lock = OwnershipLock.acquire(join(this.#storesDir, `${name}.lock`));
+    try {
+      sourceStore.fork(join(this.#storesDir, `${name}.db`));
+    } catch (err) {
+      lock.release();
+      throw err;
+    }
+    const store = Store.open({ dbPath: join(this.#storesDir, `${name}.db`) });
+    this.#registered.set(name, { store, lock });
+    return name;
+  }
+
+  /**
+   * The composed fork name: `<source>-fork`, then `-fork-2`, … — the
+   * first candidate free in the registry wins. The suffix is bounded so
+   * the composition never breaks the 32-char grammar: a long source
+   * truncates before the suffix lands.
+   */
+  #composeForkName(source: string): string {
+    for (let n = 1; n < 100; n++) {
+      const suffix = n === 1 ? '-fork' : `-fork-${n}`;
+      const candidate = `${source.slice(0, 32 - suffix.length)}${suffix}`;
+      if (STORE_NAME.test(candidate) && !this.#registered.has(candidate)) return candidate;
+    }
+    throw new StoreError('conflict', `no free fork name for "${source}"`);
+  }
+
+  /**
+   * Removes a store outright: db + WAL sidecars + lock (the #19 verdict —
+   * hard delete, the manage cap is the confirmation). Unknown names refuse.
+   */
+  remove(name: string): void {
+    const registered = this.#registered.get(name);
+    if (registered === undefined) {
+      throw new StoreError('not_found', `no store "${name}" in the registry`);
+    }
+    this.#registered.delete(name);
+    registered.store.close();
+    const dbPath = join(this.#storesDir, `${name}.db`);
+    for (const path of [...sidecarPaths(dbPath), join(this.#storesDir, `${name}.lock`)]) {
+      rmSync(path, { force: true });
+    }
+  }
+
+  /** Releases every lock and closes every store — the clean shutdown. */
+  close(): void {
+    for (const [name, registered] of this.#registered) {
+      registered.store.close();
+      registered.lock.release();
+      this.#registered.delete(name);
+    }
+  }
+}

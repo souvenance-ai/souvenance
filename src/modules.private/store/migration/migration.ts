@@ -1,5 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 
+import { StoreError } from '../store-error/store-error.ts';
+
 export const SCHEMA_VERSION = 6;
 
 const V1 = `
@@ -148,7 +150,7 @@ export function migrate(db: DatabaseSync): void {
   const current = ensureVersionTable(db);
   for (let version = current + 1; version <= SCHEMA_VERSION; version++) {
     const migration = migrations[version];
-    if (!migration) throw new Error(`No migration for schema version ${version}`);
+    if (!migration) throw new StoreError('invalid', `No migration for schema version ${version}`);
     db.exec('BEGIN');
     try {
       db.exec(migration);
