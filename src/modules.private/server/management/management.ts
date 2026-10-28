@@ -23,16 +23,16 @@ const StoreNameSchema = z.string().regex(STORE_NAME);
 
 const StatsSchema = z.object({
   memories: z.number(),
-  memories_by_status: z.record(z.string(), z.number()),
-  memories_by_kind: z.record(z.string(), z.number()),
+  memories_by_status: z.record(z.string(), z.number()).readonly(),
+  memories_by_kind: z.record(z.string(), z.number()).readonly(),
   edges: z.number(),
-  edges_by_kind: z.record(z.string(), z.number()),
+  edges_by_kind: z.record(z.string(), z.number()).readonly(),
 });
 
 const ErrorSchema = z.object({ error: z.string() });
 
 const NameSchema = z.object({ name: StoreNameSchema });
-const ChildNameSchema = z.object({ name: StoreNameSchema.optional() });
+const ForkBodySchema = z.object({ name: StoreNameSchema.optional() });
 const DescriptorSchema = z.object({ name: z.string(), stats: StatsSchema });
 
 /** One documented refusal, typed so the response keys stay literal. */
@@ -83,20 +83,12 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
     },
   });
   app.openapi(listStores, (c) => {
-    const descriptors = registry.names().map((name) => {
-      const store = registry.get(name);
-      if (store === undefined)
-        throw new Error(`registry served the name "${name}" without its store`);
-      // The spread answers the schema: the facade's Readonly records are
-      // the stored truth, the wire speaks plain mutable JSON.
-      return { name, stats: { ...store.stats() } };
-    });
-    return c.json(descriptors, 200);
+    return c.json(registry.descriptors(), 200);
   });
 
   const describeStore = createRoute({
     method: 'get',
-    path: '/stores/:name',
+    path: '/stores/{name}',
     tags: ['stores'],
     request: { params: z.object({ name: StoreNameSchema }) },
     responses: {
@@ -115,20 +107,20 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
     if (store === undefined) {
       return c.json({ error: `no store "${name}" in the registry` }, 404);
     }
-    return c.json({ name, stats: { ...store.stats() } }, 200);
+    return c.json({ name, stats: store.stats() }, 200);
   });
 
   const forkStore = createRoute({
     method: 'post',
-    path: '/stores/:name/fork',
+    path: '/stores/{name}/fork',
     tags: ['stores'],
     request: {
       params: z.object({ name: StoreNameSchema }),
-      body: { content: { 'application/json': { schema: ChildNameSchema } }, required: true },
+      body: { content: { 'application/json': { schema: ForkBodySchema } }, required: false },
     },
     responses: {
       201: {
-        description: 'the fork exists — the child name is the payload',
+        description: 'the fork exists — the forked name is the payload',
         content: { 'application/json': { schema: NameSchema } },
       },
       400: GRAMMAR_REFUSAL(),
@@ -139,14 +131,14 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
   });
   app.openapi(forkStore, (c) => {
     const { name } = c.req.valid('param');
-    const { name: child } = c.req.valid('json');
-    const forked = registry.fork(name, child);
-    return c.json({ name: forked }, 201);
+    const { name: forked } = c.req.valid('json') ?? {};
+    const forkedName = registry.fork(name, forked);
+    return c.json({ name: forkedName }, 201);
   });
 
   const deleteStore = createRoute({
     method: 'delete',
-    path: '/stores/:name',
+    path: '/stores/{name}',
     tags: ['stores'],
     request: { params: z.object({ name: StoreNameSchema }) },
     responses: {

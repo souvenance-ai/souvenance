@@ -116,7 +116,7 @@ test('the fork carries the memories — an exact copy', () => {
   }
 });
 
-test('fork takes an explicit child name and refuses collisions and unknown sources', () => {
+test('fork takes an explicit forked name and refuses collisions and unknown sources', () => {
   const dir = tempDir();
   try {
     const registry = Registry.open(dir);
@@ -134,6 +134,32 @@ test('fork takes an explicit child name and refuses collisions and unknown sourc
       codeOf(() => registry.fork('nowhere', 'child')),
       'not_found',
     );
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('descriptors serves every open store — name plus verbatim stats, no paths', () => {
+  const dir = tempDir();
+  try {
+    const registry = Registry.open(dir);
+    const main = registry.create('main');
+    main.store('remembered', { kind: 'note' });
+    registry.create('other');
+    const descriptors = registry.descriptors();
+    assert.deepEqual(
+      descriptors.map((descriptor) => descriptor.name),
+      ['main', 'other'],
+    );
+    assert.deepEqual(descriptors[0]?.stats, {
+      memories: 1,
+      memories_by_status: { active: 1 },
+      memories_by_kind: { note: 1 },
+      edges: 0,
+      edges_by_kind: {},
+    });
+    assert.deepEqual(Object.keys(descriptors[0] ?? {}), ['name', 'stats']);
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
