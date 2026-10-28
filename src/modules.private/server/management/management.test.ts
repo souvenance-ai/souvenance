@@ -27,28 +27,36 @@ function boot(dir: string) {
 }
 
 /** A request authorized by the manage-cap grant. */
-function manage(path: string, method = 'GET', body?: unknown): { path: string; init: RequestInit } {
-  return {
-    path,
-    init: {
-      method,
-      headers: {
-        authorization: `Bearer ${MANAGE_SECRET}`,
-        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    },
-  };
+function manage(
+  path: string,
+  method = 'GET',
+  body?: unknown,
+): { readonly path: string; readonly init: RequestInit } {
+  return bearerRequest(MANAGE_SECRET, path, method, body);
 }
 
 /** A request authorized by the plain rw grant — no manage cap. */
-function plain(path: string, method = 'GET', body?: unknown): { path: string; init: RequestInit } {
+function plain(
+  path: string,
+  method = 'GET',
+  body?: unknown,
+): { readonly path: string; readonly init: RequestInit } {
+  return bearerRequest(SECRET, path, method, body);
+}
+
+/** One bearer-request shape; the grants differ only in their secret. */
+function bearerRequest(
+  secret: string,
+  path: string,
+  method: string,
+  body?: unknown,
+): { readonly path: string; readonly init: RequestInit } {
   return {
     path,
     init: {
       method,
       headers: {
-        authorization: `Bearer ${SECRET}`,
+        authorization: `Bearer ${secret}`,
         ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -58,9 +66,9 @@ function plain(path: string, method = 'GET', body?: unknown): { path: string; in
 
 async function call(
   app: ReturnType<typeof createApp>,
-  request: { path: string; init: RequestInit },
+  request: { readonly path: string; readonly init: RequestInit },
   env: unknown = LOOPBACK,
-): Promise<{ status: number; body: unknown }> {
+): Promise<{ readonly status: number; readonly body: unknown }> {
   const res = await app.request(request.path, request.init, env);
   const text = await res.text();
   return { status: res.status, body: text ? JSON.parse(text) : null };
@@ -166,14 +174,19 @@ test('describe serves {name, stats}; unknown is 404; grammar-bad is 400', async 
   }
 });
 
-test('fork answers 201 with the child name — composed when the body stays silent', async () => {
+test('fork answers 201 with the forked name — composed when the body stays silent', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
     registry.create('main');
+    // No body at all: the composition stands in (the document says the
+    // body is optional — the behavior agrees).
+    const bodyless = await call(app, manage('/stores/main/fork', 'POST'));
+    assert.equal(bodyless.status, 201);
+    assert.deepEqual(bodyless.body, { name: 'main-fork' });
     const composed = await call(app, manage('/stores/main/fork', 'POST', {}));
     assert.equal(composed.status, 201);
-    assert.deepEqual(composed.body, { name: 'main-fork' });
+    assert.deepEqual(composed.body, { name: 'main-fork-2' }, 'the second composed hop');
     const explicit = await call(app, manage('/stores/main/fork', 'POST', { name: 'copy' }));
     assert.equal(explicit.status, 201);
     assert.deepEqual(explicit.body, { name: 'copy' });
@@ -196,9 +209,40 @@ test('delete answers 204 and removes the trio; the second delete is a 404', asyn
     assert.equal(gone.status, 204);
     assert.equal(gone.body, null, '204, no body');
     assert.ok(!existsSync(join(dir, 'main.db')));
+    assert.ok(!existsSync(join(dir, 'main.db-wal')), 'the WAL sidecar goes with it');
+    assert.ok(!existsSync(join(dir, 'main.db-shm')), 'the shm sidecar goes with it');
     assert.ok(!existsSync(join(dir, 'main.lock')));
     const again = await call(app, manage('/stores/main', 'DELETE'));
     assert.equal(again.status, 404);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the stats ride the facade verbatim — the document speaks the same shape', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    const main = registry.create('main');
+    main.store('a real memory', { kind: 'note' });
+    const described = await call(app, manage('/stores/main'));
+    assert.equal(described.status, 200);
+    assert.deepEqual((described.body as { stats: Record<string, unknown> }).stats, {
+      memories: 1,
+      memories_by_status: { active: 1 },
+      memories_by_kind: { note: 1 },
+      edges: 0,
+      edges_by_kind: {},
+    });
+    // The OpenAPI document — generated from the same schema set — names
+    // the facade's fields; the schema and the facade cannot drift apart
+    // without this pin noticing the wire.
+    const doc = await call(app, manage('/doc'));
+    assert.ok(
+      JSON.stringify(doc.body).includes('memories_by_status'),
+      'the document describes the stats shape',
+    );
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -14,7 +14,7 @@
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { STORE_NAME } from '../../config/config.ts';
-import { Store } from '../../store/store.ts';
+import { Store, type Stats } from '../../store/store.ts';
 import { StoreError } from '../../store/store-error/store-error.ts';
 import { sidecarPaths } from '../../store/utils/sidecar-paths/sidecar-paths.ts';
 import { OwnershipLock } from '../ownership-lock/ownership-lock.ts';
@@ -89,6 +89,17 @@ export class Registry {
     return [...this.#registered.keys()].sort();
   }
 
+  /**
+   * Every open store's descriptor — the name and its stats verbatim from
+   * the facade, never the path: the routes' whole view of the registry,
+   * so no route walks the map or re-learns the shape.
+   */
+  descriptors(): { name: string; stats: Stats }[] {
+    return [...this.#registered.entries()]
+      .sort(([left], [right]) => (left < right ? -1 : 1))
+      .map(([name, registered]) => ({ name, stats: registered.store.stats() }));
+  }
+
   /** Creates an empty store: grammar-checked, collision-refused, locked, open. */
   create(name: string): Store {
     Registry.#assertName(name);
@@ -99,17 +110,17 @@ export class Registry {
   }
 
   /**
-   * Forks a store into a new one. When the child name is absent the
+   * Forks a store into a new one. When the forked name is absent the
    * server composes one — `<source>-fork`, then `-fork-2`, … — the first
-   * grammar-valid name free of collisions. Returns the child's name.
+   * grammar-valid name free of collisions. Returns the forked name.
    */
-  fork(source: string, child?: string): string {
+  fork(source: string, forked?: string): string {
     const sourceStore = this.get(source);
     if (sourceStore === undefined) {
       throw new StoreError('not_found', `no store "${source}" in the registry`);
     }
-    if (child !== undefined) Registry.#assertName(child);
-    const name = child ?? this.#composeForkName(source);
+    if (forked !== undefined) Registry.#assertName(forked);
+    const name = forked ?? this.#composeForkName(source);
     if (this.#registered.has(name)) {
       throw new StoreError('conflict', `store "${name}" already exists`);
     }
