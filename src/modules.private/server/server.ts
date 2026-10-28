@@ -13,8 +13,9 @@ import { bodyLimit } from 'hono/body-limit';
 import type { Context } from 'hono';
 import type { TokenGrant } from '../config/config.ts';
 import { StoreError } from '../store/store-error/store-error.ts';
-import { auth, type ServerEnv } from './auth/auth.ts';
+import { auth, requireManage, type ServerEnv } from './auth/auth.ts';
 import { rateLimit } from './rate-limit/rate-limit.ts';
+import { registerManagementRoutes } from './management/management.ts';
 import type { Registry } from './registry/registry.ts';
 
 export const MAX_BODY_BYTES = 1024 * 1024;
@@ -36,7 +37,20 @@ export interface ServerDeps {
 }
 
 export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
-  const app = new OpenAPIHono<ServerEnv>();
+  const app = new OpenAPIHono<ServerEnv>({
+    // One schema set validates AND documents (ADR 0005) — and one error
+    // shape: a zod refusal is formatted into the {error} envelope, never
+    // zod's own success/error split.
+    defaultHook: (result, c) => {
+      if (!result.success) {
+        const issues = result.error.issues
+          .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+          .join('; ');
+        return c.json({ error: `invalid request — ${issues}` }, 400);
+      }
+      return;
+    },
+  });
 
   // The public trio — no data, only shape and liveness (Q7).
   app.get('/healthz', (c) => c.json({ ok: true }));
@@ -73,6 +87,15 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
       onError: (c) => c.json({ error: `body exceeds ${MAX_BODY_BYTES} bytes` }, 413),
     }),
   );
+
+  // The management gate: the exact management paths only — the data
+  // routes (slices 3–4) live deeper under /stores/:name/… and must stay
+  // open to plain rw grants.
+  app.use('/stores', requireManage());
+  app.use('/stores/:name', requireManage());
+  app.use('/stores/:name/fork', requireManage());
+
+  registerManagementRoutes(app, deps.registry);
 
   return app;
 }

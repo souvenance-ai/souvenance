@@ -120,3 +120,19 @@ export function auth(tokens: readonly TokenGrant[]) {
     return next();
   });
 }
+
+/**
+ * The manage-cap gate (slice 2): the management routes demand the cap
+ * explicitly — default-deny means a grant without `manage` refuses 403
+ * (Q8), the operator passes. Bound per route, never as a blanket
+ * `/stores/*` middleware: the data routes must stay open to plain rw
+ * grants.
+ */
+export function requireManage() {
+  return createMiddleware<ServerEnv>(async (c, next) => {
+    if (c.get('grant').manage !== true) {
+      return c.json({ error: 'the manage cap is required — this grant does not carry it' }, 403);
+    }
+    return next();
+  });
+}
