@@ -5,6 +5,8 @@
  * racing write passes through here; the store's concurrency contract
  * (#11) rides on this one loop.
  */
+import { StoreError } from '../../store-error/store-error.ts';
+
 const SQLITE_BUSY = 5;
 const BUSY_RETRIES = 50;
 const BUSY_DELAY_MS = 20;
@@ -29,5 +31,8 @@ export function withBusyRetry<GOutput>(operation: () => GOutput): GOutput {
       throw err;
     }
   }
-  throw lastError;
+  // Exhausted: the busy refusal is typed (StoreError 'busy') so the HTTP
+  // server maps it to 503 by code, not by message regex (#20). The raw
+  // SQLite message rides untouched — the tests pin it.
+  throw new StoreError('busy', (lastError as Error).message);
 }

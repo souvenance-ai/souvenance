@@ -5,6 +5,7 @@
  * input is interpolated anywhere (paths are validated to a fixed grammar
  * before composition, values are bound).
  */
+import { StoreError } from '../../store-error/store-error.ts';
 import { parseMetadataSegment } from '../parse-metadata-segment/parse-metadata-segment.ts';
 
 /**
@@ -61,7 +62,8 @@ export interface SqlCondition {
  */
 function compileMetadataPath(path: string): string {
   if (!path) {
-    throw new Error(
+    throw new StoreError(
+      'invalid',
       'metadata filter paths must be non-empty dot-paths ("project.owner", "tags[0]")',
     );
   }
@@ -70,7 +72,8 @@ function compileMetadataPath(path: string): string {
     .map((segment) => {
       const parsed = parseMetadataSegment(segment);
       if (!parsed) {
-        throw new Error(
+        throw new StoreError(
+          'invalid',
           `metadata filter paths accept letters, digits, "-" and "_" per segment, with optional [n] indices` +
             ` — refused: ${JSON.stringify(path)}`,
         );
@@ -86,13 +89,14 @@ export function compileReadFilters(filters: ReadFilters): readonly SqlCondition[
   if (filters.kind !== undefined) {
     const kinds = filters.kind;
     if (!Array.isArray(kinds) || kinds.length === 0) {
-      throw new Error(
+      throw new StoreError(
+        'invalid',
         'kind filter refuses an empty list — pass kind names ("note", "log", …) or omit kind',
       );
     }
     for (const kind of kinds) {
       if (typeof kind !== 'string' || !kind) {
-        throw new Error('kind filter entries must be non-empty kind names');
+        throw new StoreError('invalid', 'kind filter entries must be non-empty kind names');
       }
     }
     conditions.push({
@@ -103,7 +107,8 @@ export function compileReadFilters(filters: ReadFilters): readonly SqlCondition[
   if (filters.metadata !== undefined) {
     const entries = Object.entries(filters.metadata);
     if (entries.length === 0) {
-      throw new Error(
+      throw new StoreError(
+        'invalid',
         'metadata filter refuses an empty object — pass at least one path/value pair or omit metadata',
       );
     }
@@ -115,7 +120,10 @@ export function compileReadFilters(filters: ReadFilters): readonly SqlCondition[
       } else if (typeof value === 'string' || typeof value === 'number') {
         bound = value;
       } else {
-        throw new Error('metadata filter values must be strings, numbers or booleans');
+        throw new StoreError(
+          'invalid',
+          'metadata filter values must be strings, numbers or booleans',
+        );
       }
       // The path interpolates VALIDATED segments only — no caller input
       // reaches the SQL text; the value rides as a bound parameter.
