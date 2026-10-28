@@ -282,7 +282,7 @@ test('a ro grant reads everything and writes nothing — 403 on every write rout
       kind: 'note',
     });
     const id = (created.body as { id: string }).id;
-    const attempts: [string, string, unknown?][] = [
+    const attempts: readonly (readonly [string, string, unknown?])[] = [
       ['POST', '/stores/atlas/memories', { content: 'x', kind: 'note' }],
       ['POST', `/stores/atlas/memories/${id}/supersede`, { content: 'y' }],
       ['POST', `/stores/atlas/memories/${id}/deprecate`],
