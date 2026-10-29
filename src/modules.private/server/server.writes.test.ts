@@ -80,6 +80,37 @@ test('create answers 201 with the id — the memory serves, relations rode the o
   }
 });
 
+test('create refuses non-scalar metadata values — the one grammar, both surfaces (#51)', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    registry.create('atlas');
+    const arrayValue = await call(app, 'POST', '/stores/atlas/memories', {
+      content: 'x',
+      kind: 'note',
+      metadata: { tags: ['a', 'b'] },
+    });
+    assert.equal(arrayValue.status, 400);
+    assert.match((arrayValue.body as { error: string }).error, /may not be arrays/);
+    const nullValue = await call(app, 'POST', '/stores/atlas/memories', {
+      content: 'x',
+      kind: 'note',
+      metadata: { owner: null },
+    });
+    assert.equal(nullValue.status, 400);
+    assert.match((nullValue.body as { error: string }).error, /may not be null/);
+    const nestedOk = await call(app, 'POST', '/stores/atlas/memories', {
+      content: 'x',
+      kind: 'note',
+      metadata: { tree: { ab: 9, mark: 'z' } },
+    });
+    assert.equal(nestedOk.status, 201);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('create refusals ride the facade teaching — kind, metadata.kind, summary ceiling', async () => {
   const dir = tempDir();
   try {

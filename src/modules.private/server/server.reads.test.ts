@@ -6,7 +6,7 @@ import { test } from 'vitest';
 import type { TokenGrant } from '../config/config.ts';
 import { createApp } from './server.ts';
 import { Registry } from './registry/registry.ts';
-import type { Store } from '../store/store.ts';
+import type { Store, StoreOptions } from '../store/store.ts';
 
 const ATLAS_SECRET = `souv-${'f'.repeat(32)}`;
 const OTHER_SECRET = `souv-${'1'.repeat(32)}`;
@@ -63,11 +63,7 @@ function jsonQuery(params: Record<string, string | string[]>): string {
 }
 
 /** Seeds a store deterministically: kind and metadata ride the content. */
-function seed(
-  store: Store,
-  content: string,
-  options: { kind: string; metadata?: Record<string, unknown> },
-): string {
+function seed(store: Store, content: string, options: StoreOptions): string {
   return store.store(content, options);
 }
 

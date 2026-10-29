@@ -24,11 +24,34 @@ import {
   unknownMemoryRefusal,
   unknownStoreRefusal,
 } from '../wire/wire.ts';
+import type { MetadataValue } from '../../store/store.ts';
 
 /** The one-gesture relations: the facade's RelationSpec verbatim. */
 const RelationsSchema = z.array(z.object({ to: z.uuid(), kind: z.string() })).optional();
 
-const MetadataShape = z.record(z.string(), z.unknown()).optional();
+/**
+ * The authored metadata on the write surface: the facade's grammar
+ * mirrored — keys one path segment each, values scalar or nested objects
+ * (#51's ruling). The validator's own teaching (facade, StoreError) is
+ * the refusal the agent reads when it breaks the grammar on the wire.
+ */
+/**
+ * The authored metadata on the write surface. The OpenAPI converter
+ * cannot recurse declared records (a self-cycling `z.record` 500s the
+ * /doc), so the schema stays structurally loose and the contract reads
+ * twice: here in the description, and in the facade's teaching refusals
+ * — the gate is the facade's `validateMetadata`, one home, one voice
+ * (#40 keys, #51 values). The wire's `as` bridge to the facade's narrow
+ * type follows the `parsed as MetadataFilters` precedent of reads.ts.
+ */
+const MetadataShape = z
+  .record(z.string(), z.unknown())
+  .optional()
+  .describe(
+    'keys are one path segment each (letters, digits, "-", "_"); values are scalars ' +
+      '(string | number | boolean) or nested objects of them — arrays and null never author: ' +
+      'the filter cannot ask for either (#40, #51)',
+  );
 const SummaryShape = z.string().optional();
 
 const StoreBodySchema = z.object({
@@ -56,7 +79,15 @@ const HotBodySchema = z.object({ hot: z.boolean() });
 const LinkBodySchema = z.object({
   to: z.uuid(),
   kind: z.string(),
-  metadata: MetadataShape,
+  /**
+   * The EDGE metadata: free-form JSON on purpose — the typed filter
+   * addresses memories' metadata, never edges' — so no addressability
+   * obligation gates it (#51's ruling).
+   */
+  metadata: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe('free-form JSON — edges sit outside the filter reach'),
 });
 const UnlinkBodySchema = z.object({ to: z.uuid(), kind: z.string().optional() });
 
@@ -91,7 +122,9 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     const id = store.store(body.content, {
       kind: body.kind,
       summary: body.summary,
-      metadata: body.metadata,
+      // Same bridge as supersede's: the facade gates, the wire passes
+      // verbatim (the converter cannot carry the declared recursion).
+      metadata: body.metadata as Record<string, MetadataValue> | undefined,
       relations: body.relations,
     });
     return c.json({ id }, 201);
@@ -123,7 +156,11 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     const successor = store.supersede(id, body.content, {
       kind: body.kind,
       summary: body.summary,
-      metadata: body.metadata,
+      // The wire passes the authored metadata verbatim; the facade's
+      // validateMetadata is the gate (the OpenAPI converter cannot carry
+      // the declared recursion — the `as` bridge reads reads.ts's
+      // MetadataFilters precedent).
+      metadata: body.metadata as Record<string, MetadataValue> | undefined,
       relations: body.relations,
     });
     return c.json({ id: successor }, 201);
@@ -248,7 +285,8 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     const fused = store.merge(body.ids, body.content, {
       kind: body.kind,
       summary: body.summary,
-      metadata: body.metadata,
+      // Same bridge as store's and supersede's: the facade gates.
+      metadata: body.metadata as Record<string, MetadataValue> | undefined,
     });
     return c.json({ id: fused }, 201);
   });

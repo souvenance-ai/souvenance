@@ -31,7 +31,7 @@ The authored condensation of a memory's content — what checkin and search serv
 _Avoid_: abstract, digest, tldr
 
 **Metadata**:
-The free JSON an agent authors on a memory, beside the columns — searchable by typed scalar equality on dot-paths. Its keys obey the filter's path grammar at authoring time: one grammar, both surfaces, everything stored stays addressable.
+The free JSON an agent authors on a memory, beside the columns — searchable by typed scalar equality on dot-paths. Its keys obey the filter's path grammar at authoring time and its values are scalar leaves or nested objects of them: arrays and null never author — the filter cannot ask for either (the values half of the one-grammar promise, #51's wire finding). Legacy rows keep their values verbatim; the structural inheritance copies what exists without re-authoring.
 _Avoid_: properties, custom fields, tags (a data convention, not a surface)
 
 **Hot**:
