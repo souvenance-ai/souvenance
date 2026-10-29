@@ -139,6 +139,25 @@ test('a non-StoreError is an internal error — the client never sees internals'
   }
 });
 
+test('busy answers an opaque 503 — the engine message never crosses the wire', async () => {
+  const dir = tempDir();
+  try {
+    const { registry } = boot(dir);
+    const app = createApp({ registry, tokens: [] });
+    app.get('/stores/probe-deep/inner', () => {
+      throw new StoreError('busy', 'database is locked ( SQLITE_BUSY: raw engine text )');
+    });
+    const res = await app.request('/stores/probe-deep/inner', {}, loopbackEnv());
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as { error: string };
+    assert.equal(body.error, 'the store is busy — retry in a moment');
+    assert.equal(body.error.includes('SQLITE_BUSY'), false);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a bad bearer under the guard refuses 401 before any route exists', async () => {
   const dir = tempDir();
   try {

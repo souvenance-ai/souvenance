@@ -84,7 +84,6 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       400: invalidRefusal('the body refuses — kind required, summary ceiling, grammar'),
       403: foreignRefusal(),
       404: unknownStoreRefusal(),
-      409: statusRefusal(),
     },
   });
   app.openapi(createMemory, (c) => {
@@ -191,7 +190,6 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       400: invalidRefusal('the body refuses — self-edges refuse, kind must be non-empty'),
       403: foreignRefusal(),
       404: unknownMemoryRefusal(),
-      409: statusRefusal(),
     },
   });
   app.openapi(linkMemories, (c) => {
