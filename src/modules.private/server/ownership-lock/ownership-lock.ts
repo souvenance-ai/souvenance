@@ -39,8 +39,6 @@ export interface OwnershipLockOptions {
   readonly heartbeatMs?: number;
   /** Silence beyond this age marks the owner dead. Default 30 s (#20, Q9). */
   readonly staleMs?: number;
-  /** The clock, injectable for tests. */
-  readonly now?: () => number;
 }
 
 interface LockDocument {
@@ -55,13 +53,11 @@ export class OwnershipLock {
   #heartbeatTimer: NodeJS.Timeout | undefined;
   readonly #lockPath: string;
   readonly #heartbeatMs: number;
-  readonly #now: () => number;
   readonly #claim: string;
 
   private constructor(lockPath: string, options: OwnershipLockOptions, claim: string) {
     this.#lockPath = lockPath;
     this.#heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
-    this.#now = options.now ?? Date.now;
     this.#claim = claim;
   }
 
@@ -71,7 +67,6 @@ export class OwnershipLock {
    * checks that process, not a riddle.
    */
   static acquire(lockPath: string, options: OwnershipLockOptions = {}): OwnershipLock {
-    const now = options.now ?? Date.now;
     const staleMs = options.staleMs ?? STALE_MS;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -81,9 +76,9 @@ export class OwnershipLock {
         if (code !== 'EEXIST' && code !== 'ENOENT') throw err;
       }
       const held = OwnershipLock.#readHeld(lockPath);
-      if (now() - held.heartbeat_at <= staleMs) {
+      if (Date.now() - held.heartbeat_at <= staleMs) {
         throw new Error(
-          `store is owned by pid ${held.pid} (heartbeat ${now() - held.heartbeat_at}ms ago) — ` +
+          `store is owned by pid ${held.pid} (heartbeat ${Date.now() - held.heartbeat_at}ms ago) — ` +
             `if that process is truly gone, its lock goes stale (breakable) after ${staleMs}ms of silence`,
         );
       }
@@ -97,19 +92,24 @@ export class OwnershipLock {
   }
 
   static #stake(lockPath: string, options: OwnershipLockOptions): OwnershipLock {
-    const now = options.now ?? Date.now;
     mkdirSync(dirname(lockPath), { recursive: true });
     // The claim is atomic twice over: the document is fully written to a
     // scratch name, then LINKED (never renamed) onto the lock path — link
     // fails with EEXIST when a live lock is already there, where rename
     // would silently replace it and steal the ownership.
     const claim = randomUUID();
+    const acquiredAt = Date.now();
     const scratch = `${lockPath}.claim-${process.pid}-${Math.random().toString(36).slice(2)}`;
     const fd = openSync(scratch, 'wx');
     try {
       writeSync(
         fd,
-        JSON.stringify({ pid: process.pid, claim, acquired_at: now(), heartbeat_at: now() }),
+        JSON.stringify({
+          pid: process.pid,
+          claim,
+          acquired_at: acquiredAt,
+          heartbeat_at: acquiredAt,
+        }),
       );
     } finally {
       closeSync(fd);
@@ -162,7 +162,7 @@ export class OwnershipLock {
       }
       const fd = openSync(`${this.#lockPath}.claim-${process.pid}`, 'w');
       try {
-        writeSync(fd, JSON.stringify({ ...held, heartbeat_at: this.#now() }));
+        writeSync(fd, JSON.stringify({ ...held, heartbeat_at: Date.now() }));
       } finally {
         closeSync(fd);
       }

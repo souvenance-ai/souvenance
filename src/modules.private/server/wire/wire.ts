@@ -30,8 +30,20 @@ export const StoreNameSchema = z.string().regex(STORE_NAME);
 
 export const StoreParamsSchema = z.object({ name: StoreNameSchema });
 
+/** The addressed-memory params: the store the grant reaches, the memory id. */
+export const MemoryIdParamsSchema = z.object({ name: StoreNameSchema, id: z.uuid() });
+
 /** The explicit limit's shape: the cap judges only the explicit (Q18). */
 export const limitShape = z.coerce.number().int().min(1).max(MAX_LIMIT).optional();
+
+/** The stats' five-key ledger — the descriptor's and the checkin's shared shape. */
+export const StatsSchema = z.object({
+  memories: z.number(),
+  memories_by_status: z.record(z.string(), z.number()).readonly(),
+  memories_by_kind: z.record(z.string(), z.number()).readonly(),
+  edges: z.number(),
+  edges_by_kind: z.record(z.string(), z.number()).readonly(),
+});
 
 /** One documented refusal — the response keys stay literal at the call sites. */
 export function refusal(description: string) {
@@ -90,13 +102,7 @@ export const SearchHitSchema: z.ZodType<SearchResult> = z.lazy(() =>
 export const CheckinReportSchema: z.ZodType<CheckinReport> = z.lazy(() =>
   z.object({
     hot: z.array(MemoryNodeSchema).readonly(),
-    stats: z.object({
-      memories: z.number(),
-      memories_by_status: z.record(z.string(), z.number()).readonly(),
-      memories_by_kind: z.record(z.string(), z.number()).readonly(),
-      edges: z.number(),
-      edges_by_kind: z.record(z.string(), z.number()).readonly(),
-    }),
+    stats: StatsSchema,
   }),
 );
 

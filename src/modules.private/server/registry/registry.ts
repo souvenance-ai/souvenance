@@ -25,6 +25,12 @@ interface Registered {
   readonly lock: OwnershipLock;
 }
 
+/** The routes' whole view of one open store: its name and its stats, never the path. */
+export interface StoreDescriptor {
+  readonly name: string;
+  readonly stats: Stats;
+}
+
 export class Registry {
   readonly #storesDir: string;
   readonly #registered: Map<string, Registered>;
@@ -106,7 +112,7 @@ export class Registry {
    * the facade, never the path: the routes' whole view of the registry,
    * so no route walks the map or re-learns the shape.
    */
-  descriptors(): { name: string; stats: Stats }[] {
+  descriptors(): readonly StoreDescriptor[] {
     return [...this.#registered.entries()]
       .sort(([left], [right]) => (left < right ? -1 : 1))
       .map(([name, registered]) => ({ name, stats: registered.store.stats() }));

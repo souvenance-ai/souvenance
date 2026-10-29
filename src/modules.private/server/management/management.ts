@@ -17,15 +17,7 @@ import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
 import type { Registry } from '../registry/registry.ts';
 import type { ServerEnv } from '../auth/auth.ts';
-import { refusal, StoreNameSchema, unknownStoreRefusal } from '../wire/wire.ts';
-
-const StatsSchema = z.object({
-  memories: z.number(),
-  memories_by_status: z.record(z.string(), z.number()).readonly(),
-  memories_by_kind: z.record(z.string(), z.number()).readonly(),
-  edges: z.number(),
-  edges_by_kind: z.record(z.string(), z.number()).readonly(),
-});
+import { refusal, StatsSchema, StoreNameSchema, unknownStoreRefusal } from '../wire/wire.ts';
 
 const NameSchema = z.object({ name: StoreNameSchema });
 const ForkBodySchema = z.object({ name: StoreNameSchema.optional() });
@@ -65,7 +57,7 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
     responses: {
       200: {
         description: 'every open store, by name with its stats',
-        content: { 'application/json': { schema: z.array(DescriptorSchema) } },
+        content: { 'application/json': { schema: z.array(DescriptorSchema).readonly() } },
       },
       403: CAP_REFUSAL(),
     },
