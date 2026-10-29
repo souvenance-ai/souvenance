@@ -46,6 +46,19 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     );
   }
   const registry = Registry.open(options.storesDir);
+  // The #19 boot validation: a grant naming a store the registry does not
+  // open is refused, not hidden — such a grant could only ever serve 404s
+  // forever. The teaching names the offending stores and the remedy, and
+  // the boot backs out of every claim it opened before refusing.
+  const unknown = options.tokens.filter((grant) => !registry.names().includes(grant.store));
+  if (unknown.length > 0) {
+    const rows = unknown.map((grant) => `"${grant.store}" (${grant.agent})`).join(', ');
+    registry.close();
+    throw new Error(
+      `refusing to start — ${rows} name no store the registry opened at ${options.storesDir}: ` +
+        `create the store(s) or fix the token rows`,
+    );
+  }
   const app = createApp({ registry, tokens: options.tokens, version: options.version });
   // The listening is awaited: the boot resolves only once the bound port
   // is known (the smoke test asks for 0 and reads the real one).
