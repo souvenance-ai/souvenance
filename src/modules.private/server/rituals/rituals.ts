@@ -13,8 +13,8 @@ import type { Registry } from '../registry/registry.ts';
 import {
   CheckinReportSchema,
   CheckoutReportSchema,
+  checkinLimitShape,
   foreignRefusal,
-  limitShape,
   refusal,
   StoreParamsSchema,
   unknownStoreRefusal,
@@ -27,7 +27,7 @@ export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Regi
     tags: ['rituals'],
     request: {
       params: StoreParamsSchema,
-      query: z.object({ limit: limitShape }),
+      query: z.object({ limit: checkinLimitShape }),
     },
     responses: {
       200: {

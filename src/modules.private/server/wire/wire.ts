@@ -17,7 +17,7 @@ import type {
   SearchResult,
 } from '../../store/store.ts';
 import { STORE_NAME } from '../../config/config.ts';
-import { MAX_LIMIT } from '../limits/limits.ts';
+import { MAX_DEPTH, MAX_LIMIT } from '../limits/limits.ts';
 
 // ——— The routes' shared vocabulary: the shapes every route file speaks
 // (the error envelope, the store-name param, the capped limit) live here
@@ -35,6 +35,17 @@ export const MemoryIdParamsSchema = z.object({ name: StoreNameSchema, id: z.uuid
 
 /** The explicit limit's shape: the cap judges only the explicit (Q18). */
 export const limitShape = z.coerce.number().int().min(1).max(MAX_LIMIT).optional();
+
+/**
+ * Checkin's explicit limit keeps the facade's verbatim judgment — an
+ * integer ≥ 1, NO ceiling: the 1000 cap is list/search's alone, and an
+ * explicit session block follows "order guides attention, nothing
+ * drops" (#50; the absent limit stays absent, no server default).
+ */
+export const checkinLimitShape = z.coerce.number().int().min(1).optional();
+
+/** Get's projection depth: the wire caps the walk the facade leaves to its caller (#50). */
+export const depthShape = z.coerce.number().int().min(1).max(MAX_DEPTH).optional();
 
 /** The stats' five-key ledger — the descriptor's and the checkin's shared shape. */
 export const StatsSchema = z.object({
