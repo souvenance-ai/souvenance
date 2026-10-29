@@ -19,12 +19,12 @@ lands as a JSON file under the run's throwaway work dir (printed path survives i
 
 ## Phases
 
-| root | port    | what it pins                                                                 |
-| ---- | ------- | ---------------------------------------------------------------------------- |
-| A `doc-wire`    | 18501 | happy paths of all 17 routes folded on the served `/doc`, keyset paging peek truth, `(created_at,id) DESC` order, fork carry |
+| root            | port  | what it pins                                                                                                                                                                                                                                      |
+| --------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A `doc-wire`    | 18501 | happy paths of all 17 routes folded on the served `/doc`, keyset paging peek truth, `(created_at,id) DESC` order, fork carry                                                                                                                      |
 | B `adversarial` | 18502 | malformed JSON, wrong types, hostile metadata keys and **values** (ruling A #51: trees serve, arrays/null/non-finite refuse), oversized 413, corrupt cursors, limits, depth, path traversal, unicode round-trips, removed surfaces, dup JSON keys |
-| C `auth-matrix` | 18531 | operator loopback, ro on every write, the manage cap, bad bearers, the off-loopback bind refusal, the 429 window with its real reset |
-| D `concurrency` | 18541 | 24 parallel writers, the SIGKILL patient lock (~30 s refusal → takeover + WAL durability), the second-host refusal, create/fork/delete races, parallel supersede, SIGTERM handover |
+| C `auth-matrix` | 18531 | operator loopback, ro on every write, the manage cap, bad bearers, the off-loopback bind refusal, the 429 window with its real reset                                                                                                              |
+| D `concurrency` | 18541 | 24 parallel writers, the SIGKILL patient lock (~30 s refusal → takeover + WAL durability), the second-host refusal, create/fork/delete races, parallel supersede, SIGTERM handover                                                                |
 
 ## Hygiene
 

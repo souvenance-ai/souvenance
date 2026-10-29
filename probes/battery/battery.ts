@@ -76,7 +76,8 @@ export async function req(
   } catch (thrown) {
     const code = (thrown as { cause?: { code?: string } })?.cause?.code ?? '';
     const connectLevel =
-      ['UND_ERR_SOCKET', 'ECONNRESET', 'EPIPE', 'ERR_STREAM_PREMATURE_CLOSE'].includes(code) && attempt === 0;
+      ['UND_ERR_SOCKET', 'ECONNRESET', 'EPIPE', 'ERR_STREAM_PREMATURE_CLOSE'].includes(code) &&
+      attempt === 0;
     if (!connectLevel) throw thrown;
     await delay(60);
     return req(base, method, path, options, timeoutMs, attempt + 1);
@@ -130,7 +131,7 @@ export class Server {
     this.child.stderr?.on('data', (chunk) => stderr.push(String(chunk)));
     this.dump = { out: '' };
     this.child.on('exit', () => {
-      void stdout, void stderr;
+      (void stdout, void stderr);
       this.dump = { out: stderr.join('') + stdout.join('') };
     });
     // the served log flushes on exit; a mid-life dump still reads the tail
@@ -203,13 +204,17 @@ export function lightJsonValidate(
     return lightJsonValidate(target, value, path, errors, doc);
   }
   if (node.oneOf) {
-    const anyOk = node.oneOf.some((alternative) => lightJsonValidate(alternative, value, path, [], doc).length === 0);
+    const anyOk = node.oneOf.some(
+      (alternative) => lightJsonValidate(alternative, value, path, [], doc).length === 0,
+    );
     if (!anyOk) errors.push(`${path}: matches none of oneOf`);
     return errors;
   }
   if (Array.isArray(value)) {
     if (node.type === 'array' && node.items) {
-      value.forEach((entry, index) => lightJsonValidate(node.items, entry, `${path}[${index}]`, errors, doc));
+      value.forEach((entry, index) =>
+        lightJsonValidate(node.items, entry, `${path}[${index}]`, errors, doc),
+      );
     } else {
       errors.push(`${path}: expected ${node.type ?? 'scalar'}, got array`);
     }
@@ -220,28 +225,40 @@ export function lightJsonValidate(
       errors.push(`${path}: expected ${node.type}, got object`);
       return errors;
     }
-    for (const key of node.required ?? []) if (!(key in (value as Record<string, unknown>))) errors.push(`${path}: required '${key}' missing`);
+    for (const key of node.required ?? [])
+      if (!(key in (value as Record<string, unknown>)))
+        errors.push(`${path}: required '${key}' missing`);
     if (node.additionalProperties === false) {
       for (const key of Object.keys(value as Record<string, unknown>)) {
-        if (!(key in (node.properties ?? {}))) errors.push(`${path}: additional key '${key}' forbidden`);
+        if (!(key in (node.properties ?? {})))
+          errors.push(`${path}: additional key '${key}' forbidden`);
       }
     }
     for (const [key, sub] of Object.entries(node.properties ?? {})) {
       if (key in (value as Record<string, unknown>)) {
-        lightJsonValidate(sub, (value as Record<string, unknown>)[key], `${path}.${key}`, errors, doc);
+        lightJsonValidate(
+          sub,
+          (value as Record<string, unknown>)[key],
+          `${path}.${key}`,
+          errors,
+          doc,
+        );
       }
     }
     return errors;
   }
   const actual = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
   if (actual === 'null') {
-    if (node.nullable !== true) errors.push(`${path}: null served but the schema does not declare nullable`);
+    if (node.nullable !== true)
+      errors.push(`${path}: null served but the schema does not declare nullable`);
     return errors;
   }
   if (node.type != null) {
     const expected = Array.isArray(node.type) ? node.type : [node.type];
     if (!expected.includes(actual)) {
-      errors.push(`${path}: expected ${expected.join('/')} — got ${actual}=${JSON.stringify(value)?.slice(0, 40)}`);
+      errors.push(
+        `${path}: expected ${expected.join('/')} — got ${actual}=${JSON.stringify(value)?.slice(0, 40)}`,
+      );
     }
   }
   if (node.enum && !node.enum.includes(value)) {
@@ -270,7 +287,9 @@ export const record = (value: unknown): ProbeRecord | null =>
 
 export const records = (value: unknown): readonly ProbeRecord[] =>
   Array.isArray(value)
-    ? (value.filter((entry) => entry !== null && typeof entry === 'object') as readonly ProbeRecord[])
+    ? (value.filter(
+        (entry) => entry !== null && typeof entry === 'object',
+      ) as readonly ProbeRecord[])
     : [];
 
 export type FindingSeverity = 'bug' | 'doc-gap' | 'surprise';
@@ -285,11 +304,20 @@ export interface ProbeVerdict {
 export interface ServedDocument {
   readonly openapi?: string;
   readonly info?: { readonly title?: string };
-  readonly paths?: Record<string, Record<string, {
-    readonly responses?: Record<string, {
-      readonly content?: Record<string, { readonly schema: unknown }>;
-    }>;
-  }>>;
+  readonly paths?: Record<
+    string,
+    Record<
+      string,
+      {
+        readonly responses?: Record<
+          string,
+          {
+            readonly content?: Record<string, { readonly schema: unknown }>;
+          }
+        >;
+      }
+    >
+  >;
   readonly components?: { readonly schemas?: Record<string, unknown> };
 }
 
@@ -307,17 +335,24 @@ export function docAgrees(
 ): ProbeVerdict {
   const document = battery.document as ServedDocument | null;
   const operation = document?.paths?.[routePath]?.[method.toLowerCase()];
-  if (!operation) return fail(`route ${routePath} — the doc has no ${method}: observed ${status}`, 'doc-gap');
+  if (!operation)
+    return fail(`route ${routePath} — the doc has no ${method}: observed ${status}`, 'doc-gap');
   const declared = operation.responses ?? {};
   const match = Object.entries(declared).find(
     ([code]) => code === String(status) || (code === 'default' && status >= 400),
   );
-  if (!match) return fail(`${method} ${routePath} → ${status}: /doc declares ${Object.keys(declared).join(',')} only`);
+  if (!match)
+    return fail(
+      `${method} ${routePath} → ${status}: /doc declares ${Object.keys(declared).join(',')} only`,
+    );
   const schema = match[1]?.content?.['application/json']?.schema;
   if (!schema) return ok(`${method} ${routePath} → ${status} (declared, non-JSON or empty schema)`);
   const violations = lightJsonValidate(schema, body, 'body', [], battery.document);
   if (violations.length > 0) {
-    return fail(`${method} ${routePath} → ${status} body vs declarations: ${violations.slice(0, 3).join(' | ')}`, 'doc-gap');
+    return fail(
+      `${method} ${routePath} → ${status} body vs declarations: ${violations.slice(0, 3).join(' | ')}`,
+      'doc-gap',
+    );
   }
   return ok(`${method} ${routePath} → ${status} (declared + body shape)`);
 }
@@ -339,7 +374,14 @@ export class Battery {
   private phaseServed?: Server;
   document: unknown = null;
 
-  constructor({ name, port, cases, stores = [], tokens = null, root }: {
+  constructor({
+    name,
+    port,
+    cases,
+    stores = [],
+    tokens = null,
+    root,
+  }: {
     name: string;
     port: number;
     cases: readonly ProbeCase[];
@@ -381,19 +423,28 @@ export class Battery {
    * refetched after the granted boot (both serve; trivially equal).
    */
   async grandOpening(env: Record<string, string> = {}): Promise<Server> {
-    const server = new Server({ home: this.homePath, port: this.port, logPath: join(this.root, 'logs', 'serve.log') });
+    const server = new Server({
+      home: this.homePath,
+      port: this.port,
+      logPath: join(this.root, 'logs', 'serve.log'),
+    });
     this.phaseServed = server;
     await server.boot(env);
     this.document = (await req(server.url, 'GET', '/doc')).json;
     for (const name of this.stores) {
       const made = await req(server.url, 'POST', '/stores', { body: { name } });
-      if (made.status !== 201) throw new Error(`grandOpening: ${made.status} creating ${name}: ${made.text}`);
+      if (made.status !== 201)
+        throw new Error(`grandOpening: ${made.status} creating ${name}: ${made.text}`);
     }
     if (this.tokens) {
       await server.stop();
       this.phaseServed = undefined;
       await this.writeConfig({ tokens: this.tokens });
-      const granted = new Server({ home: this.homePath, port: this.port, logPath: join(this.root, 'logs', 'serve.log') });
+      const granted = new Server({
+        home: this.homePath,
+        port: this.port,
+        logPath: join(this.root, 'logs', 'serve.log'),
+      });
       this.phaseServed = granted;
       await granted.boot(env, 9000);
       this.document = (await req(granted.url, 'GET', '/doc')).json;
@@ -436,14 +487,21 @@ export async function runBattery(battery: Battery): Promise<number> {
       };
       results.push(recorded);
       if (!recorded.ok) findings.push(recorded);
-      console.log(`[${recorded.ok ? 'PASS' : `FAIL(${recorded.severity ?? '?'})`}] ${recorded.id} ${recorded.name} — ${recorded.describe ?? ''}`);
+      console.log(
+        `[${recorded.ok ? 'PASS' : `FAIL(${recorded.severity ?? '?'})`}] ${recorded.id} ${recorded.name} — ${recorded.describe ?? ''}`,
+      );
     }
   } finally {
     await battery.server?.stop();
     const dir = join(battery.root, 'logs');
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, 'report.json'), JSON.stringify({ results, findings }, null, 2) + '\n');
+    await writeFile(
+      join(dir, 'report.json'),
+      JSON.stringify({ results, findings }, null, 2) + '\n',
+    );
   }
-  console.log(`${battery.name}: ${results.filter((r) => r.ok).length}/${results.length} pass, ${findings.length} findings`);
+  console.log(
+    `${battery.name}: ${results.filter((r) => r.ok).length}/${results.length} pass, ${findings.length} findings`,
+  );
   return findings.length;
 }
