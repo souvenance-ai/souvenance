@@ -4,8 +4,9 @@
  * namespace every slice's routes mount into, the refusal envelope
  * ({error: message}), and the caps. StoreError codes map to statuses
  * once, here — the honest mapping the typed refusals exist for (Q2);
- * a non-StoreError is an internal error whose internals go to the
- * operator's stderr, never to the client (#19: 500/503 do not disclose).
+ * a non-StoreError is an internal error and busy is an opaque 503, both
+ * keeping their internals on the operator's stderr, never on the wire
+ * (#19: 500/503 do not disclose).
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { swaggerUI } from '@hono/swagger-ui';
@@ -85,9 +86,10 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   }
 
   // The envelope: every refusal one JSON doc, {error: message} (#19).
-  // 500 never carries details (#19): read_only (the manager's case — the
-  // server never opens read-only) and every non-StoreError land in the
-  // same opaque internal; the detail goes to the operator's stderr.
+  // 503/500 never carry details (#19): busy reaches the client as its own
+  // teaching (retry in a moment), while read_only (the manager's case —
+  // the server never opens read-only) and every non-StoreError land in
+  // the same opaque internal; the detail goes to the operator's stderr.
   const internal = (err: unknown, c: Context): Response => {
     process.stderr.write(`internal error: ${err instanceof Error ? err.stack : String(err)}\n`);
     return c.json({ error: 'internal error' }, 500);
@@ -100,6 +102,14 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
     }
     if (!(err instanceof StoreError)) return internal(err, c);
     const status = STATUS_BY_CODE[err.code];
+    // busy is neither the client's mistake nor an internal: the store is
+    // alive and the request was honest — the refused answer is opaque all
+    // the same (#19: 500/503 do not disclose), the engine's raw message
+    // (SQLITE_BUSY's own text) goes to the operator's stderr only.
+    if (status === 503) {
+      process.stderr.write(`store busy: ${err.message}\n`);
+      return c.json({ error: 'the store is busy — retry in a moment' }, 503);
+    }
     if (status === 500) return internal(err, c);
     return c.json({ error: err.message }, status);
   });
