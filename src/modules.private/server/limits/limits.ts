@@ -16,3 +16,10 @@ export const MAX_LIMIT = 1000;
 export const DEFAULT_LIMIT = 100;
 /** The wire ceiling on get's projection depth (the facade needs no cap; the wire does, #50). */
 export const MAX_DEPTH = 4;
+/**
+ * The body ceiling the middleware enforces app-wide (#19): the exact byte
+ * count the served 413 refusal names. Lives here with the other caps;
+ * the document's 413 annotations read this too, so the wire, the
+ * message and the declared set cannot drift.
+ */
+export const MAX_BODY_BYTES = 1024 * 1024;

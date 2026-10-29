@@ -20,6 +20,7 @@ import { registerManagementRoutes } from './management/management.ts';
 import { registerReadRoutes } from './reads/reads.ts';
 import { registerRitualRoutes } from './rituals/rituals.ts';
 import { registerWriteRoutes } from './writes/writes.ts';
+import { MAX_BODY_BYTES } from './limits/limits.ts';
 import type { Registry } from './registry/registry.ts';
 import { HTTPException } from 'hono/http-exception';
 import {
@@ -29,8 +30,6 @@ import {
   OutEdgeSchema,
   SearchHitSchema,
 } from './wire/wire.ts';
-
-export const MAX_BODY_BYTES = 1024 * 1024;
 
 /** The status a StoreError code maps to; read_only is the manager's case, never served. */
 const STATUS_BY_CODE: Record<StoreError['code'], 400 | 404 | 409 | 503 | 500> = {

@@ -80,6 +80,35 @@ test('create answers 201 with the id — the memory serves, relations rode the o
   }
 });
 
+test('the oversized body serves 413 — the /doc declares what the wire serves (#51 B09)', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    registry.create('atlas');
+    const oversize = await call(
+      app,
+      'POST',
+      '/stores/atlas/memories',
+      JSON.stringify({ content: 'x'.repeat(1_300_000), kind: 'note' }),
+    );
+    assert.equal(oversize.status, 413);
+    assert.match((oversize.body as { error: string }).error, /body exceeds 1048576 bytes/);
+    const doc = await app.request('/doc');
+    const declared = (
+      (await doc.json()) as {
+        paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
+      }
+    ).paths['/stores/{name}/memories']['post'].responses;
+    assert.ok(
+      '413' in declared,
+      `/doc must declare 413 on the body routes, has ${Object.keys(declared).join(',')}`,
+    );
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('create refuses non-scalar metadata values — the one grammar, both surfaces (#51)', async () => {
   const dir = tempDir();
   try {

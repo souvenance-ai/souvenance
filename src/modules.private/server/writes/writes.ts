@@ -19,6 +19,7 @@ import {
   foreignRefusal,
   invalidRefusal,
   MemoryIdParamsSchema,
+  payloadRefusal,
   refusal,
   StoreParamsSchema,
   unknownMemoryRefusal,
@@ -107,6 +108,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       400: invalidRefusal('the body refuses — kind required, summary ceiling, grammar'),
       403: foreignRefusal(),
       404: unknownStoreRefusal(),
+      413: payloadRefusal(),
     },
   });
   app.openapi(createMemory, (c) => {
@@ -141,6 +143,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       409: statusRefusal(),
+      413: payloadRefusal(),
     },
   });
   app.openapi(supersedeMemory, (c) => {
@@ -170,6 +173,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       409: statusRefusal(),
+      413: payloadRefusal(),
     },
   });
   app.openapi(deprecateMemory, (c) => {
@@ -193,6 +197,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       409: statusRefusal(),
+      413: payloadRefusal(),
     },
   });
   app.openapi(setHot, (c) => {
@@ -219,6 +224,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       400: invalidRefusal('the body refuses — self-edges refuse, kind must be non-empty'),
       403: foreignRefusal(),
       404: unknownMemoryRefusal(),
+      413: payloadRefusal(),
     },
   });
   app.openapi(linkMemories, (c) => {
@@ -243,6 +249,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       409: statusRefusal(),
+      413: payloadRefusal(),
     },
   });
   app.openapi(unlinkMemories, (c) => {
@@ -270,6 +277,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       409: statusRefusal(),
+      413: payloadRefusal(),
     },
   });
   app.openapi(mergeMemories, (c) => {

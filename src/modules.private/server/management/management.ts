@@ -17,7 +17,13 @@ import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
 import type { Registry } from '../registry/registry.ts';
 import type { ServerEnv } from '../auth/auth.ts';
-import { refusal, StatsSchema, StoreNameSchema, unknownStoreRefusal } from '../wire/wire.ts';
+import {
+  payloadRefusal,
+  refusal,
+  StatsSchema,
+  StoreNameSchema,
+  unknownStoreRefusal,
+} from '../wire/wire.ts';
 
 const NameSchema = z.object({ name: StoreNameSchema });
 const ForkBodySchema = z.object({ name: StoreNameSchema.optional() });
@@ -42,6 +48,7 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
       400: GRAMMAR_REFUSAL(),
       403: CAP_REFUSAL(),
       409: COLLISION_REFUSAL(),
+      413: payloadRefusal(),
     },
   });
   app.openapi(createStore, (c) => {
@@ -107,6 +114,7 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
       403: CAP_REFUSAL(),
       404: UNKNOWN_REFUSAL(),
       409: COLLISION_REFUSAL(),
+      413: payloadRefusal(),
     },
   });
   app.openapi(forkStore, (c) => {
@@ -126,6 +134,7 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
       400: GRAMMAR_REFUSAL(),
       403: CAP_REFUSAL(),
       404: UNKNOWN_REFUSAL(),
+      413: payloadRefusal(),
     },
   });
   app.openapi(deleteStore, (c) => {

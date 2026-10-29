@@ -17,7 +17,7 @@ import type {
   SearchResult,
 } from '../../store/store.ts';
 import { STORE_NAME } from '../../config/config.ts';
-import { MAX_DEPTH, MAX_LIMIT } from '../limits/limits.ts';
+import { MAX_BODY_BYTES, MAX_DEPTH, MAX_LIMIT } from '../limits/limits.ts';
 
 // ——— The routes' shared vocabulary: the shapes every route file speaks
 // (the error envelope, the store-name param, the capped limit) live here
@@ -71,6 +71,13 @@ export const foreignRefusal = () => refusal('the grant reaches another store');
 export const unknownStoreRefusal = () => refusal('no such store');
 export const unknownMemoryRefusal = () => refusal('no such memory');
 export const invalidRefusal = (description: string) => refusal(description);
+/**
+ * The one 413: the bodyLimit middleware serves it on any body past the
+ * cap (the bodyLimit runs app-wide, before the route), and the write
+ * routes annotate it — the document is the canon (#51's B09 finding: the
+ * wire served what the declared responses forgot).
+ */
+export const payloadRefusal = () => refusal(`the body exceeds ${MAX_BODY_BYTES} bytes`);
 
 const relationShape = {
   from_id: z.string(),
