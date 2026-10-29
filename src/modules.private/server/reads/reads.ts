@@ -19,6 +19,7 @@ import { HTTPException } from 'hono/http-exception';
 import { DEFAULT_LIMIT } from '../limits/limits.ts';
 import { decodeCursor, encodeCursor } from '../cursor-token/cursor-token.ts';
 import { reachedStore } from '../reached-store/reached-store.ts';
+import { StoreError } from '../../store/store-error/store-error.ts';
 import type { ServerEnv } from '../auth/auth.ts';
 import type { Registry } from '../registry/registry.ts';
 import type { MetadataFilters } from '../../store/utils/compile-read-filters/compile-read-filters.ts';
@@ -27,11 +28,11 @@ import {
   foreignRefusal,
   invalidRefusal,
   limitShape,
+  MemoryIdParamsSchema,
   MemoryNodeSchema,
   SearchHitSchema,
-  StoreNameSchema,
-  unknownStoreRefusal,
   StoreParamsSchema,
+  unknownStoreRefusal,
 } from '../wire/wire.ts';
 
 const kindShape = z.array(z.string()).optional();
@@ -135,7 +136,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
     path: '/stores/{name}/memories/{id}',
     tags: ['memories'],
     request: {
-      params: z.object({ name: StoreNameSchema, id: z.uuid() }),
+      params: MemoryIdParamsSchema,
       query: z.object({ depth: z.coerce.number().int().min(1).optional() }),
     },
     responses: {
@@ -157,7 +158,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
     const { depth } = c.req.valid('query');
     const memory = store.get(id, { depth });
     if (memory === null) {
-      return c.json({ error: `memory not found: ${id}` }, 404);
+      throw new StoreError('not_found', `memory not found: ${id}`);
     }
     return c.json(memory, 200);
   });

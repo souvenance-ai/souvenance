@@ -18,14 +18,12 @@ import type { Registry } from '../registry/registry.ts';
 import {
   foreignRefusal,
   invalidRefusal,
+  MemoryIdParamsSchema,
   refusal,
-  StoreNameSchema,
   StoreParamsSchema,
   unknownMemoryRefusal,
   unknownStoreRefusal,
 } from '../wire/wire.ts';
-
-const IdParamsSchema = z.object({ name: StoreNameSchema, id: z.uuid() });
 
 /** The one-gesture relations: the facade's RelationSpec verbatim. */
 const RelationsSchema = z.array(z.object({ to: z.uuid(), kind: z.string() })).optional();
@@ -104,7 +102,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     path: '/stores/{name}/memories/{id}/supersede',
     tags: ['memories'],
     request: {
-      params: IdParamsSchema,
+      params: MemoryIdParamsSchema,
       body: { content: { 'application/json': { schema: SupersedeBodySchema } }, required: true },
     },
     responses: {
@@ -135,7 +133,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     method: 'post',
     path: '/stores/{name}/memories/{id}/deprecate',
     tags: ['memories'],
-    request: { params: IdParamsSchema },
+    request: { params: MemoryIdParamsSchema },
     responses: {
       204: { description: 'deprecated — nothing to say' },
       403: foreignRefusal(),
@@ -155,7 +153,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     path: '/stores/{name}/memories/{id}/hot',
     tags: ['memories'],
     request: {
-      params: IdParamsSchema,
+      params: MemoryIdParamsSchema,
       body: { content: { 'application/json': { schema: HotBodySchema } }, required: true },
     },
     responses: {
@@ -179,7 +177,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     path: '/stores/{name}/memories/{id}/link',
     tags: ['memories'],
     request: {
-      params: IdParamsSchema,
+      params: MemoryIdParamsSchema,
       body: { content: { 'application/json': { schema: LinkBodySchema } }, required: true },
     },
     responses: {
@@ -205,7 +203,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     path: '/stores/{name}/memories/{id}/link',
     tags: ['memories'],
     request: {
-      params: IdParamsSchema,
+      params: MemoryIdParamsSchema,
       body: { content: { 'application/json': { schema: UnlinkBodySchema } }, required: true },
     },
     responses: {
