@@ -46,7 +46,7 @@ test('checkin: serves the curated hot block, newest first, relations included', 
   try {
     const a = store.store('standing directive', {
       kind: 'note',
-      metadata: { tags: ['context'] },
+      metadata: { tag: 'context' },
       summary: 'the directive, condensed',
     });
     const b = store.store('another hot note', { kind: 'note' });

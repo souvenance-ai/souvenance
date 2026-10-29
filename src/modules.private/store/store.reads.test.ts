@@ -58,13 +58,13 @@ function assertServingOrder(
 function seed(store: Store): { a: string; b: string; c: string } {
   const a = store.store('The quick brown fox jumps', {
     kind: 'note',
-    metadata: { tags: ['animal'] },
+    metadata: { tag: 'animal' },
   });
   const b = store.store('Hello world from the fox', {
     kind: 'log',
-    metadata: { tags: ['greeting'] },
+    metadata: { tag: 'greeting' },
   });
-  const c = store.store('A lazy dog sleeps', { kind: 'note', metadata: { tags: ['animal'] } });
+  const c = store.store('A lazy dog sleeps', { kind: 'note', metadata: { tag: 'animal' } });
   store.link(a, b, 'references');
   store.link(b, c, 'extends');
   return { a, b, c };
@@ -75,13 +75,13 @@ function seed(store: Store): { a: string; b: string; c: string } {
 test('get: returns a memory by id — content, kind, parsed metadata, status', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('hello world', { kind: 'note', metadata: { tags: ['a'] } });
+    const id = store.store('hello world', { kind: 'note', metadata: { tag: 'a' } });
     const memory = store.get(id);
     assert.ok(memory);
     assert.equal(memory!.id, id);
     assert.equal(memory!.content, 'hello world');
     assert.equal(memory!.kind, 'note', 'kind is a first-class column of the served memory');
-    assert.deepEqual(memory!.metadata, { tags: ['a'] });
+    assert.deepEqual(memory!.metadata, { tag: 'a' });
     assert.ok(typeof memory!.created_at === 'string');
     assert.equal(memory!.summary, null);
     assert.equal(
@@ -524,12 +524,12 @@ test('search: throws on empty query', () => {
 test('search: deserializes metadata JSON — null stays null', () => {
   const { store, cleanup } = tempStore();
   try {
-    store.store('searchable text', { kind: 'note', metadata: { tags: ['x'] } });
+    store.store('searchable text', { kind: 'note', metadata: { tag: 'x' } });
     store.store('more searchable text', { kind: 'note' });
     const results = store.search('searchable');
     assert.equal(results.length, 2);
     const tagged = results.find((result) => result.metadata !== null)!;
-    assert.deepEqual(tagged.metadata, { tags: ['x'] });
+    assert.deepEqual(tagged.metadata, { tag: 'x' });
     const bare = results.find((result) => result.metadata === null)!;
     assert.equal(bare.metadata, null);
   } finally {

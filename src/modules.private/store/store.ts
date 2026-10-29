@@ -18,7 +18,7 @@ import { parseRelationRow } from './utils/parse-relation-row/parse-relation-row.
 import { sanitizeFtsQuery } from './utils/sanitize-fts-query/sanitize-fts-query.ts';
 import { sidecarPaths } from './utils/sidecar-paths/sidecar-paths.ts';
 import { tightenPermissions } from './utils/tighten-permissions/tighten-permissions.ts';
-import { validateMetadataKeys } from './utils/validate-metadata-keys/validate-metadata-keys.ts';
+import { validateMetadata } from './utils/validate-metadata/validate-metadata.ts';
 import { withBusyRetry } from './utils/with-busy-retry/with-busy-retry.ts';
 import type {
   ReadFilters,
@@ -115,6 +115,15 @@ export interface RelationSpec {
   readonly kind: string;
 }
 
+/**
+ * The authored metadata VALUE contract (#40, the values half landed by
+ * #51's wire finding): scalar leaves the filter's typed equality can ask
+ * for, or a nested object of them with the same atomic keys. Arrays and
+ * null never author — the filter cannot address them by index nor ask
+ * for a null equality (absence is expressed by omitting the key).
+ */
+export type MetadataValue = string | number | boolean | { readonly [key: string]: MetadataValue };
+
 export interface StoreOptions {
   /**
    * The memory's classification — a required column with a free
@@ -124,7 +133,15 @@ export interface StoreOptions {
    * is a column, one spelling.
    */
   readonly kind: string;
-  readonly metadata?: Record<string, unknown>;
+  /**
+   * The authored metadata: keys one path segment each (the filter's
+   * grammar, #40) and values scalar or nested objects of them — arrays
+   * and null are refused at authoring, the filter cannot ask for either
+   * (#51's wire finding: the values half of the one-grammar promise).
+   * The edge metadata is a different authored surface — link's options
+   * carry it untouched, the filter never addresses edges.
+   */
+  readonly metadata?: Record<string, MetadataValue>;
   /**
    * The authored condensation of the content — owed when the content runs
    * past `MAX_SUMMARY_LENGTH`, refused when it exceeds the ceiling itself.
@@ -154,11 +171,17 @@ export interface SupersedeOptions extends Omit<StoreOptions, 'kind'> {
  *  when they disagree; provided = it wins. */
 export interface MergeOptions {
   readonly kind?: string;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: Record<string, MetadataValue>;
   readonly summary?: string;
 }
 
 export interface LinkOptions {
+  /**
+   * The authored EDGE metadata. Left free-form on purpose: the typed
+   * metadata filter addresses memories' metadata, never edges' — the
+   * addressability obligation (and its array/null regression) starts with
+   * the surfaces the filter reaches (#51's ruling).
+   */
   readonly metadata?: Record<string, unknown>;
 }
 
@@ -572,7 +595,7 @@ export class Store {
     if (!content) throw new StoreError('invalid', 'content must be non-empty');
     assertStoreKind(options.kind);
     refuseMetadataKind(options.metadata);
-    validateMetadataKeys(options.metadata, '$');
+    validateMetadata(options.metadata, '$');
     this.#checkSummary(content, options.summary ?? null);
     const id = randomUUID();
     const summary = options.summary ?? null;
@@ -609,7 +632,7 @@ export class Store {
     if (!content) throw new StoreError('invalid', 'content must be non-empty');
     assertOptionalKind(options.kind);
     refuseMetadataKind(options.metadata);
-    validateMetadataKeys(options.metadata, '$');
+    validateMetadata(options.metadata, '$');
     this.#checkSummary(content, options.summary ?? null);
     const newId = randomUUID();
     const created_at = new Date().toISOString();
@@ -672,7 +695,7 @@ export class Store {
     if (!content) throw new StoreError('invalid', 'content must be non-empty');
     assertOptionalKind(options.kind);
     refuseMetadataKind(options.metadata);
-    validateMetadataKeys(options.metadata, '$');
+    validateMetadata(options.metadata, '$');
     this.#checkSummary(content, options.summary ?? null);
     const seen = new Set<string>();
     for (const id of ids) {

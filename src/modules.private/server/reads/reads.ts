@@ -71,7 +71,17 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
         after: z.string().optional(),
         limit: limitShape,
         kind: kindShape,
-        metadata: metadataShape,
+        /**
+         * One URL-encoded JSON object of path → scalar — the dot-paths
+         * walk the stored objects (keys carry no dots, so the segments
+         * are unambiguous), the values compare by typed equality
+         * (string | number | boolean), AND across paths. Array values
+         * are not authored in the first place (#51), so no index
+         * syntax exists.
+         */
+        metadata: metadataShape.describe(
+          'URL-encoded JSON object of dot-path → scalar (string | number | boolean), AND across paths',
+        ),
         include_terminals: includeTerminalsShape,
       }),
     },

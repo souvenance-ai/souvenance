@@ -85,14 +85,14 @@ function edgesOf(store: Store, id: string): RawEdge[] {
 test('store: inserts a memory with UUID id, kind, metadata, born active and cold', () => {
   const { store, cleanup } = tempStore();
   try {
-    const id = store.store('hello world', { kind: 'note', metadata: { tags: ['a'] } });
+    const id = store.store('hello world', { kind: 'note', metadata: { tag: 'a' } });
     assert.ok(uuidRegex(id), `id should be a UUID v4, got: ${id}`);
 
     const memory = memoryRow(store, id);
     assert.equal(memory.id, id);
     assert.equal(memory.content, 'hello world');
     assert.equal(memory.kind, 'note', 'kind is a column — the required classification');
-    assert.deepEqual(JSON.parse(memory.metadata!), { tags: ['a'] });
+    assert.deepEqual(JSON.parse(memory.metadata!), { tag: 'a' });
     assert.equal(memory.status, 'active', 'curation is a status, earned via setHot (#38)');
     assert.equal(memory.summary, null, 'a short content owes no summary');
   } finally {
@@ -105,9 +105,63 @@ test('store: kind is required — a kind-less memory does not exist', () => {
   try {
     // The runtime guard exists for the JS caller TS cannot see: play it by
     // erasing the type system's view of the required property.
-    const kindless = { metadata: { tags: ['a'] } } as unknown as StoreOptions;
+    const kindless = { metadata: { tag: 'a' } } as unknown as StoreOptions;
     assert.throws(() => store.store('doomed memory', kindless), /kind is required: pass kind/);
     assert.equal(count(store, 'SELECT count(*) as c FROM memories'), 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: metadata values refuse arrays — the filter cannot ask for them (#51)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    assert.throws(
+      () =>
+        store.store('doomed memory', {
+          kind: 'note',
+          metadata: { tags: ['a', 'b'] },
+        } as unknown as Parameters<Store['store']>[1]),
+      /metadata values may not be arrays — the filter cannot address them by index or compare them whole \(#40\).*refused: \$.tags/,
+    );
+    assert.throws(
+      () =>
+        store.store('doomed memory', {
+          kind: 'note',
+          metadata: { deep: [['x']] },
+        } as unknown as Parameters<Store['store']>[1]),
+      /refused: \$.deep/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: metadata values refuse null — omit the key to say nothing (#51)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    assert.throws(
+      () =>
+        store.store('doomed memory', {
+          kind: 'note',
+          metadata: { owner: null },
+        } as unknown as Parameters<Store['store']>[1]),
+      /metadata values may not be null — the filter cannot ask for null \(#40\).*omit \$\.owner/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: nested objects of scalar leaves author fine — the filter walks them', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const id = store.store('nested metadata', {
+      kind: 'note',
+      metadata: { tree: { ab: 9 }, mark: 'x' },
+    });
+    const memory = store.get(id);
+    assert.deepEqual(memory!.metadata, { tree: { ab: 9 }, mark: 'x' });
   } finally {
     cleanup();
   }
@@ -568,26 +622,33 @@ test('supersede: stores metadata on the new memory', () => {
   try {
     const oldId = store.store('hello world', { kind: 'note' });
     const newId = store.supersede(oldId, 'hello universe', {
-      metadata: { tags: ['greeting'] },
+      metadata: { tag: 'greeting' },
     });
 
-    assert.deepEqual(JSON.parse(memoryRow(store, newId).metadata!), { tags: ['greeting'] });
+    assert.deepEqual(JSON.parse(memoryRow(store, newId).metadata!), { tag: 'greeting' });
   } finally {
     cleanup();
   }
 });
 
-test('supersede: the head inherits the source kind column and unions tags', () => {
+test('supersede: the head inherits the source kind column and unions legacy tags', () => {
   const { store, cleanup } = tempStore();
   try {
-    const oldId = store.store('hello world', {
-      kind: 'note',
-      metadata: { tags: ['a', 'b'], session: 2 },
-    });
+    // The tags convention is legacy truth, not authored vocabulary: the
+    // array lives in a migrated row's metadata (raw probe), and the
+    // structural inheritance copies it — while an authored array would be
+    // refused at the gate (#51: arrays cannot be asked for by the filter).
+    const oldId = store.store('hello world', { kind: 'note', metadata: { session: 2 } });
+    const raw = probe(store);
+    raw
+      .prepare('UPDATE memories SET metadata = ? WHERE id = ?')
+      .run(JSON.stringify({ tags: ['a', 'b'], session: 2 }), oldId);
+    raw.close();
     const newId = store.supersede(oldId, 'hello universe');
 
     // The kind column carries (omitted kind = inherited, #31); tags are
-    // structural and carry; contextual keys do not.
+    // structural and carry through the inheritance (copying is not
+    // authoring); contextual keys do not.
     assert.equal(memoryRow(store, newId).kind, 'note');
     assert.deepEqual(JSON.parse(memoryRow(store, newId).metadata!), {
       tags: ['a', 'b'],
@@ -602,7 +663,7 @@ test('supersede: explicit metadata is used verbatim, no inherit — the kind sti
   try {
     const oldId = store.store('hello world', {
       kind: 'note',
-      metadata: { tags: ['a'] },
+      metadata: { tag: 'a' },
     });
     const newId = store.supersede(oldId, 'hello universe', {
       metadata: { session: 3 },
@@ -948,32 +1009,42 @@ test('merge: combines memories, marks originals as merged, bridges them', () => 
   }
 });
 
-test('merge: stores metadata on the merged memory', () => {
+test('merge: stores authored metadata on the merged memory', () => {
   const { store, cleanup } = tempStore();
   try {
     const a = store.store('memory a', { kind: 'note' });
     const b = store.store('memory b', { kind: 'note' });
     const mergedId = store.merge([a, b], 'combined', {
-      metadata: { tags: ['merged'] },
+      metadata: { mark: 'merged' },
     });
 
-    assert.deepEqual(JSON.parse(memoryRow(store, mergedId).metadata!), { tags: ['merged'] });
+    assert.deepEqual(JSON.parse(memoryRow(store, mergedId).metadata!), { mark: 'merged' });
   } finally {
     cleanup();
   }
 });
 
-test('merge: inherits the kind when every source agrees, unions tags', () => {
+test('merge: inherits the kind when every source agrees, unions legacy tags', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('alpha', { kind: 'note', metadata: { tags: ['x'] } });
-    const b = store.store('beta', { kind: 'note', metadata: { tags: ['y', 'x'] } });
+    const a = store.store('alpha', { kind: 'note', metadata: { tag: 'x' } });
+    const b = store.store('beta', { kind: 'note' });
+    // The second source's tags ride as legacy truth: the array was
+    // authored by a pre-refonte agent, the raw probe carries it (#51:
+    // arrays are unauthored vocabulary — the structural inheritance
+    // copies what exists).
+    const raw = probe(store);
+    raw
+      .prepare('UPDATE memories SET metadata = ? WHERE id = ?')
+      .run(JSON.stringify({ tags: ['y', 'x'] }), b);
+    raw.close();
     const id = store.merge([a, b], 'alpha beta combined');
 
-    // The kind column inherits on agreement; the tags union in metadata.
+    // The kind column inherits on agreement; the tags union in metadata —
+    // in first-seen order: a carries no tags array, b's own order stands.
     assert.equal(memoryRow(store, id).kind, 'note');
     assert.deepEqual(JSON.parse(memoryRow(store, id).metadata!), {
-      tags: ['x', 'y'],
+      tags: ['y', 'x'],
     });
   } finally {
     cleanup();
@@ -983,8 +1054,8 @@ test('merge: inherits the kind when every source agrees, unions tags', () => {
 test('merge: sources disagreeing on kind are refused with the candidate kinds', () => {
   const { store, cleanup } = tempStore();
   try {
-    const a = store.store('alpha', { kind: 'note', metadata: { tags: ['x'] } });
-    const b = store.store('beta', { kind: 'decision', metadata: { tags: ['y'] } });
+    const a = store.store('alpha', { kind: 'note', metadata: { tag: 'x' } });
+    const b = store.store('beta', { kind: 'decision' });
     assert.throws(
       () => store.merge([a, b], 'alpha beta combined'),
       /merge refused: sources disagree on kind \(decision, note\) — pass kind to classify the fusion/,
