@@ -249,6 +249,13 @@ test('get serves the projection — raw edges at the default depth, expansion on
       200,
       'c has no out edges — still 200',
     );
+    const deep = await get(app, `/stores/atlas/memories/${a}?depth=4`);
+    assert.equal(deep.status, 200, 'the wire cap leaves 4 to the walk');
+    assert.equal(
+      (await get(app, `/stores/atlas/memories/${a}?depth=5`)).status,
+      400,
+      'the wire caps the projection walk (MAX_DEPTH) — the facade leaves the pace to callers; over the wire the caller is remote',
+    );
     const unknown = await get(app, `/stores/atlas/memories/00000000-0000-4000-8000-000000000000`);
     assert.equal(unknown.status, 404);
     assert.match((unknown.body as { error: string }).error, /memory not found/);

@@ -31,6 +31,7 @@ import {
   MemoryIdParamsSchema,
   MemoryNodeSchema,
   SearchHitSchema,
+  depthShape,
   StoreParamsSchema,
   unknownStoreRefusal,
 } from '../wire/wire.ts';
@@ -137,7 +138,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
-      query: z.object({ depth: z.coerce.number().int().min(1).optional() }),
+      query: z.object({ depth: depthShape }),
     },
     responses: {
       200: {

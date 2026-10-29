@@ -89,6 +89,23 @@ test('checkin honors the limit — order guides attention, the cap truncates', a
   }
 });
 
+test('an explicit checkin limit past 1000 serves — the ceiling is list/search alone', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry, atlas } = boot(dir);
+    atlas.store('a hot memory', { kind: 'note' });
+    atlas.setHot(atlas.list()[0]?.id ?? '', true);
+    const res = await app.request('/stores/atlas/checkin?limit=2000', {}, LOOPBACK);
+    assert.equal(res.status, 200, 'the 1000 ceiling never judged checkin (#50)');
+    const report = (await res.json()) as { hot: unknown[] };
+    assert.equal(report.hot.length, 1, 'the facade judged the limit — attention, not the cap');
+    assert.equal((await app.request('/stores/atlas/checkin?limit=abc', {}, LOOPBACK)).status, 400);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a ro grant reads the rituals — reading the register is not writing it', async () => {
   const dir = tempDir();
   try {
