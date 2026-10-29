@@ -39,7 +39,7 @@ test('scalar leaves and absence pass — string, number, boolean, null metadata 
 test('arrays refuse at authoring — the filter cannot address them by index nor whole (#51)', () => {
   assert.throws(
     () => validateMetadata({ tags: ['a', 'b'] }, '$'),
-    /metadata values may not be arrays — the filter cannot address them by index or compare them whole \(#40\).*refused: \$.tags/,
+    /may not be arrays.*#40, #51.*refused: \$.tags/,
   );
   assert.throws(
     () => validateMetadata({ tree: { deep: [['nope']] } }, '$'),
@@ -49,9 +49,14 @@ test('arrays refuse at authoring — the filter cannot address them by index nor
 });
 
 test('null values refuse — omit the key to say nothing (#51)', () => {
-  assert.throws(
-    () => validateMetadata({ owner: null }, '$'),
-    /metadata values may not be null — the filter cannot ask for null \(#40\).*omit \$\.owner/,
-  );
+  assert.throws(() => validateMetadata({ owner: null }, '$'), /may not be null.*omit \$\.owner/);
   assert.throws(() => validateMetadata({ tree: { leaf: null } }, '$'), /omit \$\.tree\.leaf/);
+});
+
+test('non-finite numbers refuse — JSON.stringify would carry them as null (#51)', () => {
+  assert.throws(
+    () => validateMetadata({ rank: NaN }, '$'),
+    /may not be non-finite numbers.*JSON\.stringify.*omit \$\.rank/,
+  );
+  assert.throws(() => validateMetadata({ tree: { limit: Infinity } }, '$'), /omit \$\.tree\.limit/);
 });

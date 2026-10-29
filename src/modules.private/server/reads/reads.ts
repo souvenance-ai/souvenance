@@ -37,7 +37,20 @@ import {
 } from '../wire/wire.ts';
 
 const kindShape = z.array(z.string()).optional();
-const metadataShape = z.string().optional();
+/**
+ * The metadata param's language rides once on the shared const — both
+ * filter routes (list and search) document the same grammar (#51): one
+ * URL-encoded JSON object of path → scalar, the dot-paths walking the
+ * stored objects (keys carry no dots, the segments are unambiguous),
+ * typed equality (string | number | boolean), AND across paths. Array
+ * values are not authored in the first place, so no index syntax exists.
+ */
+const metadataShape = z
+  .string()
+  .optional()
+  .describe(
+    'URL-encoded JSON object of dot-path → scalar (string | number | boolean), AND across paths',
+  );
 const includeTerminalsShape = z.string().optional();
 
 /** The metadata param's parse: one URL-encoded JSON object, path → scalar. */
@@ -71,17 +84,9 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
         after: z.string().optional(),
         limit: limitShape,
         kind: kindShape,
-        /**
-         * One URL-encoded JSON object of path → scalar — the dot-paths
-         * walk the stored objects (keys carry no dots, so the segments
-         * are unambiguous), the values compare by typed equality
-         * (string | number | boolean), AND across paths. Array values
-         * are not authored in the first place (#51), so no index
-         * syntax exists.
-         */
-        metadata: metadataShape.describe(
-          'URL-encoded JSON object of dot-path → scalar (string | number | boolean), AND across paths',
-        ),
+        // The grammar's language rides on the shared const (list and
+        // search document the same filter).
+        metadata: metadataShape,
         include_terminals: includeTerminalsShape,
       }),
     },

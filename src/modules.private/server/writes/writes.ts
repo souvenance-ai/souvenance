@@ -30,12 +30,6 @@ import type { MetadataValue } from '../../store/store.ts';
 const RelationsSchema = z.array(z.object({ to: z.uuid(), kind: z.string() })).optional();
 
 /**
- * The authored metadata on the write surface: the facade's grammar
- * mirrored — keys one path segment each, values scalar or nested objects
- * (#51's ruling). The validator's own teaching (facade, StoreError) is
- * the refusal the agent reads when it breaks the grammar on the wire.
- */
-/**
  * The authored metadata on the write surface. The OpenAPI converter
  * cannot recurse declared records (a self-cycling `z.record` 500s the
  * /doc), so the schema stays structurally loose and the contract reads

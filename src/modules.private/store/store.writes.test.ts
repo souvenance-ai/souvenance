@@ -122,7 +122,7 @@ test('store: metadata values refuse arrays — the filter cannot ask for them (#
           kind: 'note',
           metadata: { tags: ['a', 'b'] },
         } as unknown as Parameters<Store['store']>[1]),
-      /metadata values may not be arrays — the filter cannot address them by index or compare them whole \(#40\).*refused: \$.tags/,
+      /may not be arrays.*#40, #51.*refused: \$.tags/,
     );
     assert.throws(
       () =>
@@ -137,7 +137,7 @@ test('store: metadata values refuse arrays — the filter cannot ask for them (#
   }
 });
 
-test('store: metadata values refuse null — omit the key to say nothing (#51)', () => {
+test('store: metadata values refuse null and non-finite numbers — omit the key (#51)', () => {
   const { store, cleanup } = tempStore();
   try {
     assert.throws(
@@ -146,7 +146,23 @@ test('store: metadata values refuse null — omit the key to say nothing (#51)',
           kind: 'note',
           metadata: { owner: null },
         } as unknown as Parameters<Store['store']>[1]),
-      /metadata values may not be null — the filter cannot ask for null \(#40\).*omit \$\.owner/,
+      /may not be null.*omit \$\.owner/,
+    );
+    assert.throws(
+      () =>
+        store.store('doomed memory', {
+          kind: 'note',
+          metadata: { rank: NaN },
+        } as unknown as Parameters<Store['store']>[1]),
+      /non-finite numbers.*JSON\.stringify.*omit \$\.rank/,
+    );
+    assert.throws(
+      () =>
+        store.store('doomed memory', {
+          kind: 'note',
+          metadata: { tree: { limit: Infinity } },
+        } as unknown as Parameters<Store['store']>[1]),
+      /omit \$\.tree\.limit/,
     );
   } finally {
     cleanup();
