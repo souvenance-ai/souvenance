@@ -23,7 +23,11 @@ if (selected !== undefined && !valid.includes(selected)) {
 }
 
 for (const port of ports) {
-  try { execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' }); } catch { /* port already free */ }
+  try {
+    execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' });
+  } catch {
+    /* port already free */
+  }
 }
 
 const { mkdtemp } = await import('node:fs/promises');
@@ -36,7 +40,9 @@ const modules = [
   '../adversarial/adversarial.ts',
   '../auth-matrix/auth-matrix.ts',
   '../concurrency/concurrency.ts',
-].map((relative) => import(relative).then((module) => module as { battery: (root: string) => Battery }));
+].map((relative) =>
+  import(relative).then((module) => module as { battery: (root: string) => Battery }),
+);
 
 const { runBattery } = await import('../battery/battery.ts');
 
@@ -49,7 +55,11 @@ try {
   }
 } finally {
   for (const port of ports) {
-    try { execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' }); } catch { /* port already free */ }
+    try {
+      execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' });
+    } catch {
+      /* port already free */
+    }
   }
 }
 if (failures > 0) process.exit(1);
