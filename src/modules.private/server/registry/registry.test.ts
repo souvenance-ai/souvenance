@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import { Store } from '../../store/store.ts';
 import { StoreError } from '../../store/store-error/store-error.ts';
 import { Registry } from './registry.ts';
@@ -205,6 +205,46 @@ test('a corrupt store file kills the boot — the failure is loud, the store unt
   try {
     writeFileSync(join(dir, 'broken.db'), 'this is not sqlite');
     assert.throws(() => Registry.open(dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a failed fork claim leaves no store behind — the name stays free', () => {
+  const dir = tempDir();
+  try {
+    const registry = Registry.open(dir);
+    const source = registry.create('atlas');
+    const copy = vi.spyOn(source, 'fork').mockImplementation(() => {
+      throw new Error('the copy died mid-flight');
+    });
+    assert.throws(() => registry.fork('atlas'), /copy died/);
+    assert.ok(!existsSync(join(dir, 'atlas-fork.db')), 'the half-born store must not survive');
+    assert.ok(!existsSync(join(dir, 'atlas-fork.lock')));
+    copy.mockRestore();
+    // The name is free and claimable again: the failed birth stays dead.
+    assert.equal(registry.fork('atlas'), 'atlas-fork');
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a throwing close never wedges the name — the lock releases before anything else', () => {
+  const dir = tempDir();
+  try {
+    const registry = Registry.open(dir);
+    const main = registry.create('main');
+    const refusingClose = vi.spyOn(main, 'close').mockImplementation(() => {
+      throw new Error('close refuses');
+    });
+    assert.throws(() => registry.remove('main'), /close refuses/);
+    assert.ok(!existsSync(join(dir, 'main.lock')), 'the lock is gone with the handoff');
+    refusingClose.mockRestore();
+    main.close(); // the abandoned handle still closes — the refusal was the mock's
+    const again = registry.create('main');
+    assert.ok(again !== undefined, 'the name is claimable again, no heartbeat survived');
+    registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

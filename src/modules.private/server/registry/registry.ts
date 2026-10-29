@@ -11,7 +11,7 @@
  * remove speak the same vocabulary the facade does, and the server maps
  * codes to statuses once, honestly.
  */
-import { mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { STORE_NAME } from '../../config/config.ts';
 import { Store, type Stats } from '../../store/store.ts';
@@ -69,13 +69,25 @@ export class Registry {
    * cold-open, create, fork.
    */
   #claim(name: string, build: (dbPath: string) => Store): Store {
+    const dbPath = join(this.#storesDir, `${name}.db`);
     const lock = OwnershipLock.acquire(join(this.#storesDir, `${name}.lock`));
+    // A failed claim must not leave its birth behind: a half-copied fork
+    // or a refused open would otherwise resurrect at the next boot — cold
+    // open over a half-born store, or a corrupt one bricking the boot.
+    // The cleanup keeps to the files THIS claim created: a db handed to
+    // the server from the outside is the operator's, its fate never ours.
+    const handed = existsSync(dbPath);
     try {
-      const store = build(join(this.#storesDir, `${name}.db`));
+      const store = build(dbPath);
       this.#registered.set(name, { store, lock });
       return store;
     } catch (err) {
       lock.release();
+      if (!handed) {
+        for (const path of sidecarPaths(dbPath)) {
+          rmSync(path, { force: true });
+        }
+      }
       throw err;
     }
   }
@@ -157,10 +169,16 @@ export class Registry {
       throw new StoreError('not_found', `no store "${name}" in the registry`);
     }
     this.#registered.delete(name);
-    registered.store.close();
-    // The lock releases first (pid-checked, its timer stops), then the
-    // files: db + WAL sidecars — the lock file is gone with the release.
-    registered.lock.release();
+    // The release is owed whatever the close says: a throwing close must
+    // never leave the name behind a still-beating heartbeat — the store
+    // would refuse every re-acquisition until the process died. The
+    // sidecars go only on a clean close: a db the close could not part
+    // with keeps its files until the operator's hand.
+    try {
+      registered.store.close();
+    } finally {
+      registered.lock.release();
+    }
     const dbPath = join(this.#storesDir, `${name}.db`);
     for (const path of sidecarPaths(dbPath)) {
       rmSync(path, { force: true });
@@ -170,8 +188,11 @@ export class Registry {
   /** Releases every lock and closes every store — the clean shutdown. */
   close(): void {
     for (const [name, registered] of this.#registered) {
-      registered.store.close();
-      registered.lock.release();
+      try {
+        registered.store.close();
+      } finally {
+        registered.lock.release();
+      }
       this.#registered.delete(name);
     }
   }
