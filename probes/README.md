@@ -3,7 +3,7 @@
 The agent's black-box rig over the HTTP surface (issue #51's artifact):
 
 - **`/doc` is the canon** — the probes ask the wire what it does and fold every observed exchange against the served OpenAPI document (`docAgrees`). The implementation is never read.
-- **Honest isolation** — each battery boots a real `souvenance serve` on its own throwaway `HOME` (fresh config, fresh stores) on its own port; nothing reaches outside the host.
+- **Honest isolation** — each battery boots a real `souvenance serve` on its own throwaway `HOME` (fresh config, fresh stores) on its own port; nothing reaches outside the host. The production posture (#63): the phases carry their credentials in the config they author — a management token for the store births, a store grant per probed store; the identity cases (bare → 401) call bare on purpose.
 - **Agent economics** — the battery intentionally stands out of `fb:test`/CI (the 429 window waits real seconds; the lifecycle phases kill and reboot the server) and out of the tsconfig include (the same exemption `legacy/` rides). A local type pass: `npx tsc --noEmit --strict --target esnext --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --types node probes/run/run.ts`
 
 ## Run
@@ -19,12 +19,12 @@ lands as a JSON file under the run's throwaway work dir (printed path survives i
 
 ## Phases
 
-| root            | port  | what it pins                                                                                                                                                                                                                                      |
-| --------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A `doc-wire`    | 18501 | happy paths of all 17 routes folded on the served `/doc`, keyset paging peek truth, `(created_at,id) DESC` order, fork carry                                                                                                                      |
-| B `adversarial` | 18502 | malformed JSON, wrong types, hostile metadata keys and **values** (ruling A #51: trees serve, arrays/null/non-finite refuse), oversized 413, corrupt cursors, limits, depth, path traversal, unicode round-trips, removed surfaces, dup JSON keys |
-| C `auth-matrix` | 18531 | operator loopback, ro on every write, the manage cap, bad bearers, the off-loopback bind refusal, the 429 window with its real reset                                                                                                              |
-| D `concurrency` | 18541 | 24 parallel writers, the SIGKILL patient lock (~30 s refusal → takeover + WAL durability), the second-host refusal, create/fork/delete races, parallel supersede, SIGTERM handover                                                                |
+| root            | port  | what it pins                                                                                                                                                                                                                                                                                           |
+| --------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A `doc-wire`    | 18501 | happy paths of all 17 routes folded on the served `/doc`, keyset paging peek truth, `(created_at,id) DESC` order, fork carry (the stats' verdict)                                                                                                                                                      |
+| B `adversarial` | 18502 | malformed JSON, wrong types, hostile metadata keys and **values** (ruling A #51: trees serve, arrays/null/non-finite refuse), oversized 413, corrupt cursors, limits, depth, path traversal, unicode round-trips, removed surfaces, dup JSON keys                                                      |
+| C `auth-matrix` | 18531 | the loopback bypass dead (bare → 401), ro/rw on every write, the management family serving create/list/describe/fork/delete and the wrong-family 403s, bad bearers, the zero-credential boot refusal, the management-only boot birthing a fresh host's first store, the 429 window with its real reset |
+| D `concurrency` | 18541 | 24 parallel writers, the SIGKILL patient lock (~30 s refusal → takeover + WAL durability), the second-host refusal, create/fork/delete races, parallel supersede, SIGTERM handover                                                                                                                     |
 
 ## Hygiene
 

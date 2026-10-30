@@ -5,18 +5,44 @@
 // Expectation: refusals teach (400 {error}), nothing crashes, nothing 500s.
 // The metadata-value probes pin ruling A (#51's B07): trees store and
 // leaf-walk, arrays/null/non-finite refuse with the facade's teaching.
+// The production posture (#63): the probes carry the alpha store grant
+// (identity is cheap — hostility lives in the payload, not the header).
 //
 import {
   Battery,
+  bearerOf,
+  type ManagementToken,
   type ProbeCase,
   type ProbeRecord,
   type ProbeVerdict,
+  type TokenGrant,
   fail,
   ok,
   record,
   records,
   req,
 } from '../battery/battery.ts';
+
+/** The ambient identity (#63): the battery's alpha store grant. */
+const ALPH = 'souv-' + '4'.repeat(32);
+const OTHER_SECRET = 'souv-' + '5'.repeat(32);
+const OPS_SECRET = 'souv-' + '6'.repeat(32);
+
+function call(
+  url: string,
+  method: 'GET' | 'POST' | 'DELETE',
+  path: string,
+  options: { headers?: Record<string, string>; body?: string | object } = {},
+  timeoutMs?: number,
+): ReturnType<typeof req> {
+  return req(
+    url,
+    method,
+    path,
+    { ...options, headers: { ...bearerOf(ALPH), ...options.headers } },
+    timeoutMs,
+  );
+}
 
 /** Refusal contract: the status carries the envelope {error: string}. */
 function refuses(
@@ -47,7 +73,7 @@ const cases: readonly ProbeCase[] = [
         ['just null', 'null'],
         ['nul byte', '{"content":"a\u0000b","kind":"note"}'],
       ] as const) {
-        const r = await req(b.server!.url, 'POST', '/stores/alpha/memories', { body: raw });
+        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', { body: raw });
         const verdict = awaits(r, [400, 413, 415], tag);
         if (verdict) return verdict;
       }
@@ -66,7 +92,7 @@ const cases: readonly ProbeCase[] = [
         ['kind empty', { content: 'x', kind: '' }],
         ['kind null', { content: 'x', kind: null }],
       ] as const) {
-        const r = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
           body: body as object,
         });
         const verdict = awaits(r, [400], tag);
@@ -79,7 +105,7 @@ const cases: readonly ProbeCase[] = [
     id: 'B03',
     name: 'extra keys refuse — the wire teaches what it does not serve (#60)',
     run: async (b) => {
-      const made = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const made = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
         body: { content: 'x', kind: 'note', armor: true },
       });
       if (made.status !== 400) return fail(`extra key → ${made.status} ${made.text.slice(0, 140)}`);
@@ -99,7 +125,7 @@ const cases: readonly ProbeCase[] = [
         ['kind number', { content: 'x', kind: 42 }],
         ['kind object', { content: 'x', kind: { a: 1 } }],
       ] as const) {
-        const r = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
           body: body as object,
         });
         const verdict = awaits(r, [400], tag);
@@ -113,7 +139,7 @@ const cases: readonly ProbeCase[] = [
     name: 'kind is a free vocabulary, not an enum',
     run: async (b) => {
       for (const kind of ['dream', 'X1', 'note-2', 'latin1_é']) {
-        const r = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
           body: { content: `kind probe ${kind}`, kind },
         });
         if (r.status !== 201)
@@ -136,13 +162,13 @@ const cases: readonly ProbeCase[] = [
         ['unicode', 'clé'],
         ['star', 'a*b'],
       ] as const) {
-        const r = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
           body: { content: 'metadata probe', kind: 'note', metadata: { [key]: 'v' } },
         });
         const verdict = awaits(r, [400], `metadata key ${JSON.stringify(key)}`);
         if (verdict) return verdict;
       }
-      const plain = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const plain = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
         body: { content: 'metadata ok probe', kind: 'note', metadata: { 'a-b_C9': 'v' } },
       });
       if (plain.status !== 201)
@@ -157,7 +183,7 @@ const cases: readonly ProbeCase[] = [
     id: 'B07',
     name: 'metadata value grammar: trees serve, arrays/null refuse (#51 fix)',
     run: async (b) => {
-      const tree = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const tree = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
         body: {
           content: `tree row ${Date.now()}`,
           kind: 'note',
@@ -172,12 +198,12 @@ const cases: readonly ProbeCase[] = [
         ['null', { owner: null }],
         ['non-finite', { rank: NaN }],
       ] as const) {
-        const r = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
           body: { content: 'x', kind: 'note', metadata },
         });
         if (r.json === null && tag === 'non-finite') {
           // the wire's JSON cannot even carry a NaN literal — the gate holds
-          const raw = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+          const raw = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
             body: '{"content":"nan case","kind":"note","metadata":{"rank":NaN}}',
           });
           if (raw.status !== 400)
@@ -193,7 +219,7 @@ const cases: readonly ProbeCase[] = [
             `metadata ${tag}: refusal without the teaching: ${String(record(r.json)?.error).slice(0, 140)}`,
           );
       }
-      const walked = await req(
+      const walked = await call(
         b.server!.url,
         'GET',
         `/stores/alpha/memories?metadata=${encodeURIComponent(JSON.stringify({ 'tree.ab': 9 }))}`,
@@ -216,14 +242,14 @@ const cases: readonly ProbeCase[] = [
         ['bom', '\ufeffcloaked'],
         ['quotes', '"p"q\'r\ts'],
       ] as const) {
-        const made = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const made = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
           body: { content: text, kind: 'note' },
         });
         if (made.status !== 201)
           return fail(`${tag} refused: ${made.status} ${made.text.slice(0, 160)}`);
         const node = record(
           (
-            await req(
+            await call(
               b.server!.url,
               'GET',
               `/stores/alpha/memories/${String(record(made.json)?.id)}`,
@@ -241,7 +267,7 @@ const cases: readonly ProbeCase[] = [
     name: 'oversized body → refusal, no hang',
     run: async (b) => {
       const big = 'b'.repeat(1_300_000);
-      const r = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
         body: JSON.stringify({ content: big, kind: 'note' }),
       });
       if (!r.status.toString().startsWith('4'))
@@ -275,11 +301,11 @@ const cases: readonly ProbeCase[] = [
         ['exponent', 1e15],
         ['huge', 99999999999999999999],
       ] as const) {
-        const r = await req(b.server!.url, 'GET', `/stores/alpha/memories?limit=${q}`);
+        const r = await call(b.server!.url, 'GET', `/stores/alpha/memories?limit=${q}`);
         const verdict = awaits(r, [400], `limit=${tag}`);
         if (verdict) return verdict;
       }
-      const capOk = await req(b.server!.url, 'GET', '/stores/alpha/memories?limit=1000');
+      const capOk = await call(b.server!.url, 'GET', '/stores/alpha/memories?limit=1000');
       if (capOk.status !== 200) return fail(`limit=1000 (cap) refused: ${capOk.status}`, 'doc-gap');
       return ok('hostile limits refused, cap accepted');
     },
@@ -295,7 +321,7 @@ const cases: readonly ProbeCase[] = [
         ['raw json', encodeURIComponent('{"a":1}')],
         ['url junk', '%2F..%2F..%2Fetc'],
       ] as const) {
-        const r = await req(b.server!.url, 'GET', `/stores/alpha/memories?after=${after}`);
+        const r = await call(b.server!.url, 'GET', `/stores/alpha/memories?after=${after}`);
         const verdict = awaits(r, [400], `after=${tag}`);
         if (verdict) return verdict;
       }
@@ -306,16 +332,19 @@ const cases: readonly ProbeCase[] = [
     id: 'B12',
     name: 'cross-store cursor reuse — bloodless',
     run: async (b) => {
-      const made = await req(b.server!.url, 'POST', '/stores', { body: { name: 'cursor-other' } });
-      if (made.status !== 201) return fail(`probe store: ${made.status}`);
-      await req(b.server!.url, 'POST', '/stores/cursor-other/memories', {
+      // cursor-other is born at grandOpening — its grant rode the config (#63).
+      await call(b.server!.url, 'POST', '/stores/cursor-other/memories', {
+        headers: bearerOf(OTHER_SECRET),
         body: { content: `stranger row ${Date.now()}`, kind: 'event' },
       });
-      await req(b.server!.url, 'POST', '/stores/cursor-other/memories', {
+      await call(b.server!.url, 'POST', '/stores/cursor-other/memories', {
+        headers: bearerOf(OTHER_SECRET),
         body: { content: `stranger row ${Date.now()}`, kind: 'event' },
       });
-      const p1 = await req(b.server!.url, 'GET', '/stores/cursor-other/memories?limit=1');
-      const reused = await req(
+      const p1 = await call(b.server!.url, 'GET', '/stores/cursor-other/memories?limit=1', {
+        headers: bearerOf(OTHER_SECRET),
+      });
+      const reused = await call(
         b.server!.url,
         'GET',
         `/stores/alpha/memories?limit=1&after=${encodeURIComponent(String(record(p1.json)?.next_after))}`,
@@ -339,15 +368,15 @@ const cases: readonly ProbeCase[] = [
     id: 'B13',
     name: 'deleted-cursor row — gap or clean serve',
     run: async (b) => {
-      const gone = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const gone = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
         body: { content: `page anchor ${Date.now()}`, kind: 'event' },
       });
-      const first = await req(b.server!.url, 'GET', '/stores/alpha/memories?limit=1');
+      const first = await call(b.server!.url, 'GET', '/stores/alpha/memories?limit=1');
       const anchor = String(record(first.json)?.next_after);
-      await req(b.server!.url, 'POST', `/stores/alpha/memories/${String(record(gone.json)?.id)}`, {
+      await call(b.server!.url, 'POST', `/stores/alpha/memories/${String(record(gone.json)?.id)}`, {
         body: undefined,
       });
-      const next = await req(
+      const next = await call(
         b.server!.url,
         'GET',
         `/stores/alpha/memories?limit=1&after=${encodeURIComponent(anchor)}`,
@@ -366,7 +395,7 @@ const cases: readonly ProbeCase[] = [
         ['overflow', 'z'.repeat(300)],
         ['embedded slash', '12b19538-1c07-43b4-b471-b518cbae75ad/x'],
       ] as const) {
-        const r = await req(b.server!.url, 'GET', `/stores/alpha/memories/${idPart}`);
+        const r = await call(b.server!.url, 'GET', `/stores/alpha/memories/${idPart}`);
         const verdict = awaits(r, [400, 404], `id ${tag}`);
         if (verdict) return verdict;
       }
@@ -383,7 +412,7 @@ const cases: readonly ProbeCase[] = [
         ['float', 1.5],
         ['zero', 0],
       ] as const) {
-        const r = await req(
+        const r = await call(
           b.server!.url,
           'GET',
           `/stores/alpha/memories/${crypto.randomUUID()}?depth=${depth}`,
@@ -408,7 +437,7 @@ const cases: readonly ProbeCase[] = [
         ['quote-pair', '"unterminated'],
         ['unicode', '日本語 🔍'],
       ] as const) {
-        const r = await req(
+        const r = await call(
           b.server!.url,
           'GET',
           `/stores/alpha/search?q=${encodeURIComponent(q)}`,
@@ -423,13 +452,13 @@ const cases: readonly ProbeCase[] = [
     id: 'B17',
     name: 'duplicate JSON keys — last wins, nothing corrupts',
     run: async (b) => {
-      const r = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
         body: '{"content":"dup keys","kind":"note","kind":"the-winner"}',
       });
       const verdict = awaits(r, [400, 201], 'duplicate kind key');
       if (verdict.ok) {
         const node = record(
-          (await req(b.server!.url, 'GET', `/stores/alpha/memories/${String(record(r.json)?.id)}`))
+          (await call(b.server!.url, 'GET', `/stores/alpha/memories/${String(record(r.json)?.id)}`))
             .json,
         );
         if (node?.kind !== 'the-winner')
@@ -451,7 +480,10 @@ const cases: readonly ProbeCase[] = [
         'has space',
         'a'.repeat(40),
       ]) {
-        const r = await req(b.server!.url, 'POST', '/stores', { body: { name } });
+        const r = await req(b.server!.url, 'POST', '/stores', {
+          headers: bearerOf(OPS_SECRET),
+          body: { name },
+        });
         const verdict = awaits(r, [400], `store name ${JSON.stringify(name.slice(0, 12))}`);
         if (verdict) return verdict;
       }
@@ -468,7 +500,7 @@ const cases: readonly ProbeCase[] = [
         ['DELETE', '/stores/alpha/recover'],
         ['POST', '/stores/alpha/export'],
       ] as const) {
-        const r = await req(b.server!.url, method, path, {
+        const r = await call(b.server!.url, method, path, {
           body: method === 'POST' ? {} : undefined,
         });
         const verdict = awaits(r, [404], `${method} ${path}`);
@@ -481,7 +513,7 @@ const cases: readonly ProbeCase[] = [
     id: 'B20',
     name: 'link/hot/supersede/merge adversarial bodies teach',
     run: async (b) => {
-      const anchor = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const anchor = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
         body: { content: `anchor ${Date.now()}`, kind: 'event' },
       });
       const id = String(record(anchor.json)?.id);
@@ -526,7 +558,7 @@ const cases: readonly ProbeCase[] = [
           [400, 409, 404],
         ],
       ] as const) {
-        const r = await req(b.server!.url, method, path, { body: JSON.stringify(body) });
+        const r = await call(b.server!.url, method, path, { body: JSON.stringify(body) });
         const verdict = awaits(r, [...expected], tag);
         if (verdict) return verdict;
       }
@@ -551,7 +583,18 @@ function awaits(
   return ok(`${describe} — ${r.status} is in ${expectations.join('|')}`);
 }
 
-/** The battery built fresh every run: operator loopback, one growing store. */
+/** The battery built fresh every run: credentials in the config (#63). */
 export function battery(root: string): Battery {
-  return new Battery({ name: 'B-adversarial', port: 18502, cases, stores: ['alpha'], root });
+  return new Battery({
+    name: 'B-adversarial',
+    port: 18502,
+    cases,
+    stores: ['alpha', 'cursor-other'],
+    tokens: [
+      { agent: 'alpha-rw', secret: ALPH, store: 'alpha', mode: 'rw' },
+      { agent: 'other-rw', secret: OTHER_SECRET, store: 'cursor-other', mode: 'rw' },
+    ] satisfies readonly TokenGrant[],
+    management: [{ agent: 'ops', secret: OPS_SECRET }] satisfies readonly ManagementToken[],
+    root,
+  });
 }

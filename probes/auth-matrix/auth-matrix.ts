@@ -1,12 +1,17 @@
 //
-// Phase C — the auth matrix end-to-end: loopback operator, ro/rw on every
-// write, manage-less management, bad bearers, the off-loopback bind
-// policy, and the 429 window with its real reset. Grants: alpha rw,
-// beta ro, gamma ro + manage.
+// Phase C — the auth matrix end-to-end (#63): the loopback bypass is
+// dead (a bare request is a 401 whatever the peer), ro/rw on every
+// write, the management family serving create/list/describe/fork/delete
+// and nothing else, bad bearers, the zero-credential boot policy (any
+// host), the management-only boot that births a fresh host's first
+// store, and the 429 window with its real reset. Credentials: alpha rw,
+// beta ro, beta-writer rw (the seeder), gamma = the management token.
 //
 import {
   Battery,
   Server,
+  bearerOf,
+  type ManagementToken,
   type ProbeCase,
   type TokenGrant,
   delay,
@@ -20,31 +25,31 @@ import { join } from 'node:path';
 
 const ALPH = 'souv-' + 'a'.repeat(32);
 const BET = 'souv-' + 'b'.repeat(32);
+const BETW = 'souv-' + 'e'.repeat(32);
 const GAMM = 'souv-' + 'c'.repeat(32);
-const bearerOf = (secret: string): Record<string, string> => ({
-  authorization: `Bearer ${secret}`,
-});
 
 const cases: readonly ProbeCase[] = [
   {
     id: 'C01',
-    name: 'operator loopback: rw + manage without bearer',
+    name: 'the loopback bypass is dead — a bare request refuses 401',
     run: async (b) => {
       const written = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
-        body: { content: `operator row ${Date.now()}`, kind: 'note' },
+        body: { content: `freestyle row ${Date.now()}`, kind: 'note' },
       });
-      if (written.status !== 201)
-        return fail(`operator write → ${written.status} ${written.text.slice(0, 120)}`);
+      if (written.status !== 401)
+        return fail(`bare write → ${written.status} ${written.text.slice(0, 120)}`);
+      if (typeof record(written.json)?.error !== 'string')
+        return fail(`401 without {error} envelope: ${written.text.slice(0, 120)}`, 'doc-gap');
       const made = await req(b.server!.url, 'POST', '/stores', {
-        body: { name: 'operator-store' },
+        body: { name: 'freestyle-store' },
       });
-      if (made.status !== 201) return fail(`operator manage create → ${made.status}`);
-      return ok('operator writes and manages bare loopback');
+      if (made.status !== 401) return fail(`bare manage create → ${made.status}`);
+      return ok('the freestyle retired — no token, no memory');
     },
   },
   {
     id: 'C02',
-    name: 'rw grant: write passes, manage-less refused',
+    name: 'rw store grant: write passes, the management surface refuses',
     run: async (b) => {
       const written = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
         headers: bearerOf(ALPH),
@@ -62,7 +67,7 @@ const cases: readonly ProbeCase[] = [
         );
       if (typeof record(attempt.json)?.error !== 'string')
         return fail(`403 without {error} envelope: ${attempt.text.slice(0, 120)}`, 'doc-gap');
-      return ok('rw reads its store and never manages');
+      return ok('rw serves its store and never the management surface');
     },
   },
   {
@@ -70,9 +75,11 @@ const cases: readonly ProbeCase[] = [
     name: 'ro grant: reads pass, every write verb refuses',
     run: async (b) => {
       const seeded = await req(b.server!.url, 'POST', '/stores/beta/memories', {
+        headers: bearerOf(BETW),
         body: { content: `ro seed ${Date.now()}`, kind: 'note' },
       });
-      if (seeded.status !== 201) return fail(`ro seed as operator → ${seeded.status}`);
+      if (seeded.status !== 201)
+        return fail(`beta seed by the rw grant → ${seeded.status} ${seeded.text.slice(0, 120)}`);
       const target = String(record(seeded.json)?.id);
       for (const [method, path] of [
         ['GET', '/stores/beta/memories'],
@@ -128,37 +135,47 @@ const cases: readonly ProbeCase[] = [
   },
   {
     id: 'C05',
-    name: 'manage grant: create/list/delete serve',
+    name: 'the management family: create/list/describe/fork/delete serve',
     run: async (b) => {
       const made = await req(b.server!.url, 'POST', '/stores', {
         headers: bearerOf(GAMM),
         body: { name: 'gamma-made' },
       });
       if (made.status !== 201)
-        return fail(`manage create → ${made.status} ${made.text.slice(0, 140)}`);
+        return fail(`management create → ${made.status} ${made.text.slice(0, 140)}`);
       const listed = await req(b.server!.url, 'GET', '/stores', { headers: bearerOf(GAMM) });
       if (listed.status !== 200)
-        return fail(`manage list → ${listed.status} ${listed.text.slice(0, 140)}`, 'doc-gap');
+        return fail(`management list → ${listed.status} ${listed.text.slice(0, 140)}`, 'doc-gap');
+      const described = await req(b.server!.url, 'GET', '/stores/gamma-made', {
+        headers: bearerOf(GAMM),
+      });
+      if (described.status !== 200)
+        return fail(`management describe → ${described.status} ${described.text.slice(0, 140)}`);
+      const forked = await req(b.server!.url, 'POST', '/stores/gamma-made/fork', {
+        headers: bearerOf(GAMM),
+        body: { name: 'gamma-fork' },
+      });
+      if (forked.status !== 201)
+        return fail(`management fork → ${forked.status} ${forked.text.slice(0, 140)}`);
+      const killedFork = await req(b.server!.url, 'DELETE', '/stores/gamma-fork', {
+        headers: bearerOf(GAMM),
+      });
+      if (killedFork.status !== 204)
+        return fail(`management delete fork → ${killedFork.status}`, 'doc-gap');
       const killed = await req(b.server!.url, 'DELETE', '/stores/gamma-made', {
         headers: bearerOf(GAMM),
       });
       if (killed.status !== 204)
-        return fail(
-          `manage delete own create → ${killed.status} ${killed.text.slice(0, 140)}`,
-          'doc-gap',
-        );
-      return ok('manage cap serves create/list/delete');
+        return fail(`management delete → ${killed.status} ${killed.text.slice(0, 140)}`, 'doc-gap');
+      return ok('the management family serves create/list/describe/fork/delete');
     },
   },
   {
     id: 'C06',
-    name: 'bad bearers all refused with envelope',
+    name: 'bad bearers and wrong families all refused with envelope',
     run: async (b) => {
-      const operatorByDesign = await req(b.server!.url, 'GET', '/stores/alpha/memories', {});
-      if (operatorByDesign.status !== 200)
-        return fail(
-          `no-header loopback should be operator mode (200), got ${operatorByDesign.status}`,
-        );
+      const bare = await req(b.server!.url, 'GET', '/stores/alpha/memories', {});
+      if (bare.status !== 401) return fail(`no-header should refuse 401 (#63), got ${bare.status}`);
       const attempts: readonly (readonly [string, Record<string, string> | null])[] = [
         ['wrong scheme', { authorization: `Basic ${ALPH}` }],
         ['unknown secret', { authorization: 'Bearer ' + 'souv-' + 'd'.repeat(32) }],
@@ -169,20 +186,29 @@ const cases: readonly ProbeCase[] = [
         const r = await req(b.server!.url, 'GET', '/stores/alpha/memories', {
           headers: headers ?? {},
         });
-        if (![401, 403].includes(r.status)) return fail(`${tag} → ${r.status}`, 'doc-gap');
+        if (r.status !== 401) return fail(`${tag} → ${r.status}`, 'doc-gap');
         if (typeof record(r.json)?.error !== 'string')
           return fail(`${tag}: no {error} envelope: ${r.text.slice(0, 120)}`, 'doc-gap');
       }
-      return ok('five hostile identity attempts refuse with envelope');
+      // Wrong family: a management credential on a data route — 403 with
+      // the envelope (401 stays strictly identity).
+      const family = await req(b.server!.url, 'GET', '/stores/alpha/memories', {
+        headers: bearerOf(GAMM),
+      });
+      if (family.status !== 403)
+        return fail(`management token on data → expected 403, got ${family.status}`, 'doc-gap');
+      if (typeof record(family.json)?.error !== 'string')
+        return fail(`403 without {error} envelope: ${family.text.slice(0, 120)}`, 'doc-gap');
+      return ok('five hostile identity attempts + one wrong family refuse with envelope');
     },
   },
   {
     id: 'C07',
-    name: 'off-loopback bind refuses without tokens',
+    name: 'a zero-credential host refuses at boot — any host',
     run: async (b) => {
-      // The open-bind cold host: `host: 0.0.0.0`, tokens [] — boot refuses
-      // with the teaching (#19: a server the outside can reach demands
-      // grants). The refusal text rides the child's stderr.
+      // The cold host: a config with no credentials at all — boot refuses
+      // with the teaching (#63: no token, no memory), whatever the bind.
+      // The refusal text rides the child's stderr.
       const coldHome = join(b.root, 'binds', 'cold');
       const configDir = join(coldHome, '.souvenance');
       await mkdir(configDir, { recursive: true });
@@ -201,14 +227,53 @@ const cases: readonly ProbeCase[] = [
         refusal = String((caught as Error).message);
       }
       if (refusal === null || refusal === 'STILL RUNNING')
-        return fail('open bind 0.0.0.0 without tokens booted and stayed serving', 'doc-gap');
-      if (!/without tokens|demands grants/i.test(refusal))
-        return fail(`refusal text missing the bind policy: ${refusal.slice(0, 240)}`, 'doc-gap');
-      return ok('cold open-bind refused with the teaching');
+        return fail('a zero-credential host booted and stayed serving', 'doc-gap');
+      if (!/zero credentials|no token, no memory/i.test(refusal))
+        return fail(`refusal text missing the boot policy: ${refusal.slice(0, 240)}`, 'doc-gap');
+      return ok('the credential-less host refused with the teaching');
     },
   },
   {
     id: 'C08',
+    name: 'a management-only boot serves — a fresh host births its first store',
+    run: async (b) => {
+      // The bootstrap posture (#63): the config carries the management
+      // family alone; the boot serves, the first store is born over
+      // HTTP, and the data routes still demand a store grant.
+      const freshHome = join(b.root, 'binds', 'fresh');
+      const configDir = join(freshHome, '.souvenance');
+      await mkdir(configDir, { recursive: true });
+      await writeFile(
+        join(configDir, 'config.json'),
+        JSON.stringify({ management: [{ agent: 'gamma-mgr', secret: GAMM }] }) + '\n',
+      );
+      const fresh = new Server({
+        home: freshHome,
+        port: b.port + 2,
+        logPath: join(b.root, 'logs', 'fresh-boot.log'),
+      });
+      await fresh.boot({}, 7000);
+      try {
+        const born = await req(fresh.url, 'POST', '/stores', {
+          headers: bearerOf(GAMM),
+          body: { name: 'first-born' },
+        });
+        if (born.status !== 201)
+          return fail(`first store on a fresh host → ${born.status} ${born.text.slice(0, 140)}`);
+        const listed = await req(fresh.url, 'GET', '/stores', { headers: bearerOf(GAMM) });
+        if (listed.status !== 200)
+          return fail(`the fresh host's registry → ${listed.status}`, 'doc-gap');
+        const bare = await req(fresh.url, 'GET', '/stores/first-born/memories', {});
+        if (bare.status !== 401)
+          return fail(`data without a store grant → ${bare.status}`, 'doc-gap');
+        return ok('the fresh host booted management-only, birthed its first store');
+      } finally {
+        await fresh.stop();
+      }
+    },
+  },
+  {
+    id: 'C09',
     name: '429: the grant exhausts, the window resets, others stay clean',
     run: async (b) => {
       const storm = await Promise.allSettled(
@@ -240,7 +305,7 @@ const cases: readonly ProbeCase[] = [
       if (other.status !== 200)
         return fail(`other grants punished with alpha: ${other.status}`, 'doc-gap');
       const alive = await req(b.server!.url, 'GET', '/healthz', {}, 8000);
-      if (alive.status !== 200) return fail(`operator health suffers the storm: ${alive.status}`);
+      if (alive.status !== 200) return fail(`healthz suffers the storm: ${alive.status}`);
       const started = Date.now();
       let resetAt: string | null = null;
       while (Date.now() - started < 75_000) {
@@ -261,7 +326,7 @@ const cases: readonly ProbeCase[] = [
       if (resetAt === null)
         return fail('the 429 window never reset in 75s — grant stranded', 'doc-gap');
       return ok(
-        `storm → 429 ×${exhausted}; window reset ${resetAt}; other grants + operator untouched`,
+        `storm → 429 ×${exhausted}; window reset ${resetAt}; other grants untouched, the doors stay public`,
       );
     },
   },
@@ -272,12 +337,13 @@ export function battery(root: string): Battery {
     name: 'C-auth-matrix',
     port: 18531,
     cases,
-    stores: ['alpha', 'beta', 'gamma'],
+    stores: ['alpha', 'beta'],
     tokens: [
       { agent: 'alpha-rw', secret: ALPH, store: 'alpha', mode: 'rw' },
       { agent: 'beta-ro', secret: BET, store: 'beta', mode: 'ro' },
-      { agent: 'gamma-mgr', secret: GAMM, store: 'gamma', mode: 'ro', manage: true },
+      { agent: 'beta-writer', secret: BETW, store: 'beta', mode: 'rw' },
     ] satisfies readonly TokenGrant[],
+    management: [{ agent: 'gamma-mgr', secret: GAMM }] satisfies readonly ManagementToken[],
     root,
   });
 }
