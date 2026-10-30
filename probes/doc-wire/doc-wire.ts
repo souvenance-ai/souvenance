@@ -243,19 +243,24 @@ const cases: readonly ProbeCase[] = [
   },
   {
     id: 'A13',
-    name: '?kind filter (IN across repeated kinds)',
+    name: '?kind filter — a lone param is its singleton, repeated params IN',
     run: async (b) => {
       await req(b.server!.url, 'POST', '/stores/alpha/memories', {
         body: { content: `event row ${Date.now()}`, kind: 'event' },
       });
+      // The singleton must REALLY filter: this half passed vacuously when
+      // a lone kind refused 400 (the empty row list can't leak) — #62.
       const one = await req(b.server!.url, 'GET', '/stores/alpha/memories?kind=note');
-      if (memoriesOf(record(one.json)).some((entry) => entry.kind !== 'note'))
+      if (one.status !== 200) return fail(`?kind=note → ${one.status}`, 'doc-gap');
+      const lone = memoriesOf(record(one.json));
+      if (lone.length === 0) return fail('the singleton kind filter served nothing — vacuous');
+      if (lone.some((entry) => entry.kind !== 'note'))
         return fail(`kind filter leak: ${one.text.slice(0, 200)}`);
       const both = await req(b.server!.url, 'GET', '/stores/alpha/memories?kind=note&kind=event');
       const kinds = new Set(memoriesOf(record(both.json)).map((entry) => String(entry.kind)));
       if (![...kinds].includes('note') || ![...kinds].includes('event'))
         return fail(`IN filter lost: ${both.text.slice(0, 200)}`, 'doc-gap');
-      return ok('kind IN semantics');
+      return ok('singleton + IN semantics');
     },
   },
   {
