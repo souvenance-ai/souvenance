@@ -1,8 +1,9 @@
 /**
  * The read routes (slice 3, #19's read contract): the list pages by the
  * opaque keyset cursor — `{memories, next_after}` (Q16: the envelope,
- * `null` when the page is exhausted), the filters ride repeated `kind`
- * params (IN semantics, Q17) and the one URL-encoded `metadata` JSON
+ * `null` when the page is exhausted), the filters ride `kind` params —
+ * repeated for IN, a lone one as its singleton array (#62) — and the one
+ * URL-encoded `metadata` JSON
  * object (Q3), `include_terminals` is a presence flag; get serves the
  * projection at the asked depth (unknown → 404, teaching); search is
  * limit-only — bare hits with their bm25 `rank`, no cursor (the rank is
@@ -36,7 +37,20 @@ import {
   unknownStoreRefusal,
 } from '../wire/wire.ts';
 
-const kindShape = z.array(z.string()).optional();
+/**
+ * The kind filter's language, both routes (list and search): repeated
+ * `?kind=a&kind=b` narrows with IN semantics (Q17); a LONE `?kind=a` is
+ * its one-element array — the form idiom the wire's own `type: array`
+ * declaration speaks, the strict refusal of which burned a living agent
+ * (#62). The /doc description rides the shared const.
+ */
+const kindShape = z.preprocess(
+  (value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]),
+  z
+    .array(z.string())
+    .optional()
+    .describe('repeat the param for several kinds (IN); a single value filters one kind'),
+);
 /**
  * The metadata param's language rides once on the shared const — both
  * filter routes (list and search) document the same grammar (#51): one
