@@ -884,9 +884,11 @@ export class Store {
         throw new StoreError('not_found', `edge not found: ${fromId} -> ${toId}`);
       }
       const kinds = directed.map((edge) => edge.kind).join(', ');
+      // Transport-neutral voice: the parameter is named, never a flag —
+      // the wire takes {"kind": …}, a CLI takes --kind (#62).
       throw new StoreError(
         'invalid',
-        `ambiguous: ${directed.length} edges between ${fromId} and ${toId}, pass --kind: ${kinds}`,
+        `ambiguous: ${directed.length} edges between ${fromId} and ${toId}, pass kind: ${kinds}`,
       );
     });
   }

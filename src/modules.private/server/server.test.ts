@@ -57,13 +57,39 @@ test('the OpenAPI document serves at /doc, the UI at /docs', async () => {
   }
 });
 
+test('the discovery door: the root points, the alias serves, the miss teaches (#62)', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    const pointer = await app.request('/');
+    assert.equal(pointer.status, 200);
+    assert.deepEqual((await pointer.json()) as Record<string, string>, {
+      name: 'souvenance',
+      version: 'test',
+      healthz: '/healthz',
+      doc: '/doc',
+      docs: '/docs',
+    });
+    const alias = await app.request('/openapi.json');
+    assert.equal(alias.status, 200);
+    const served = (await alias.json()) as { openapi: string; info: { title: string } };
+    assert.equal(served.openapi, '3.0.0');
+    assert.equal(served.info.title, 'souvenance');
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('unknown routes answer the JSON envelope — never a bare-text 404', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
     const res = await app.request('/nope');
     assert.equal(res.status, 404);
-    assert.deepEqual((await res.json()) as { error: string }, { error: 'no such route' });
+    assert.deepEqual((await res.json()) as { error: string }, {
+      error: 'no such route — the API document serves at /doc, the API lives under /stores',
+    });
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
