@@ -77,13 +77,16 @@ const cases: readonly ProbeCase[] = [
   },
   {
     id: 'B03',
-    name: 'extra fields tolerated — the wire strips what it does not serve',
+    name: 'extra keys refuse — the wire teaches what it does not serve (#60)',
     run: async (b) => {
       const made = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
         body: { content: 'x', kind: 'note', armor: true },
       });
-      if (made.status !== 201) return fail(`extra key → ${made.status} ${made.text.slice(0, 140)}`);
-      return ok(`extra key 'armor' — ${made.status} is in 400|201`);
+      if (made.status !== 400) return fail(`extra key → ${made.status} ${made.text.slice(0, 140)}`);
+      const error = record(made.json)?.error;
+      if (typeof error !== 'string' || !error.includes('armor'))
+        return fail(`the refusal does not name the key: ${made.text.slice(0, 140)}`);
+      return ok(`extra key 'armor' → 400 naming it`);
     },
   },
   {
