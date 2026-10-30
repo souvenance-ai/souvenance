@@ -161,6 +161,64 @@ test('repeated kind params narrow with IN semantics (Q17)', async () => {
   }
 });
 
+test('a lone kind param narrows as its singleton array — the form idiom (#62)', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry, atlas } = boot(dir);
+    seed(atlas, 'a note', { kind: 'note' });
+    seed(atlas, 'a decision', { kind: 'decision' });
+    // The living agent's friction: one kind refused 400 demanding an
+    // array — the only idiom left was doubling the parameter.
+    const lone = await get(app, `/stores/atlas/memories?kind=note`);
+    assert.equal(lone.status, 200);
+    assert.deepEqual(
+      (lone.body as { memories: Array<{ kind: string }> }).memories.map((memory) => memory.kind),
+      ['note'],
+    );
+    // Doubling stays legal and serves the same rows.
+    const doubled = await get(app, `/stores/atlas/memories?kind=note&kind=note`);
+    assert.equal(doubled.status, 200);
+    assert.deepEqual(
+      (doubled.body as { memories: Array<{ id: string }> }).memories.map((memory) => memory.id),
+      (lone.body as { memories: Array<{ id: string }> }).memories.map((memory) => memory.id),
+    );
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('/doc declares the kind filter as an array — the idiom the wire now speaks (#62)', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    const res = await app.request('/doc');
+    const document = (await res.json()) as {
+      paths: Record<
+        string,
+        {
+          get?: {
+            parameters?: Array<{
+              name: string;
+              in: string;
+              schema?: { type?: string; description?: string };
+            }>;
+          };
+        }
+      >;
+    };
+    const kind = document.paths['/stores/{name}/memories']?.get?.parameters?.find(
+      (parameter) => parameter.name === 'kind' && parameter.in === 'query',
+    );
+    assert.ok(kind, 'the kind query parameter is declared');
+    assert.equal(kind?.schema?.type, 'array', 'the filter rides the array shape');
+    assert.match(kind?.schema?.description ?? '', /a single value/i, 'the idiom is documented');
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the metadata filter is one URL-encoded JSON object — typed equality', async () => {
   const dir = tempDir();
   try {
