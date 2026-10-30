@@ -450,7 +450,7 @@ test('unlink: refuses an ambiguous pair with the candidate kinds', () => {
     store.link(a, b, 'extends');
     assert.throws(
       () => store.unlink(a, b),
-      /ambiguous: 2 edges between .* and .*, pass --kind: extends, references/,
+      /ambiguous: 2 edges between .* and .*, pass kind: extends, references/,
     );
     // The refusal is not destructive: both edges survive.
     assert.equal(count(store, 'SELECT count(*) as c FROM edges'), 2);

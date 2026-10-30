@@ -533,6 +533,40 @@ const cases: readonly ProbeCase[] = [
       return docAgrees(b, '/stores/{name}/fork', 'POST', made.status, made.json);
     },
   },
+  {
+    id: 'A27',
+    name: 'the discovery door: / points, /openapi.json serves, the 404 teaches',
+    run: async (b) => {
+      // Two agent lives knocked on mute doors before finding /doc (#62).
+      const pointer = await req(b.server!.url, 'GET', '/');
+      if (pointer.status !== 200) return fail(`/ → ${pointer.status}`);
+      const door = pointer.json as Record<string, unknown> | null;
+      if (
+        door?.name !== 'souvenance' ||
+        door?.doc !== '/doc' ||
+        door?.docs !== '/docs' ||
+        door?.healthz !== '/healthz'
+      )
+        return fail(`the pointer is mute: ${pointer.text.slice(0, 160)}`);
+      const alias = await req(b.server!.url, 'GET', '/openapi.json');
+      if (alias.status !== 200) return fail(`/openapi.json → ${alias.status}`);
+      const served = alias.json as { openapi?: string; info?: { title?: string } } | null;
+      if (served?.openapi !== '3.0.0' || served?.info?.title !== 'souvenance')
+        return fail(`the alias serves noise: ${alias.text.slice(0, 160)}`);
+      const document = b.document as { openapi?: string; info?: { title?: string } } | null;
+      if (
+        document &&
+        (served?.openapi !== document.openapi || served?.info?.title !== document.info?.title)
+      )
+        return fail('the alias disagrees with /doc');
+      const miss = await req(b.server!.url, 'GET', '/nope');
+      if (miss.status !== 404) return fail(`/nope → ${miss.status}`);
+      const taught = String((miss.json as { error?: string } | null)?.error ?? '');
+      if (!taught.includes('/doc'))
+        return fail(`the 404 does not teach: ${miss.text.slice(0, 160)}`);
+      return ok('pointer + alias + teaching 404');
+    },
+  },
 ];
 
 /** The battery built fresh every run: operator loopback, no tokens. */

@@ -1,6 +1,8 @@
 /**
- * The HTTP server's skeleton (#20 slice 1): the public trio (/healthz,
- * /doc, /docs — shape disclosure only, Q7), the guarded /stores/*
+ * The HTTP server's skeleton (#20 slice 1): the public doors (/healthz,
+ * /doc + its conventional alias /openapi.json, /docs, the root pointer —
+ * shape disclosure only, Q7; the living test burned two agent lives
+ * knocking on mute doors — #62), the guarded /stores/*
  * namespace every slice's routes mount into, the refusal envelope
  * ({error: message}), and the caps. StoreError codes map to statuses
  * once, here — the honest mapping the typed refusals exist for (Q2);
@@ -63,13 +65,27 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
     },
   });
 
-  // The public trio — no data, only shape and liveness (Q7).
+  // The public doors — no data, only shape and liveness (Q7). The living
+  // test burned two agent lives knocking on mute doors (#62): the root
+  // pointer answers the bare-host knock, the conventional /openapi.json
+  // answers the reflex, and /doc stays the canonical document.
   app.get('/healthz', (c) => c.json({ ok: true }));
-  app.doc('/doc', {
+  const docOptions = {
     openapi: '3.0.0',
     info: { title: 'souvenance', version: deps.version ?? '0.2.0' },
-  });
+  };
+  app.doc('/doc', docOptions);
+  app.doc('/openapi.json', docOptions);
   app.get('/docs', swaggerUI({ url: '/doc' }));
+  app.get('/', (c) =>
+    c.json({
+      name: 'souvenance',
+      version: deps.version ?? '0.2.0',
+      healthz: '/healthz',
+      doc: '/doc',
+      docs: '/docs',
+    }),
+  );
 
   // The recursive wire shapes must be NAMED components: the OpenAPI
   // generator inlines every schema it walks, and a recursion inlined is
@@ -112,7 +128,14 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
     if (status === 500) return internal(err, c);
     return c.json({ error: err.message }, status);
   });
-  app.notFound((c) => c.json({ error: 'no such route' }, 404));
+  // The 404 teaches: the envelope keeps its one shape, the message points
+  // the way in (#62 — a mute 404 nearly cost a session its life).
+  app.notFound((c) =>
+    c.json(
+      { error: 'no such route — the API document serves at /doc, the API lives under /stores' },
+      404,
+    ),
+  );
 
   // The guarded namespace: the whole API lives under /stores/* (#19 Mount).
   // Auth first, then the rate limit (it reads the grant), then the cap.
