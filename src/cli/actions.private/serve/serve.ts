@@ -27,6 +27,7 @@ export async function serve(options: ServeOptions): Promise<void> {
     host: config.host,
     storesDir: config.storesDir,
     tokens: config.tokens,
+    management: config.management,
     version: pkg.version,
   });
   const shutdown = (): void => {

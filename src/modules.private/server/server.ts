@@ -14,9 +14,9 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import { swaggerUI } from '@hono/swagger-ui';
 import { bodyLimit } from 'hono/body-limit';
 import type { Context } from 'hono';
-import type { TokenGrant } from '../config/config.ts';
+import type { ManagementGrant, StoreGrant } from '../config/config.ts';
 import { StoreError } from '../store/store-error/store-error.ts';
-import { auth, requireManage, type ServerEnv } from './auth/auth.ts';
+import { auth, requireManagement, type ServerEnv } from './auth/auth.ts';
 import { rateLimit } from './rate-limit/rate-limit.ts';
 import { registerManagementRoutes } from './management/management.ts';
 import { registerReadRoutes } from './reads/reads.ts';
@@ -44,7 +44,9 @@ const STATUS_BY_CODE: Record<StoreError['code'], 400 | 404 | 409 | 503 | 500> = 
 
 export interface ServerDeps {
   readonly registry: Registry;
-  readonly tokens: readonly TokenGrant[];
+  readonly tokens: readonly StoreGrant[];
+  /** The management family (#63): the host's management surface. */
+  readonly management: readonly ManagementGrant[];
   /** The package version the OpenAPI document carries. */
   readonly version?: string;
 }
@@ -139,7 +141,7 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
 
   // The guarded namespace: the whole API lives under /stores/* (#19 Mount).
   // Auth first, then the rate limit (it reads the grant), then the cap.
-  app.use('/stores/*', auth(deps.tokens));
+  app.use('/stores/*', auth(deps.tokens, deps.management));
   app.use('/stores/*', rateLimit());
   app.use(
     '/stores/*',
@@ -149,12 +151,13 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
     }),
   );
 
-  // The management gate: the exact management paths only — the data
-  // routes (slices 3–4) live deeper under /stores/:name/… and must stay
-  // open to plain rw grants.
-  app.use('/stores', requireManage());
-  app.use('/stores/:name', requireManage());
-  app.use('/stores/:name/fork', requireManage());
+  // The management gate (#63): the exact management paths only — the
+  // management family serves them, a store grant refuses 403. The data
+  // routes (slices 3–4) live deeper under /stores/:name/… and serve
+  // store grants.
+  app.use('/stores', requireManagement());
+  app.use('/stores/:name', requireManagement());
+  app.use('/stores/:name/fork', requireManagement());
 
   registerManagementRoutes(app, deps.registry);
   registerReadRoutes(app, deps.registry);

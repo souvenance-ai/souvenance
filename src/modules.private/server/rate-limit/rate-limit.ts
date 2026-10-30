@@ -2,9 +2,9 @@
  * The rate limit (Q4): a fixed 60 s window per grant, 120 requests, the
  * refusal a 429 carrying `Retry-After` in whole seconds. The constants
  * are code, not config — a grant owner tunes their pacing, not the
- * server's patience. The operator is exempt (Q10): the limit guards the
- * server against distant agents, not the local hand that runs it.
- * Buckets key on the grant's digest — two rows never share a bucket, the
+ * server's patience. Every credential eats the limit (#63) — the
+ * operator's exemption retired with the loopback operator. Buckets key
+ * on the credential's digest — two rows never share a bucket, the
  * secret never lands in one.
  */
 import { createMiddleware } from 'hono/factory';
@@ -32,7 +32,6 @@ export function rateLimit(options: RateLimitOptions = {}) {
 
   return createMiddleware<ServerEnv>(async (c, next) => {
     const grant = c.get('grant');
-    if (grant.operator) return next();
 
     const windowStart = Math.floor(now() / windowMs) * windowMs;
     const bucket = buckets.get(grant.key);

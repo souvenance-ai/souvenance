@@ -1,9 +1,10 @@
 /**
- * The boot ceremony's own tests (#50): the #19 grant validation — a grant
- * naming a store the registry does not open refuses the start with the
- * teaching, and the refused boot releases every claim it opened, so the
- * same host boots again without a manual lock hunt. The happy path pins
- * the bound port's resolution (the smoke test's contract).
+ * The boot ceremony's own tests (#50): the zero-credential refusal (#63 —
+ * no token, no memory), the #19 grant validation — a grant naming a store
+ * the registry does not open refuses the start with the teaching — and
+ * the refused boot releases every claim it opened, so the same host boots
+ * again without a manual lock hunt. The happy path pins the bound port's
+ * resolution (the smoke test's contract) and the banner's two counts.
  */
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -23,9 +24,56 @@ function options(storesDir: string, store: string) {
     port: 0,
     storesDir,
     tokens: [{ agent: 'nova', secret: `souv-${'b'.repeat(32)}`, store, mode: 'rw' as const }],
+    management: [],
     version: 'test',
   };
 }
+
+test('a zero-credential host refuses to start — no token, no memory', async () => {
+  const dir = tempDir();
+  try {
+    const error = await startServer({
+      host: '127.0.0.1',
+      port: 0,
+      storesDir: dir,
+      tokens: [],
+      management: [],
+      version: 'test',
+    }).catch((err: Error) => err);
+    assert.match(String(error), /zero credentials/);
+    assert.match(String(error), /no token, no memory/);
+    assert.match(String(error), /mint a grant/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a management-only boot serves — a fresh host is bootable and the banner counts both', async () => {
+  const dir = tempDir();
+  const lines: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: unknown) => {
+    lines.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    const running = await startServer({
+      host: '127.0.0.1',
+      port: 0,
+      storesDir: dir,
+      tokens: [],
+      management: [{ agent: 'ops', secret: `souv-${'a'.repeat(32)}` }],
+      version: 'test',
+    });
+    assert.ok(running.port > 0, 'the fresh host boots on the management family alone');
+    await running.close();
+    const banner = lines.find((line) => line.includes('grant(s)')) ?? '';
+    assert.match(banner, /0 grant\(s\) · 1 management/);
+  } finally {
+    process.stderr.write = original;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('a grant naming a store the registry does not open refuses the start', async () => {
   const dir = tempDir();

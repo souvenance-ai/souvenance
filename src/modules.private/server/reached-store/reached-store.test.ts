@@ -1,9 +1,10 @@
 /**
- * The data routes' doors, unit-pinned: the reach refuses a foreign store
- * BEFORE existence is spoken — the registry's contents are not a foreign
- * grant's business (Q8) — and the write door walks reach, then mode, in
- * that order, structurally. The route files call these; this file pins
- * the gates themselves.
+ * The data routes' doors, unit-pinned: the family gate refuses a
+ * management grant before anything else, the reach refuses a foreign
+ * store BEFORE existence is spoken — the registry's contents are not a
+ * foreign grant's business (Q8) — and the write door walks family,
+ * reach, then mode, in that order, structurally. The route files call
+ * these; this file pins the gates themselves.
  */
 import assert from 'node:assert/strict';
 import type { Context } from 'hono';
@@ -26,7 +27,11 @@ function context(grant: ResolvedGrant): Context<ServerEnv> {
 }
 
 function grantAt(store: string, mode: 'ro' | 'rw'): ResolvedGrant {
-  return { agent: 'nova', store, mode, manage: false, operator: false, key: 'nova' };
+  return { family: 'store', agent: 'nova', store, mode, key: 'nova' };
+}
+
+function managementGrant(): ResolvedGrant {
+  return { family: 'management', agent: 'ops', key: 'ops' };
 }
 
 function httpStatusOf(operation: () => unknown): number {
@@ -65,6 +70,25 @@ test('a reached store that does not exist refuses not_found — the order alread
       throw new Error('expected the gate to refuse');
     } catch (err) {
       assert.equal((err as { code?: string }).code, 'not_found');
+    }
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a management grant refuses at the family gate — before reach is even asked', () => {
+  const dir = tempDir();
+  try {
+    const registry = Registry.open(dir);
+    const status = httpStatusOf(() => reachedStore(context(managementGrant()), registry, 'atlas'));
+    assert.equal(status, 403);
+    try {
+      writableStore(context(managementGrant()), registry, 'atlas');
+      throw new Error('expected the gate to refuse');
+    } catch (err) {
+      assert.ok(err instanceof HTTPException);
+      assert.match(err.message, /a management grant reaches no store data/);
     }
     registry.close();
   } finally {
