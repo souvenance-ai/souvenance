@@ -7,7 +7,7 @@ Persistent, searchable memory for AI agents: typed graphs of memories in SQLite 
 ### The experience
 
 **Individual**:
-The experiencer: one store (its memory) animated by an agent. Anchored on the store — two agents sharing one store are not two individuals.
+The experiencer: one store (its memory) animated by an agent. Anchored on the store — two agents sharing one store are not two individuals. Singular by constitution: its existence is its singularity, and it does not duplicate itself — forking a store is the manager's gesture, never the individual's.
 _Avoid_: person, user, subject
 
 **Agent**:
@@ -15,8 +15,8 @@ The caller that animates an individual's store — through the server, never thr
 _Avoid_: user, bot, client (that's the CLI)
 
 **Operator**:
-The human who runs the manager and owns the host — the only audience of `souvenance`. On the wire, the loopback caller with no bearer at all: read-write plus manage on every store. Off loopback there is no operator — tokens only.
-_Avoid_: user, admin, anonymous access
+The human who runs the manager and owns the host — the only audience of `souvenance`. No wire posture: on the wire the operator presents a credential like anyone — a management grant for the host's surface, a store grant for a store's data; the maintenance stays offline.
+_Avoid_: user, admin, anonymous access, the loopback caller (retired)
 
 **Memory**:
 One record in a store: content, its kind, its authored summary, metadata, and a status (active, hot, superseded, deprecated, merged).
@@ -57,8 +57,8 @@ The `/stores/<name>/…` URL scheme: a store the server serves under its name in
 _Avoid_: mount point, attachment, root store, top-level routes
 
 **Fork**:
-An exact copy of a store as a new store — the act by which one individual becomes two.
-_Avoid_: clone, copy, backup
+An exact copy of a store as a new store — a backup, or a state set aside to examine. Born from the management surface and born unreached: no credential reaches the copy until one is minted for it. Never self-service — an individual cannot duplicate itself; forking never makes one individual two.
+_Avoid_: clone, copy, self-duplication, continuity
 
 **Cursor**:
 The serving key of the last memory served — the pair (`created_at`, `id`). `list` takes the next page strictly after it; the server hands it to its clients opaque and rebuilds it from the last served node. The UUID's lexicographic order breaks any millisecond tie.
@@ -97,12 +97,8 @@ A manager operation that opens the store directly; refuses while the server owns
 _Avoid_: direct verb, local verb
 
 **Grant**:
-A bearer token's authority: one agent, one store, one mode (`ro`/`rw`), and an optional manage cap. A row of the config's `tokens[]` — nothing else exists to present.
-_Avoid_: token file (retired), credential, API key
-
-**Manage cap**:
-The default-deny grant capability to create, fork, list, and delete stores.
-_Avoid_: admin cap, root token
+A bearer credential's authority, authored in the config — nothing else exists to present. Two families: a **store grant** (one agent, one store, one mode `ro`/`rw` — a row of `tokens[]`) and a **management grant** (one agent over the host's management surface — create, fork, list, describe, delete stores — reaching no store's data, a row of `management[]`).
+_Avoid_: token file (retired), API key, manage cap (retired)
 
 **Registry**:
 The stores dir as the store inventory: every `<name>.db` in it is a store, none is declared, and boot opens them all or refuses to serve. The dir is the truth — no list beside it to drift.
