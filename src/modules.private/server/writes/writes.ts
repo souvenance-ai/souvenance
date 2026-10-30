@@ -9,6 +9,11 @@
  * door), then mode (403 ro — reads are open to ro, writes never), then
  * the facade, whose refusals ride the envelope (400 invalid, 404
  * unknown, 409 status fights).
+ *
+ * Every body is strict (#60): an unknown key refuses 400 with the
+ * envelope teaching, never strips — a silently-dropped authored field is
+ * how an agent's model and the store's truth diverge. What the wire
+ * serves, /doc declares (`additionalProperties: false`).
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
@@ -27,8 +32,8 @@ import {
 } from '../wire/wire.ts';
 import type { MetadataValue } from '../../store/store.ts';
 
-/** The one-gesture relations: the facade's RelationSpec verbatim. */
-const RelationsSchema = z.array(z.object({ to: z.uuid(), kind: z.string() })).optional();
+/** The one-gesture relations: the facade's RelationSpec verbatim, strict — an edge carries exactly its `to` and its `kind` (#60). */
+const RelationsSchema = z.array(z.strictObject({ to: z.uuid(), kind: z.string() })).optional();
 
 /**
  * The authored metadata on the write surface. The OpenAPI converter
@@ -49,29 +54,29 @@ const MetadataShape = z
   );
 const SummaryShape = z.string().optional();
 
-const StoreBodySchema = z.object({
+const StoreBodySchema = z.strictObject({
   content: z.string(),
   kind: z.string(),
   summary: SummaryShape,
   metadata: MetadataShape,
   relations: RelationsSchema,
 });
-const SupersedeBodySchema = z.object({
+const SupersedeBodySchema = z.strictObject({
   content: z.string(),
   kind: z.string().optional(),
   summary: SummaryShape,
   metadata: MetadataShape,
   relations: RelationsSchema,
 });
-const MergeBodySchema = z.object({
+const MergeBodySchema = z.strictObject({
   ids: z.array(z.uuid()),
   content: z.string(),
   kind: z.string().optional(),
   summary: SummaryShape,
   metadata: MetadataShape,
 });
-const HotBodySchema = z.object({ hot: z.boolean() });
-const LinkBodySchema = z.object({
+const HotBodySchema = z.strictObject({ hot: z.boolean() });
+const LinkBodySchema = z.strictObject({
   to: z.uuid(),
   kind: z.string(),
   /**
@@ -84,7 +89,7 @@ const LinkBodySchema = z.object({
     .optional()
     .describe('free-form JSON — edges sit outside the filter reach'),
 });
-const UnlinkBodySchema = z.object({ to: z.uuid(), kind: z.string().optional() });
+const UnlinkBodySchema = z.strictObject({ to: z.uuid(), kind: z.string().optional() });
 
 const CreatedSchema = z.object({ id: z.string() });
 const EdgeEchoSchema = z.object({ from_id: z.string(), to_id: z.string(), kind: z.string() });

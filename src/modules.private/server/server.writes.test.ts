@@ -174,6 +174,50 @@ test('create refusals ride the facade teaching — kind, metadata.kind, summary 
   }
 });
 
+test('unknown body keys refuse 400 naming the key — the wire teaches, never strips (#60)', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    registry.create('atlas');
+    const unknown = await call(app, 'POST', '/stores/atlas/memories', {
+      title: 'a v0.1 habit',
+      content: 'x',
+      kind: 'note',
+    });
+    assert.equal(unknown.status, 400);
+    assert.match((unknown.body as { error: string }).error, /title/);
+    const nested = await call(app, 'POST', '/stores/atlas/memories', {
+      content: 'x',
+      kind: 'note',
+      relations: [{ to: '00000000-0000-4000-8000-000000000000', kind: 'references', armor: true }],
+    });
+    assert.equal(nested.status, 400);
+    assert.match((nested.body as { error: string }).error, /armor/);
+    const doc = await app.request('/doc');
+    const declared = (
+      (await doc.json()) as {
+        paths: Record<
+          string,
+          Record<
+            string,
+            {
+              requestBody: { content: { 'application/json': { schema: Record<string, unknown> } } };
+            }
+          >
+        >;
+      }
+    ).paths['/stores/{name}/memories']['post'].requestBody.content['application/json'].schema;
+    assert.equal(
+      declared['additionalProperties'],
+      false,
+      '/doc must declare the strict bodies, got ' + JSON.stringify(declared).slice(0, 200),
+    );
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('supersede answers 201 with the successor id — the old one leaves the living set', async () => {
   const dir = tempDir();
   try {

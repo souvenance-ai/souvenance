@@ -10,8 +10,10 @@
  * Refusals ride the envelope: grammar → 400 (the zod schemas carry the
  * store-name grammar; the defaultHook formats), foreign cap → 403
  * (mounted on the exact management paths in the assembly), unknown store
- * → 404, collisions → 409. One route group per file; the slices keep
- * landing as siblings (reads, writes) on the same assembly.
+ * → 404, collisions → 409. The bodies are strict (#60): an unknown key
+ * refuses 400 with the envelope teaching, never strips. One route group
+ * per file; the slices keep landing as siblings (reads, writes) on the
+ * same assembly.
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
@@ -25,8 +27,8 @@ import {
   unknownStoreRefusal,
 } from '../wire/wire.ts';
 
-const NameSchema = z.object({ name: StoreNameSchema });
-const ForkBodySchema = z.object({ name: StoreNameSchema.optional() });
+const NameSchema = z.strictObject({ name: StoreNameSchema });
+const ForkBodySchema = z.strictObject({ name: StoreNameSchema.optional() });
 const DescriptorSchema = z.object({ name: z.string(), stats: StatsSchema });
 
 const CAP_REFUSAL = () => refusal('the grant carries no manage cap');
