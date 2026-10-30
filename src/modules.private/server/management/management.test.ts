@@ -3,18 +3,16 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
-import type { TokenGrant } from '../../config/config.ts';
+import type { ManagementGrant, StoreGrant } from '../../config/config.ts';
 import { createApp } from '../server.ts';
 import { Registry } from '../registry/registry.ts';
 
 const SECRET = `souv-${'d'.repeat(32)}`;
 const MANAGE_SECRET = `souv-${'e'.repeat(32)}`;
-const TOKENS: readonly TokenGrant[] = [
+const TOKENS: readonly StoreGrant[] = [
   { agent: 'atlas', secret: SECRET, store: 'atlas', mode: 'rw' },
-  { agent: 'registry', secret: MANAGE_SECRET, store: 'atlas', mode: 'rw', manage: true },
 ];
-
-const LOOPBACK = { incoming: { socket: { remoteAddress: '127.0.0.1' } } };
+const MANAGEMENT: readonly ManagementGrant[] = [{ agent: 'ops', secret: MANAGE_SECRET }];
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'souvenance-management-test-'));
@@ -22,11 +20,11 @@ function tempDir(): string {
 
 function boot(dir: string) {
   const registry = Registry.open(dir);
-  const app = createApp({ registry, tokens: TOKENS, version: 'test' });
+  const app = createApp({ registry, tokens: TOKENS, management: MANAGEMENT, version: 'test' });
   return { registry, app };
 }
 
-/** A request authorized by the manage-cap grant. */
+/** A request authorized by the management grant. */
 function manage(
   path: string,
   method = 'GET',
@@ -35,7 +33,7 @@ function manage(
   return bearerRequest(MANAGE_SECRET, path, method, body);
 }
 
-/** A request authorized by the plain rw grant — no manage cap. */
+/** A request authorized by the plain rw store grant — no management reach. */
 function plain(
   path: string,
   method = 'GET',
@@ -44,7 +42,7 @@ function plain(
   return bearerRequest(SECRET, path, method, body);
 }
 
-/** One bearer-request shape; the grants differ only in their secret. */
+/** One bearer-request shape; the credentials differ only in their secret. */
 function bearerRequest(
   secret: string,
   path: string,
@@ -67,25 +65,17 @@ function bearerRequest(
 async function call(
   app: ReturnType<typeof createApp>,
   request: { readonly path: string; readonly init: RequestInit },
-  env: unknown = LOOPBACK,
 ): Promise<{ readonly status: number; readonly body: unknown }> {
-  const res = await app.request(request.path, request.init, env);
+  const res = await app.request(request.path, request.init);
   const text = await res.text();
   return { status: res.status, body: text ? JSON.parse(text) : null };
 }
 
-test('the operator creates a store — 201 with the name, the file on disk', async () => {
+test('a management grant creates a store — 201 with the name, the file on disk', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
-    const { status, body } = await call(app, {
-      path: '/stores',
-      init: {
-        method: 'POST',
-        body: JSON.stringify({ name: 'main' }),
-        headers: { 'content-type': 'application/json' },
-      },
-    });
+    const { status, body } = await call(app, manage('/stores', 'POST', { name: 'main' }));
     assert.equal(status, 201);
     assert.deepEqual(body, { name: 'main' });
     assert.ok(existsSync(join(dir, 'main.db')), 'the store file exists');
@@ -99,33 +89,12 @@ test('a collision refuses 409, a grammar-broken name refuses 400 in the envelope
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
-    const first = await call(app, {
-      path: '/stores',
-      init: {
-        method: 'POST',
-        body: JSON.stringify({ name: 'main' }),
-        headers: { 'content-type': 'application/json' },
-      },
-    });
+    const first = await call(app, manage('/stores', 'POST', { name: 'main' }));
     assert.equal(first.status, 201);
-    const collision = await call(app, {
-      path: '/stores',
-      init: {
-        method: 'POST',
-        body: JSON.stringify({ name: 'main' }),
-        headers: { 'content-type': 'application/json' },
-      },
-    });
+    const collision = await call(app, manage('/stores', 'POST', { name: 'main' }));
     assert.equal(collision.status, 409);
     assert.match((collision.body as { error: string }).error, /already exists/);
-    const grammar = await call(app, {
-      path: '/stores',
-      init: {
-        method: 'POST',
-        body: JSON.stringify({ name: 'Main' }),
-        headers: { 'content-type': 'application/json' },
-      },
-    });
+    const grammar = await call(app, manage('/stores', 'POST', { name: 'Main' }));
     assert.equal(grammar.status, 400);
     assert.match((grammar.body as { error: string }).error, /invalid request/);
     registry.close();
@@ -249,7 +218,7 @@ test('the stats ride the facade verbatim — the document speaks the same shape'
   }
 });
 
-test('a grant without the manage cap refuses 403 on every management route', async () => {
+test('a store grant refuses 403 on every management route — wrong family', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
@@ -262,13 +231,13 @@ test('a grant without the manage cap refuses 403 on every management route', asy
       plain('/stores/main', 'DELETE'),
     ];
     for (const request of attempts) {
-      const { status, body } = await call(app, request, {});
+      const { status, body } = await call(app, request);
       assert.equal(
         status,
         403,
-        `${request.init.method ?? 'GET'} ${request.path} must refuse without the cap`,
+        `${request.init.method ?? 'GET'} ${request.path} must refuse a store grant`,
       );
-      assert.match((body as { error: string }).error, /manage cap/);
+      assert.match((body as { error: string }).error, /a store grant reaches no management route/);
     }
     registry.close();
   } finally {
@@ -276,7 +245,7 @@ test('a grant without the manage cap refuses 403 on every management route', asy
   }
 });
 
-test('a grant carrying the manage cap drives the routes like the operator', async () => {
+test('a management grant drives the routes — create and list serve', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);

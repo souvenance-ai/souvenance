@@ -3,19 +3,22 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
-import type { TokenGrant } from '../config/config.ts';
+import type { StoreGrant } from '../config/config.ts';
 import { createApp } from './server.ts';
 import { Registry } from './registry/registry.ts';
 import type { Store, StoreOptions } from '../store/store.ts';
 
 const ATLAS_SECRET = `souv-${'f'.repeat(32)}`;
 const OTHER_SECRET = `souv-${'1'.repeat(32)}`;
-const TOKENS: readonly TokenGrant[] = [
+const TOKENS: readonly StoreGrant[] = [
   { agent: 'atlas', secret: ATLAS_SECRET, store: 'atlas', mode: 'rw' },
   { agent: 'other', secret: OTHER_SECRET, store: 'other', mode: 'rw' },
 ];
 
 const ATLAS = { authorization: `Bearer ${ATLAS_SECRET}` };
+const MGMT_SECRET = `souv-${'9'.repeat(32)}`;
+const MANAGEMENT_ROWS = [{ agent: 'valentin', secret: MGMT_SECRET }];
+const MANAGEMENT = { authorization: `Bearer ${MGMT_SECRET}` };
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'souvenance-reads-test-'));
@@ -27,7 +30,7 @@ function boot(dir: string): {
   atlas: Store;
 } {
   const registry = Registry.open(dir);
-  const app = createApp({ registry, tokens: TOKENS, version: 'test' });
+  const app = createApp({ registry, tokens: TOKENS, management: MANAGEMENT_ROWS, version: 'test' });
   return { registry, app, atlas: registry.create('atlas') };
 }
 
@@ -339,7 +342,7 @@ test('search serves bare hits with their rank — no cursor', async () => {
   }
 });
 
-test('a foreign grant refuses 403 before existence is spoken; the operator reaches everything', async () => {
+test('a foreign grant refuses 403 before existence is spoken; management reaches no data', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
@@ -351,16 +354,20 @@ test('a foreign grant refuses 403 before existence is spoken; the operator reach
     // Foreign AND unknown: still 403 — the registry's contents are not the grant's business.
     const foreignUnknown = await get(app, `/stores/nowhere/memories`);
     assert.equal(foreignUnknown.status, 403);
-    // The operator (loopback) reaches any store.
-    const operator = await get(app, `/stores/other/memories`, {});
-    assert.equal(operator.status, 200);
+    // A management grant reaches no store's data — wrong family, 403 teaching.
+    const management = await get(app, `/stores/other/memories`, MANAGEMENT);
+    assert.equal(management.status, 403);
+    assert.match(
+      (management.body as { error: string }).error,
+      /a management grant reaches no store data/,
+    );
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('an unreadable peer refuses even before reach — fail-closed holds on data routes', async () => {
+test('a bare request refuses even before reach — every store access carries a token', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);

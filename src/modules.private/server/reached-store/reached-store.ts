@@ -1,23 +1,30 @@
 /**
- * The data routes' doors. `reachedStore`: the store a read serves, once
- * the grant's reach is checked — a foreign store refuses 403 BEFORE
- * existence is spoken, the registry's contents are not a foreign grant's
- * business (Q8: the reach is 403, the unknown is 404, in that order).
- * `writableStore`: the write routes' door — the reach gate, then the
- * mode gate, IN that order, structurally; the gate sequence the write
- * module's header documents is this one call. The management gate mounts
- * in the assembly; these are the data routes' own doors.
+ * The data routes' doors (#63). `reachedStore`: the store a read serves,
+ * once the credential's family and reach are checked — a management
+ * grant refuses 403 (it reaches no store's data), a foreign store
+ * refuses 403 BEFORE existence is spoken, the registry's contents are
+ * not a foreign grant's business (Q8: the reach is 403, the unknown is
+ * 404, in that order). `writableStore`: the write routes' door — the
+ * family and reach gates via reachedStore, then the mode gate, in that
+ * order, structurally; the gate sequence the write module's header
+ * documents is this one call. The management gate mounts in the
+ * assembly; these are the data routes' own doors.
  */
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { Store } from '../../store/store.ts';
 import { StoreError } from '../../store/store-error/store-error.ts';
-import { assertWritable, grantReaches, type ServerEnv } from '../auth/auth.ts';
+import type { ServerEnv } from '../auth/auth.ts';
 import type { Registry } from '../registry/registry.ts';
 
 export function reachedStore(c: Context<ServerEnv>, registry: Registry, name: string): Store {
   const grant = c.get('grant');
-  if (!grantReaches(grant, name)) {
+  if (grant.family !== 'store') {
+    throw new HTTPException(403, {
+      message: 'a management grant reaches no store data — the data surface wants a store grant',
+    });
+  }
+  if (grant.store !== name) {
     throw new HTTPException(403, {
       message: `this grant reaches store "${grant.store}" only — "${name}" is foreign`,
     });
@@ -31,6 +38,11 @@ export function reachedStore(c: Context<ServerEnv>, registry: Registry, name: st
 
 export function writableStore(c: Context<ServerEnv>, registry: Registry, name: string): Store {
   const store = reachedStore(c, registry, name);
-  assertWritable(c.get('grant'));
+  const grant = c.get('grant');
+  if (grant.family === 'store' && grant.mode !== 'rw') {
+    throw new HTTPException(403, {
+      message: 'this grant is read-only — writes need a grant with mode rw',
+    });
+  }
   return store;
 }

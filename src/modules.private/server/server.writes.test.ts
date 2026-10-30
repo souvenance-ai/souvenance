@@ -3,14 +3,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
-import type { TokenGrant } from '../config/config.ts';
+import type { StoreGrant } from '../config/config.ts';
 import { createApp } from './server.ts';
 import { Registry } from './registry/registry.ts';
 
 const SECRET_RW = `souv-${'4'.repeat(32)}`;
 const SECRET_RO = `souv-${'5'.repeat(32)}`;
 const OTHER_SECRET = `souv-${'6'.repeat(32)}`;
-const TOKENS: readonly TokenGrant[] = [
+const TOKENS: readonly StoreGrant[] = [
   { agent: 'atlas', secret: SECRET_RW, store: 'atlas', mode: 'rw' },
   { agent: 'reader', secret: SECRET_RO, store: 'atlas', mode: 'ro' },
   { agent: 'other', secret: OTHER_SECRET, store: 'other', mode: 'rw' },
@@ -25,7 +25,7 @@ function tempDir(): string {
 
 function boot(dir: string) {
   const registry = Registry.open(dir);
-  const app = createApp({ registry, tokens: TOKENS, version: 'test' });
+  const app = createApp({ registry, tokens: TOKENS, management: [], version: 'test' });
   return { registry, app };
 }
 

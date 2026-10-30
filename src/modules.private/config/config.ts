@@ -4,9 +4,14 @@
  * inherits it tomorrow. Strictness is the contract: an unknown key or a
  * malformed grant refuses loudly (`ConfigError`) rather than guessing —
  * a typo'd `token` silently meaning nothing is how grants evaporate.
- * A MISSING file is not an error: the defaults are a servable cold host
- * (loopback, no tokens — operator mode). Defaults here, policy nowhere:
- * the config file carries no behavior, only values.
+ * Credentials come in two families (#63): store grants (`tokens[]`, one
+ * agent = one store) and management rows (`management[]`, the host's
+ * management surface). A secret naming two rows is refused here — the
+ * resolution would be ambiguous and the 429 bucket shared. A MISSING
+ * file is not an error: the defaults are a cold host (loopback, no
+ * credentials) — whether that serves is the boot's verdict, not the
+ * file's (zero credentials refuse at boot, #63). Defaults here, policy
+ * nowhere: the config file carries no behavior, only values.
  */
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -27,16 +32,25 @@ export const DEFAULT_PORT = 3141;
 export const DEFAULT_HOST = '127.0.0.1';
 
 /**
- * One grant = one agent = one store (#19). Multi-grants per agent are
- * fine — a row per (agent, store) pair; `manage` stays absent (deny) by
- * default.
+ * One store grant = one agent = one store (#19, #63). Multi-grants per
+ * agent are fine — a row per (agent, store) pair; the `agent` label is
+ * what ties an agent's rows together.
  */
-export interface TokenGrant {
+export interface StoreGrant {
   readonly agent: string;
   readonly secret: string;
   readonly store: string;
   readonly mode: 'ro' | 'rw';
-  readonly manage?: boolean;
+}
+
+/**
+ * One management row = one agent on the host's management surface (#63):
+ * create, list, describe, fork, and delete stores — and reach no store's
+ * data. The operator's own credential when HTTP is wanted (#63).
+ */
+export interface ManagementGrant {
+  readonly agent: string;
+  readonly secret: string;
 }
 
 /** The resolved config: every field present, defaults applied. */
@@ -44,7 +58,8 @@ export interface Config {
   readonly port: number;
   readonly host: string;
   readonly storesDir: string;
-  readonly tokens: readonly TokenGrant[];
+  readonly tokens: readonly StoreGrant[];
+  readonly management: readonly ManagementGrant[];
 }
 
 /** The refusal that maps to the CLI's exit 78 (#17): bad file, bad shape. */
@@ -55,19 +70,24 @@ export class ConfigError extends Error {
   }
 }
 
-const grantSchema = z.strictObject({
+const storeGrantSchema = z.strictObject({
   agent: z.string().min(1),
   secret: z.string().regex(SOUV_SECRET),
   store: z.string().regex(STORE_NAME),
   mode: z.enum(['ro', 'rw']),
-  manage: z.boolean().optional(),
+});
+
+const managementGrantSchema = z.strictObject({
+  agent: z.string().min(1),
+  secret: z.string().regex(SOUV_SECRET),
 });
 
 const configSchema = z.strictObject({
   port: z.number().int().min(1).max(65_535).optional(),
   host: z.string().min(1).optional(),
   storesDir: z.string().min(1).optional(),
-  tokens: z.array(grantSchema).optional(),
+  tokens: z.array(storeGrantSchema).optional(),
+  management: z.array(managementGrantSchema).optional(),
 });
 
 export function defaultConfigPath(): string {
@@ -91,7 +111,9 @@ function expandHome(path: string): string {
 /**
  * Parses and validates a raw value (the parsed JSON document) into a
  * resolved Config. Throws ConfigError with the schema's teaching on any
- * refusal — unknown keys included (strictObject).
+ * refusal — unknown keys included (strictObject) — and on a secret
+ * naming two rows: resolution walks both families, a shared secret is
+ * an ambiguity, and ambiguity in credentials is a refusal (#63).
  */
 export function parseConfig(raw: unknown): Config {
   const parsed = configSchema.safeParse(raw);
@@ -101,19 +123,37 @@ export function parseConfig(raw: unknown): Config {
       .join('\n');
     throw new ConfigError(`invalid config:\n${issues}`);
   }
+  const tokens = parsed.data.tokens ?? [];
+  const management = parsed.data.management ?? [];
+  const bySecret = new Map<string, string[]>();
+  for (const grant of [...tokens, ...management]) {
+    const agents = bySecret.get(grant.secret) ?? [];
+    agents.push(grant.agent);
+    bySecret.set(grant.secret, agents);
+  }
+  const duplicated = [...bySecret.entries()].filter(([, agents]) => agents.length > 1);
+  if (duplicated.length > 0) {
+    const rows = duplicated.map(([, agents]) => `"${agents.join('", "')}"`).join(', ');
+    throw new ConfigError(
+      `invalid config: the rows ${rows} share one secret — ` +
+        `every row's secret must be unique across tokens[] and management[]`,
+    );
+  }
   return {
     port: parsed.data.port ?? DEFAULT_PORT,
     host: parsed.data.host ?? DEFAULT_HOST,
     storesDir: expandHome(parsed.data.storesDir ?? defaultStoresDir()),
-    tokens: parsed.data.tokens ?? [],
+    tokens,
+    management,
   };
 }
 
 /**
- * Reads the config file. Missing file → the defaults (a cold host is
- * servable); unreadable or malformed file → ConfigError. Syntactically
- * valid JSON that fails the schema is the same refusal as bad JSON:
- * both mean the operator's hand slipped, both teach.
+ * Reads the config file. Missing file → the defaults (a cold host —
+ * whether it serves is the boot's verdict, #63); unreadable or malformed
+ * file → ConfigError. Syntactically valid JSON that fails the schema is
+ * the same refusal as bad JSON: both mean the operator's hand slipped,
+ * both teach.
  */
 export function loadConfig(configPath: string = defaultConfigPath()): Config {
   let raw: string;

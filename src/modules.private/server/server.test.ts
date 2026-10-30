@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
+import type { ManagementGrant } from '../config/config.ts';
 import { StoreError } from '../store/store-error/store-error.ts';
 import { createApp } from './server.ts';
 import { Registry } from './registry/registry.ts';
@@ -11,14 +12,15 @@ function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'souvenance-server-test-'));
 }
 
-/** The env a real loopback connection carries (the node adapter's shape). */
-function loopbackEnv(): { incoming: { socket: { remoteAddress: string } } } {
-  return { incoming: { socket: { remoteAddress: '127.0.0.1' } } };
-}
+/** A management credential: the family the describe route and probes serve. */
+const MANAGEMENT: readonly ManagementGrant[] = [
+  { agent: 'valentin', secret: `souv-${'a'.repeat(32)}` },
+];
+const MANAGEMENT_BEARER = { authorization: `Bearer ${MANAGEMENT[0]!.secret}` };
 
 function boot(dir: string) {
   const registry = Registry.open(dir);
-  const app = createApp({ registry, tokens: [], version: 'test' });
+  const app = createApp({ registry, tokens: [], management: [], version: 'test' });
   return { registry, app };
 }
 
@@ -99,10 +101,11 @@ test('unknown routes answer the JSON envelope — never a bare-text 404', async 
 test('an unknown store under the guarded namespace is a 404 once authenticated', async () => {
   const dir = tempDir();
   try {
-    const { app, registry } = boot(dir);
-    // The loopback peer passes auth, walks the rate limit and the cap,
+    const registry = Registry.open(dir);
+    const app = createApp({ registry, tokens: [], management: MANAGEMENT, version: 'test' });
+    // The management credential passes the gate, walks the rate limit,
     // and reaches the describe route — 404 in the envelope, teaching.
-    const res = await app.request('/stores/nowhere', {}, loopbackEnv());
+    const res = await app.request('/stores/nowhere', { headers: MANAGEMENT_BEARER });
     assert.equal(res.status, 404);
     assert.deepEqual((await res.json()) as { error: string }, {
       error: 'no store "nowhere" in the registry',
@@ -113,7 +116,7 @@ test('an unknown store under the guarded namespace is a 404 once authenticated',
   }
 });
 
-test('a guarded request with no peer seen refuses 401 — the check fails closed', async () => {
+test('a guarded request with no credentials refuses 401 — every store access carries a token', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
@@ -129,13 +132,13 @@ test('a StoreError thrown inside the guard maps by code into the envelope', asyn
   const dir = tempDir();
   try {
     const { registry } = boot(dir);
-    const app = createApp({ registry, tokens: [] });
+    const app = createApp({ registry, tokens: [], management: MANAGEMENT });
     // A probe route at a depth no real route claims: the mapping is the
     // subject here, not the route.
     app.get('/stores/probe-deep/inner', () => {
       throw new StoreError('conflict', 'the memory fights its state');
     });
-    const res = await app.request('/stores/probe-deep/inner', {}, loopbackEnv());
+    const res = await app.request('/stores/probe-deep/inner', { headers: MANAGEMENT_BEARER });
     assert.equal(res.status, 409);
     assert.deepEqual((await res.json()) as { error: string }, {
       error: 'the memory fights its state',
@@ -150,11 +153,11 @@ test('a non-StoreError is an internal error — the client never sees internals'
   const dir = tempDir();
   try {
     const { registry } = boot(dir);
-    const app = createApp({ registry, tokens: [] });
+    const app = createApp({ registry, tokens: [], management: MANAGEMENT });
     app.get('/stores/probe-deep/inner', () => {
       throw new Error('the sqlite file screams in stack-trace');
     });
-    const res = await app.request('/stores/probe-deep/inner', {}, loopbackEnv());
+    const res = await app.request('/stores/probe-deep/inner', { headers: MANAGEMENT_BEARER });
     assert.equal(res.status, 500);
     const body = (await res.json()) as { error: string };
     assert.equal(body.error, 'internal error');
@@ -169,11 +172,11 @@ test('busy answers an opaque 503 — the engine message never crosses the wire',
   const dir = tempDir();
   try {
     const { registry } = boot(dir);
-    const app = createApp({ registry, tokens: [] });
+    const app = createApp({ registry, tokens: [], management: MANAGEMENT });
     app.get('/stores/probe-deep/inner', () => {
       throw new StoreError('busy', 'database is locked ( SQLITE_BUSY: raw engine text )');
     });
-    const res = await app.request('/stores/probe-deep/inner', {}, loopbackEnv());
+    const res = await app.request('/stores/probe-deep/inner', { headers: MANAGEMENT_BEARER });
     assert.equal(res.status, 503);
     const body = (await res.json()) as { error: string };
     assert.equal(body.error, 'the store is busy — retry in a moment');
@@ -191,6 +194,7 @@ test('a bad bearer under the guard refuses 401 before any route exists', async (
     const app = createApp({
       registry,
       tokens: [{ agent: 'atlas', secret: `souv-${'b'.repeat(32)}`, store: 'atlas', mode: 'rw' }],
+      management: [],
     });
     const res = await app.request('/stores/atlas/memories', {
       headers: { authorization: 'Bearer souv-00000000000000000000000000000000' },
