@@ -23,18 +23,28 @@ import { dirname, join } from 'node:path';
 /** The repo root — two directories up from this file (probes/battery/). */
 export const REPO = new URL('../..', import.meta.url).pathname;
 
-/** One grant's strict shape (the config file's grant record). */
+/** One store grant's strict shape (the config file's grant record, #63). */
 export interface TokenGrant {
   readonly agent: string;
   readonly secret: string;
   readonly store: string;
   readonly mode: 'ro' | 'rw';
-  readonly manage?: boolean;
+}
+
+/** One management row's strict shape (#63): the host's management surface. */
+export interface ManagementToken {
+  readonly agent: string;
+  readonly secret: string;
 }
 
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/** The one credential header shape — every authenticated probe carries it. */
+export const bearerOf = (secret: string): Record<string, string> => ({
+  authorization: `Bearer ${secret}`,
+});
 
 export interface Exchange {
   readonly status: number;
@@ -370,6 +380,7 @@ export class Battery {
   readonly cases: readonly ProbeCase[];
   readonly stores: readonly string[];
   readonly tokens: readonly TokenGrant[] | null;
+  readonly management: readonly ManagementToken[] | null;
   readonly root: string;
   private phaseServed?: Server;
   document: unknown = null;
@@ -380,6 +391,7 @@ export class Battery {
     cases,
     stores = [],
     tokens = null,
+    management = null,
     root,
   }: {
     name: string;
@@ -387,6 +399,7 @@ export class Battery {
     cases: readonly ProbeCase[];
     stores?: readonly string[];
     tokens?: readonly TokenGrant[] | null;
+    management?: readonly ManagementToken[] | null;
     /** The throwaway work dir for this run (fresh per invocation). */
     root: string;
   }) {
@@ -395,6 +408,7 @@ export class Battery {
     this.cases = cases;
     this.stores = stores;
     this.tokens = tokens;
+    this.management = management;
     this.root = root;
   }
 
@@ -418,9 +432,12 @@ export class Battery {
   }
 
   /**
-   * grandOpening(): the operator's ceremony — cold boot (defaults, operator
-   * loopback), create the stores, stop, re-boot granted. The /doc is
-   * refetched after the granted boot (both serve; trivially equal).
+   * grandOpening(): the operator's ceremony, in the production posture
+   * (#63) — the boot carries the management family alone (a fresh host
+   * is bootable with zero store grants, and births its stores over
+   * HTTP with the management credential), then the ceremony re-boots
+   * granted: both families in the config. The /doc is refetched after
+   * the granted boot (both serve; trivially equal).
    */
   async grandOpening(env: Record<string, string> = {}): Promise<Server> {
     const server = new Server({
@@ -429,17 +446,22 @@ export class Battery {
       logPath: join(this.root, 'logs', 'serve.log'),
     });
     this.phaseServed = server;
+    await this.writeConfig(this.management ? { management: this.management } : {});
     await server.boot(env);
     this.document = (await req(server.url, 'GET', '/doc')).json;
+    const ops = this.management?.[0];
     for (const name of this.stores) {
-      const made = await req(server.url, 'POST', '/stores', { body: { name } });
+      const made = await req(server.url, 'POST', '/stores', {
+        headers: ops ? bearerOf(ops.secret) : {},
+        body: { name },
+      });
       if (made.status !== 201)
         throw new Error(`grandOpening: ${made.status} creating ${name}: ${made.text}`);
     }
-    if (this.tokens) {
+    if ((this.tokens?.length ?? 0) > 0 || (this.management?.length ?? 0) > 0) {
       await server.stop();
       this.phaseServed = undefined;
-      await this.writeConfig({ tokens: this.tokens });
+      await this.writeConfig({ tokens: this.tokens ?? [], management: this.management ?? [] });
       const granted = new Server({
         home: this.homePath,
         port: this.port,

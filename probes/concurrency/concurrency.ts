@@ -2,13 +2,17 @@
 // Phase D — concurrency & lifecycle over the real wire: parallel writers,
 // the SIGKILL patient lock (refuses ~30 s, then takeover + durability),
 // the second-host refusal, racing stores, racing supersede, the SIGTERM
-// handover.
+// handover. The production posture (#63): the probes carry the alpha
+// store grant; the store-birthing race carries the management token.
 //
 import {
   Battery,
   Server,
+  bearerOf,
+  type ManagementToken,
   type ProbeCase,
   type ProbeRecord,
+  type TokenGrant,
   delay,
   fail,
   ok,
@@ -17,6 +21,26 @@ import {
   req,
 } from '../battery/battery.ts';
 import { join } from 'node:path';
+
+/** The ambient identity (#63): the battery's alpha store grant. */
+const ALPH = 'souv-' + '7'.repeat(32);
+const OPS_SECRET = 'souv-' + '8'.repeat(32);
+
+function call(
+  url: string,
+  method: 'GET' | 'POST' | 'DELETE',
+  path: string,
+  options: { headers?: Record<string, string>; body?: string | object } = {},
+  timeoutMs?: number,
+): ReturnType<typeof req> {
+  return req(
+    url,
+    method,
+    path,
+    { ...options, headers: { ...bearerOf(ALPH), ...options.headers } },
+    timeoutMs,
+  );
+}
 
 const teachable = (status: number | string): boolean =>
   ['200', '201', '204', '400', '403', '404', '409'].includes(String(status)) ||
@@ -40,7 +64,7 @@ const cases: readonly ProbeCase[] = [
     name: '24 parallel writers on one store — all 201, all distinct',
     run: async (b) => {
       const shots = Array.from({ length: 24 }, (_, i) =>
-        req(
+        call(
           b.server!.url,
           'POST',
           '/stores/alpha/memories',
@@ -62,7 +86,7 @@ const cases: readonly ProbeCase[] = [
     id: 'D02',
     name: 'SIGKILL: patient lock (refuses ~30s) then takeover + durability',
     run: async (b) => {
-      const gone = await req(
+      const gone = await call(
         b.server!.url,
         'POST',
         '/stores/alpha/memories',
@@ -110,7 +134,13 @@ const cases: readonly ProbeCase[] = [
         }
       }
       if (revived === null) return fail(`no takeover in 48s: ${lastError}`, 'doc-gap');
-      const after = await req(revived.url, 'GET', `/stores/alpha/memories/${doomedId}`, {}, 20_000);
+      const after = await call(
+        revived.url,
+        'GET',
+        `/stores/alpha/memories/${doomedId}`,
+        {},
+        20_000,
+      );
       if (after.status !== 200) {
         await revived.stop().catch(() => {});
         return fail(
@@ -169,7 +199,11 @@ const cases: readonly ProbeCase[] = [
         path: string,
         body: object | undefined,
       ): Promise<{ status: number | string; text: string }> => {
-        const exchange = await req(b.server!.url, kind, path, body === undefined ? {} : { body });
+        // The race lives on the management surface — the ops token (#63).
+        const exchange = await call(b.server!.url, kind, path, {
+          headers: bearerOf(OPS_SECRET),
+          ...(body === undefined ? {} : { body }),
+        });
         return { status: exchange.status, text: exchange.text };
       };
       // Settled at construction: an early verdict must not strand the race's
@@ -193,7 +227,10 @@ const cases: readonly ProbeCase[] = [
         if (!teachable(shot.value.status))
           return fail(`surfaced unteachable code: ${landed.join(',')}`, 'doc-gap');
       }
-      const after = records((await req(b.server!.url, 'GET', '/stores', {}, 20_000)).json);
+      const after = records(
+        (await call(b.server!.url, 'GET', '/stores', { headers: bearerOf(OPS_SECRET) }, 20_000))
+          .json,
+      );
       const fresh = after.filter((row) => row.name === name);
       if (fresh.length > 1)
         return fail(`race duplicated the name: ${fresh.length} stores of ${name}`, 'doc-gap');
@@ -207,7 +244,7 @@ const cases: readonly ProbeCase[] = [
     id: 'D05',
     name: 'parallel supersede on one living memory — one head, one anchor superseded',
     run: async (b) => {
-      const anchor = await req(
+      const anchor = await call(
         b.server!.url,
         'POST',
         '/stores/alpha/memories',
@@ -216,14 +253,14 @@ const cases: readonly ProbeCase[] = [
       );
       const anchorId = String(record(anchor.json)?.id);
       const revisions = await Promise.allSettled([
-        req(
+        call(
           b.server!.url,
           'POST',
           `/stores/alpha/memories/${anchorId}/supersede`,
           { body: { content: `rev A ${Date.now()}` } },
           20_000,
         ),
-        req(
+        call(
           b.server!.url,
           'POST',
           `/stores/alpha/memories/${anchorId}/supersede`,
@@ -240,14 +277,14 @@ const cases: readonly ProbeCase[] = [
         (shot) => shot.status === 'fulfilled' && teachable(shot.value.status),
       );
       const node = record(
-        (await req(b.server!.url, 'GET', `/stores/alpha/memories/${anchorId}`, {}, 20_000)).json,
+        (await call(b.server!.url, 'GET', `/stores/alpha/memories/${anchorId}`, {}, 20_000)).json,
       );
       if (!respectable) return fail(`supersede race surfaced: ${statuses.join(',')}`, 'doc-gap');
       if (node?.status !== 'superseded')
         return fail(`anchor status after race: ${String(node?.status)}`, 'doc-gap');
       const activeRevisions = memoriesOf(
         record(
-          (await req(b.server!.url, 'GET', '/stores/alpha/memories?limit=1000', {}, 20_000)).json,
+          (await call(b.server!.url, 'GET', '/stores/alpha/memories?limit=1000', {}, 20_000)).json,
         ),
       ).filter((row) =>
         ['rev A', 'rev B'].some(
@@ -266,7 +303,7 @@ const cases: readonly ProbeCase[] = [
       await b.server!.stop('SIGTERM');
       const revived = await reboot(b, b.port, 'handover');
       b.adopt(revived);
-      const proof = await req(revived.url, 'GET', '/stores/alpha/memories?limit=1', {}, 20_000);
+      const proof = await call(revived.url, 'GET', '/stores/alpha/memories?limit=1', {}, 20_000);
       if (proof.status !== 200)
         return fail(
           `post-TERM reboot refuses: ${proof.status} ${proof.text.slice(0, 120)}`,
@@ -278,5 +315,15 @@ const cases: readonly ProbeCase[] = [
 ];
 
 export function battery(root: string): Battery {
-  return new Battery({ name: 'D-concurrency', port: 18541, cases, stores: ['alpha'], root });
+  return new Battery({
+    name: 'D-concurrency',
+    port: 18541,
+    cases,
+    stores: ['alpha'],
+    tokens: [
+      { agent: 'alpha-rw', secret: ALPH, store: 'alpha', mode: 'rw' },
+    ] satisfies readonly TokenGrant[],
+    management: [{ agent: 'ops', secret: OPS_SECRET }] satisfies readonly ManagementToken[],
+    root,
+  });
 }
