@@ -10,10 +10,10 @@
 import {
   Battery,
   Server,
-  bearerOf,
-  type ManagementToken,
+  bearerHeaders,
+  type ManagementGrant,
   type ProbeCase,
-  type TokenGrant,
+  type StoreGrant,
   delay,
   fail,
   ok,
@@ -25,7 +25,7 @@ import { join } from 'node:path';
 
 const ALPH = 'souv-' + 'a'.repeat(32);
 const BET = 'souv-' + 'b'.repeat(32);
-const BETW = 'souv-' + 'e'.repeat(32);
+const BETA_WRITER_SECRET = 'souv-' + 'e'.repeat(32);
 const GAMM = 'souv-' + 'c'.repeat(32);
 
 const cases: readonly ProbeCase[] = [
@@ -52,13 +52,13 @@ const cases: readonly ProbeCase[] = [
     name: 'rw store grant: write passes, the management surface refuses',
     run: async (b) => {
       const written = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
-        headers: bearerOf(ALPH),
+        headers: bearerHeaders(ALPH),
         body: { content: `alpha rw row ${Date.now()}`, kind: 'note' },
       });
       if (written.status !== 201)
         return fail(`rw write → ${written.status} ${written.text.slice(0, 120)}`);
       const attempt = await req(b.server!.url, 'POST', '/stores', {
-        headers: bearerOf(ALPH),
+        headers: bearerHeaders(ALPH),
         body: { name: 'rw-manage-attempt' },
       });
       if (attempt.status !== 403)
@@ -75,7 +75,7 @@ const cases: readonly ProbeCase[] = [
     name: 'ro grant: reads pass, every write verb refuses',
     run: async (b) => {
       const seeded = await req(b.server!.url, 'POST', '/stores/beta/memories', {
-        headers: bearerOf(BETW),
+        headers: bearerHeaders(BETA_WRITER_SECRET),
         body: { content: `ro seed ${Date.now()}`, kind: 'note' },
       });
       if (seeded.status !== 201)
@@ -87,7 +87,7 @@ const cases: readonly ProbeCase[] = [
         ['GET', '/stores/beta/checkout'],
         ['GET', '/stores/beta/search?q=x'],
       ] as const) {
-        const r = await req(b.server!.url, method, path, { headers: bearerOf(BET) });
+        const r = await req(b.server!.url, method, path, { headers: bearerHeaders(BET) });
         if (r.status !== 200) return fail(`ro read ${path} → ${r.status} ${r.text.slice(0, 120)}`);
       }
       const writes: readonly (readonly [string, string, object | null, number[]])[] = [
@@ -107,7 +107,7 @@ const cases: readonly ProbeCase[] = [
       ];
       for (const [method, path, body, expectedStatuses] of writes) {
         const r = await req(b.server!.url, method as 'GET' | 'POST' | 'DELETE', path, {
-          headers: bearerOf(BET),
+          headers: bearerHeaders(BET),
           body: body ?? undefined,
         });
         if (!expectedStatuses.includes(r.status))
@@ -126,7 +126,7 @@ const cases: readonly ProbeCase[] = [
     name: 'grant scope: beta bearer cannot reach alpha',
     run: async (b) => {
       const r = await req(b.server!.url, 'GET', '/stores/alpha/memories', {
-        headers: bearerOf(BET),
+        headers: bearerHeaders(BET),
       });
       if (r.status !== 403)
         return fail(`foreign store read → ${r.status} (${r.text.slice(0, 140)})`);
@@ -138,32 +138,32 @@ const cases: readonly ProbeCase[] = [
     name: 'the management family: create/list/describe/fork/delete serve',
     run: async (b) => {
       const made = await req(b.server!.url, 'POST', '/stores', {
-        headers: bearerOf(GAMM),
+        headers: bearerHeaders(GAMM),
         body: { name: 'gamma-made' },
       });
       if (made.status !== 201)
         return fail(`management create → ${made.status} ${made.text.slice(0, 140)}`);
-      const listed = await req(b.server!.url, 'GET', '/stores', { headers: bearerOf(GAMM) });
+      const listed = await req(b.server!.url, 'GET', '/stores', { headers: bearerHeaders(GAMM) });
       if (listed.status !== 200)
         return fail(`management list → ${listed.status} ${listed.text.slice(0, 140)}`, 'doc-gap');
       const described = await req(b.server!.url, 'GET', '/stores/gamma-made', {
-        headers: bearerOf(GAMM),
+        headers: bearerHeaders(GAMM),
       });
       if (described.status !== 200)
         return fail(`management describe → ${described.status} ${described.text.slice(0, 140)}`);
       const forked = await req(b.server!.url, 'POST', '/stores/gamma-made/fork', {
-        headers: bearerOf(GAMM),
+        headers: bearerHeaders(GAMM),
         body: { name: 'gamma-fork' },
       });
       if (forked.status !== 201)
         return fail(`management fork → ${forked.status} ${forked.text.slice(0, 140)}`);
       const killedFork = await req(b.server!.url, 'DELETE', '/stores/gamma-fork', {
-        headers: bearerOf(GAMM),
+        headers: bearerHeaders(GAMM),
       });
       if (killedFork.status !== 204)
         return fail(`management delete fork → ${killedFork.status}`, 'doc-gap');
       const killed = await req(b.server!.url, 'DELETE', '/stores/gamma-made', {
-        headers: bearerOf(GAMM),
+        headers: bearerHeaders(GAMM),
       });
       if (killed.status !== 204)
         return fail(`management delete → ${killed.status} ${killed.text.slice(0, 140)}`, 'doc-gap');
@@ -193,7 +193,7 @@ const cases: readonly ProbeCase[] = [
       // Wrong family: a management credential on a data route — 403 with
       // the envelope (401 stays strictly identity).
       const family = await req(b.server!.url, 'GET', '/stores/alpha/memories', {
-        headers: bearerOf(GAMM),
+        headers: bearerHeaders(GAMM),
       });
       if (family.status !== 403)
         return fail(`management token on data → expected 403, got ${family.status}`, 'doc-gap');
@@ -255,12 +255,12 @@ const cases: readonly ProbeCase[] = [
       await fresh.boot({}, 7000);
       try {
         const born = await req(fresh.url, 'POST', '/stores', {
-          headers: bearerOf(GAMM),
+          headers: bearerHeaders(GAMM),
           body: { name: 'first-born' },
         });
         if (born.status !== 201)
           return fail(`first store on a fresh host → ${born.status} ${born.text.slice(0, 140)}`);
-        const listed = await req(fresh.url, 'GET', '/stores', { headers: bearerOf(GAMM) });
+        const listed = await req(fresh.url, 'GET', '/stores', { headers: bearerHeaders(GAMM) });
         if (listed.status !== 200)
           return fail(`the fresh host's registry → ${listed.status}`, 'doc-gap');
         const bare = await req(fresh.url, 'GET', '/stores/first-born/memories', {});
@@ -282,7 +282,7 @@ const cases: readonly ProbeCase[] = [
             b.server!.url,
             'GET',
             '/stores/alpha/memories?limit=1',
-            { headers: bearerOf(ALPH) },
+            { headers: bearerHeaders(ALPH) },
             20_000,
           ),
         ),
@@ -299,7 +299,7 @@ const cases: readonly ProbeCase[] = [
         b.server!.url,
         'GET',
         '/stores/beta/memories?limit=1',
-        { headers: bearerOf(BET) },
+        { headers: bearerHeaders(BET) },
         20_000,
       );
       if (other.status !== 200)
@@ -313,7 +313,7 @@ const cases: readonly ProbeCase[] = [
           b.server!.url,
           'GET',
           '/stores/alpha/memories?limit=1',
-          { headers: bearerOf(ALPH) },
+          { headers: bearerHeaders(ALPH) },
           20_000,
         );
         if (probe.status === 200) {
@@ -341,9 +341,9 @@ export function battery(root: string): Battery {
     tokens: [
       { agent: 'alpha-rw', secret: ALPH, store: 'alpha', mode: 'rw' },
       { agent: 'beta-ro', secret: BET, store: 'beta', mode: 'ro' },
-      { agent: 'beta-writer', secret: BETW, store: 'beta', mode: 'rw' },
-    ] satisfies readonly TokenGrant[],
-    management: [{ agent: 'gamma-mgr', secret: GAMM }] satisfies readonly ManagementToken[],
+      { agent: 'beta-writer', secret: BETA_WRITER_SECRET, store: 'beta', mode: 'rw' },
+    ] satisfies readonly StoreGrant[],
+    management: [{ agent: 'gamma-mgr', secret: GAMM }] satisfies readonly ManagementGrant[],
     root,
   });
 }

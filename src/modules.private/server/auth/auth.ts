@@ -18,7 +18,7 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createMiddleware } from 'hono/factory';
-import type { ManagementGrant, StoreGrant } from '../../config/config.ts';
+import type { CredentialFamilies } from '../../config/config.ts';
 
 export interface ServerEnv {
   Variables: {
@@ -43,6 +43,11 @@ export interface ManagementGrantResolved {
 
 export type ResolvedGrant = StoreGrantResolved | ManagementGrantResolved;
 
+/** The doors' shared narrowing: is this resolved grant the store family? */
+export function isStoreGrant(grant: ResolvedGrant): grant is StoreGrantResolved {
+  return grant.family === 'store';
+}
+
 export function bearerOf(header: string | undefined): string | undefined {
   if (header === undefined) return undefined;
   const [scheme, secret] = header.split(' ') as readonly string[];
@@ -56,13 +61,11 @@ function digest(value: string): Buffer {
   return createHash('sha256').update(value).digest();
 }
 
-function resolveBearer(
-  tokens: readonly StoreGrant[],
-  management: readonly ManagementGrant[],
-  secret: string,
-): ResolvedGrant | undefined {
+function resolveBearer(credentials: CredentialFamilies, secret: string): ResolvedGrant | undefined {
   const presented = digest(secret);
-  const store = tokens.find((grant) => timingSafeEqual(digest(grant.secret), presented));
+  const store = credentials.tokens.find((grant) =>
+    timingSafeEqual(digest(grant.secret), presented),
+  );
   if (store !== undefined) {
     return {
       family: 'store',
@@ -72,7 +75,9 @@ function resolveBearer(
       key: digest(store.secret).toString('hex').slice(0, 16),
     };
   }
-  const row = management.find((grant) => timingSafeEqual(digest(grant.secret), presented));
+  const row = credentials.management.find((grant) =>
+    timingSafeEqual(digest(grant.secret), presented),
+  );
   if (row !== undefined) {
     return {
       family: 'management',
@@ -83,7 +88,7 @@ function resolveBearer(
   return undefined;
 }
 
-export function auth(tokens: readonly StoreGrant[], management: readonly ManagementGrant[]) {
+export function auth(credentials: CredentialFamilies) {
   return createMiddleware<ServerEnv>(async (c, next) => {
     const header = c.req.header('authorization');
     const secret = bearerOf(header);
@@ -102,7 +107,7 @@ export function auth(tokens: readonly StoreGrant[], management: readonly Managem
         401,
       );
     }
-    const grant = resolveBearer(tokens, management, secret);
+    const grant = resolveBearer(credentials, secret);
     if (grant === undefined) {
       return c.json({ error: 'unknown grant — the secret matches no token row' }, 401);
     }
@@ -119,7 +124,7 @@ export function auth(tokens: readonly StoreGrant[], management: readonly Managem
  */
 export function requireManagement() {
   return createMiddleware<ServerEnv>(async (c, next) => {
-    if (c.get('grant').family !== 'management') {
+    if (isStoreGrant(c.get('grant'))) {
       return c.json(
         {
           error:

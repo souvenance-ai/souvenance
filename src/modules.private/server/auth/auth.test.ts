@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';
 import { test } from 'vitest';
-import type { ManagementGrant, StoreGrant } from '../../config/config.ts';
+import type { CredentialFamilies, ManagementGrant, StoreGrant } from '../../config/config.ts';
 import { auth, bearerOf, requireManagement, type ServerEnv } from './auth.ts';
 
 const SECRET = `souv-${'b'.repeat(32)}`;
@@ -12,12 +12,9 @@ const MANAGEMENT_SECRET = `souv-${'a'.repeat(32)}`;
 const MANAGEMENT: readonly ManagementGrant[] = [{ agent: 'valentin', secret: MANAGEMENT_SECRET }];
 
 /** A one-route harness: the handler answers with the resolved grant. */
-function harness(
-  tokens: readonly StoreGrant[],
-  management: readonly ManagementGrant[] = [],
-): Hono<ServerEnv> {
+function harness(credentials: CredentialFamilies): Hono<ServerEnv> {
   const app = new Hono<ServerEnv>();
-  app.use('*', auth(tokens, management));
+  app.use('*', auth(credentials));
   app.get('/probe', (c) => c.json(c.get('grant')));
   return app;
 }
@@ -31,7 +28,7 @@ test('bearerOf reads the scheme case-insensitively and refuses the rest', () => 
 });
 
 test('no header refuses 401 whatever the peer — the loopback bypass retired (#63)', async () => {
-  const app = harness(TOKENS);
+  const app = harness({ tokens: TOKENS, management: [] });
   const unseen = await app.request('/probe');
   assert.equal(unseen.status, 401);
   assert.match(
@@ -53,7 +50,7 @@ test('no header refuses 401 whatever the peer — the loopback bypass retired (#
 });
 
 test('a matching bearer resolves to its store grant — one agent, one store', async () => {
-  const res = await harness(TOKENS).request('/probe', {
+  const res = await harness({ tokens: TOKENS, management: [] }).request('/probe', {
     headers: { authorization: `Bearer ${SECRET}` },
   });
   assert.equal(res.status, 200);
@@ -70,7 +67,7 @@ test('a matching bearer resolves to its store grant — one agent, one store', a
 });
 
 test('a management bearer resolves to the management family — no store, no mode', async () => {
-  const res = await harness([], MANAGEMENT).request('/probe', {
+  const res = await harness({ tokens: [], management: MANAGEMENT }).request('/probe', {
     headers: { authorization: `Bearer ${MANAGEMENT_SECRET}` },
   });
   assert.equal(res.status, 200);
@@ -81,7 +78,7 @@ test('a management bearer resolves to the management family — no store, no mod
 });
 
 test('a bearer matching no row in either family refuses 401', async () => {
-  const res = await harness(TOKENS, MANAGEMENT).request('/probe', {
+  const res = await harness({ tokens: TOKENS, management: MANAGEMENT }).request('/probe', {
     headers: { authorization: `Bearer souv-${'c'.repeat(32)}` },
   });
   assert.equal(res.status, 401);
@@ -90,7 +87,7 @@ test('a bearer matching no row in either family refuses 401', async () => {
 });
 
 test('a presented non-Bearer credential refuses 401', async () => {
-  const res = await harness([]).request('/probe', {
+  const res = await harness({ tokens: [], management: [] }).request('/probe', {
     headers: { authorization: `Basic ${SECRET}` },
   });
   assert.equal(res.status, 401);
@@ -100,7 +97,7 @@ test('a presented non-Bearer credential refuses 401', async () => {
 
 test('the management gate: a management grant passes, a store grant refuses 403', async () => {
   const app = new Hono<ServerEnv>();
-  app.use('*', auth(TOKENS, MANAGEMENT));
+  app.use('*', auth({ tokens: TOKENS, management: MANAGEMENT }));
   app.use('*', requireManagement());
   app.get('/probe', (c) => c.json(c.get('grant')));
   const ok = await app.request('/probe', {

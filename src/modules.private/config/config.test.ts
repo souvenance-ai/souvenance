@@ -6,7 +6,7 @@ import { test } from 'vitest';
 import { ConfigError, loadConfig, parseConfig } from './config.ts';
 
 const SECRET = `souv-${'a'.repeat(32)}`;
-const OPS_SECRET = `souv-${'b'.repeat(32)}`;
+const MANAGEMENT_SECRET = `souv-${'b'.repeat(32)}`;
 
 function tempConfigPath(content: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'souvenance-config-test-'));
@@ -30,7 +30,7 @@ test('parseConfig keeps the given values and expands a leading ~', () => {
     host: '0.0.0.0',
     storesDir: '~/memory-stores',
     tokens: [{ agent: 'atlas', secret: SECRET, store: 'main', mode: 'rw' }],
-    management: [{ agent: 'ops', secret: OPS_SECRET }],
+    management: [{ agent: 'ops', secret: MANAGEMENT_SECRET }],
   });
   assert.equal(config.port, 8080);
   assert.equal(config.host, '0.0.0.0');
@@ -42,7 +42,7 @@ test('parseConfig keeps the given values and expands a leading ~', () => {
     store: 'main',
     mode: 'rw',
   });
-  assert.deepEqual(config.management, [{ agent: 'ops', secret: OPS_SECRET }]);
+  assert.deepEqual(config.management, [{ agent: 'ops', secret: MANAGEMENT_SECRET }]);
 });
 
 test('an unknown key refuses — a typo must never silently mean nothing', () => {

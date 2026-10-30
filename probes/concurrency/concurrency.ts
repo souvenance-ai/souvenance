@@ -8,39 +8,25 @@
 import {
   Battery,
   Server,
-  bearerOf,
-  type ManagementToken,
+  bearerHeaders,
+  type ManagementGrant,
   type ProbeCase,
   type ProbeRecord,
-  type TokenGrant,
+  type StoreGrant,
   delay,
   fail,
   ok,
   record,
   records,
-  req,
+  requestAs,
 } from '../battery/battery.ts';
 import { join } from 'node:path';
 
 /** The ambient identity (#63): the battery's alpha store grant. */
 const ALPH = 'souv-' + '7'.repeat(32);
-const OPS_SECRET = 'souv-' + '8'.repeat(32);
+const MANAGEMENT_SECRET = 'souv-' + '8'.repeat(32);
 
-function call(
-  url: string,
-  method: 'GET' | 'POST' | 'DELETE',
-  path: string,
-  options: { headers?: Record<string, string>; body?: string | object } = {},
-  timeoutMs?: number,
-): ReturnType<typeof req> {
-  return req(
-    url,
-    method,
-    path,
-    { ...options, headers: { ...bearerOf(ALPH), ...options.headers } },
-    timeoutMs,
-  );
-}
+const call = requestAs(ALPH);
 
 const teachable = (status: number | string): boolean =>
   ['200', '201', '204', '400', '403', '404', '409'].includes(String(status)) ||
@@ -201,7 +187,7 @@ const cases: readonly ProbeCase[] = [
       ): Promise<{ status: number | string; text: string }> => {
         // The race lives on the management surface — the ops token (#63).
         const exchange = await call(b.server!.url, kind, path, {
-          headers: bearerOf(OPS_SECRET),
+          headers: bearerHeaders(MANAGEMENT_SECRET),
           ...(body === undefined ? {} : { body }),
         });
         return { status: exchange.status, text: exchange.text };
@@ -228,8 +214,15 @@ const cases: readonly ProbeCase[] = [
           return fail(`surfaced unteachable code: ${landed.join(',')}`, 'doc-gap');
       }
       const after = records(
-        (await call(b.server!.url, 'GET', '/stores', { headers: bearerOf(OPS_SECRET) }, 20_000))
-          .json,
+        (
+          await call(
+            b.server!.url,
+            'GET',
+            '/stores',
+            { headers: bearerHeaders(MANAGEMENT_SECRET) },
+            20_000,
+          )
+        ).json,
       );
       const fresh = after.filter((row) => row.name === name);
       if (fresh.length > 1)
@@ -322,8 +315,8 @@ export function battery(root: string): Battery {
     stores: ['alpha'],
     tokens: [
       { agent: 'alpha-rw', secret: ALPH, store: 'alpha', mode: 'rw' },
-    ] satisfies readonly TokenGrant[],
-    management: [{ agent: 'ops', secret: OPS_SECRET }] satisfies readonly ManagementToken[],
+    ] satisfies readonly StoreGrant[],
+    management: [{ agent: 'ops', secret: MANAGEMENT_SECRET }] satisfies readonly ManagementGrant[],
     root,
   });
 }

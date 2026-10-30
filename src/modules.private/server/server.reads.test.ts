@@ -16,9 +16,9 @@ const TOKENS: readonly StoreGrant[] = [
 ];
 
 const ATLAS = { authorization: `Bearer ${ATLAS_SECRET}` };
-const MGMT_SECRET = `souv-${'9'.repeat(32)}`;
-const MANAGEMENT_ROWS = [{ agent: 'valentin', secret: MGMT_SECRET }];
-const MANAGEMENT = { authorization: `Bearer ${MGMT_SECRET}` };
+const MANAGEMENT_SECRET = `souv-${'9'.repeat(32)}`;
+const MANAGEMENT_ROWS = [{ agent: 'valentin', secret: MANAGEMENT_SECRET }];
+const MANAGEMENT = { authorization: `Bearer ${MANAGEMENT_SECRET}` };
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'souvenance-reads-test-'));

@@ -14,7 +14,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import { swaggerUI } from '@hono/swagger-ui';
 import { bodyLimit } from 'hono/body-limit';
 import type { Context } from 'hono';
-import type { ManagementGrant, StoreGrant } from '../config/config.ts';
+import type { CredentialFamilies } from '../config/config.ts';
 import { StoreError } from '../store/store-error/store-error.ts';
 import { auth, requireManagement, type ServerEnv } from './auth/auth.ts';
 import { rateLimit } from './rate-limit/rate-limit.ts';
@@ -42,11 +42,8 @@ const STATUS_BY_CODE: Record<StoreError['code'], 400 | 404 | 409 | 503 | 500> = 
   read_only: 500,
 };
 
-export interface ServerDeps {
+export interface ServerDeps extends CredentialFamilies {
   readonly registry: Registry;
-  readonly tokens: readonly StoreGrant[];
-  /** The management family (#63): the host's management surface. */
-  readonly management: readonly ManagementGrant[];
   /** The package version the OpenAPI document carries. */
   readonly version?: string;
 }
@@ -141,7 +138,7 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
 
   // The guarded namespace: the whole API lives under /stores/* (#19 Mount).
   // Auth first, then the rate limit (it reads the grant), then the cap.
-  app.use('/stores/*', auth(deps.tokens, deps.management));
+  app.use('/stores/*', auth(deps));
   app.use('/stores/*', rateLimit());
   app.use(
     '/stores/*',

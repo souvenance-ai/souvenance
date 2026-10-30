@@ -12,7 +12,7 @@
  * first store.
  */
 import { serve, type ServerType } from '@hono/node-server';
-import type { ManagementGrant, StoreGrant } from '../../config/config.ts';
+import type { CredentialFamilies } from '../../config/config.ts';
 import { Registry } from '../registry/registry.ts';
 import { createApp } from '../server.ts';
 
@@ -25,12 +25,10 @@ export const KEEPALIVE_TIMEOUT_MS = 5_000;
  * The fully resolved exposure — the caller (config, the CLI) owns the
  * defaults; the server owns none.
  */
-export interface ServeOptions {
+export interface ServeOptions extends CredentialFamilies {
   readonly port: number;
   readonly host: string;
   readonly storesDir: string;
-  readonly tokens: readonly StoreGrant[];
-  readonly management: readonly ManagementGrant[];
   /** The package version, surfaced in the OpenAPI document. */
   readonly version: string;
 }
