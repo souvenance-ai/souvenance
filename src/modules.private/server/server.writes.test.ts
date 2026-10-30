@@ -347,6 +347,42 @@ test('link echoes the edge (201); unlink takes the body and answers 204', async 
   }
 });
 
+test('an ambiguous unlink serves the facade refusal — kind named, no flag idiom (#62)', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    registry.create('atlas');
+    const from = (
+      await call(app, 'POST', '/stores/atlas/memories', { content: 'from', kind: 'note' })
+    ).body as { id: string };
+    const to = (await call(app, 'POST', '/stores/atlas/memories', { content: 'to', kind: 'note' }))
+      .body as { id: string };
+    for (const edgeKind of ['references', 'extends']) {
+      const linked = await call(app, 'POST', `/stores/atlas/memories/${from.id}/link`, {
+        to: to.id,
+        kind: edgeKind,
+      });
+      assert.equal(linked.status, 201);
+    }
+    // The living test's exact friction: a body without kind on a doubled
+    // edge — the 400 must name the parameter, never a CLI flag.
+    const refused = await call(app, 'DELETE', `/stores/atlas/memories/${from.id}/link`, {
+      to: to.id,
+    });
+    assert.equal(refused.status, 400);
+    assert.equal(
+      (refused.body as { error: string }).error,
+      `ambiguous: 2 edges between ${from.id} and ${to.id}, pass kind: extends, references`,
+    );
+    // The refusal is not destructive: both edges survive on the wire too.
+    const served = await call(app, 'GET', `/stores/atlas/memories/${from.id}`);
+    assert.equal((served.body as { relations: { out: unknown[] } }).relations.out.length, 2);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('merge answers 201 with the fusion id — the facade teaches arity and kind fights', async () => {
   const dir = tempDir();
   try {
