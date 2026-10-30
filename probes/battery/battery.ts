@@ -24,15 +24,15 @@ import { dirname, join } from 'node:path';
 export const REPO = new URL('../..', import.meta.url).pathname;
 
 /** One store grant's strict shape (the config file's grant record, #63). */
-export interface TokenGrant {
+export interface StoreGrant {
   readonly agent: string;
   readonly secret: string;
   readonly store: string;
   readonly mode: 'ro' | 'rw';
 }
 
-/** One management row's strict shape (#63): the host's management surface. */
-export interface ManagementToken {
+/** One management grant's strict shape (the config file's row, #63). */
+export interface ManagementGrant {
   readonly agent: string;
   readonly secret: string;
 }
@@ -42,7 +42,7 @@ export function delay(ms: number): Promise<void> {
 }
 
 /** The one credential header shape — every authenticated probe carries it. */
-export const bearerOf = (secret: string): Record<string, string> => ({
+export const bearerHeaders = (secret: string): Record<string, string> => ({
   authorization: `Bearer ${secret}`,
 });
 
@@ -92,6 +92,30 @@ export async function req(
     await delay(60);
     return req(base, method, path, options, timeoutMs, attempt + 1);
   }
+}
+
+/**
+ * One probe's ambient credential (#63): a req variant that always
+ * carries the secret's bearer header — the case's own headers win when
+ * a probe presents a different credential, or none at all.
+ */
+export function requestAs(
+  secret: string,
+): (
+  url: string,
+  method: 'GET' | 'POST' | 'DELETE',
+  path: string,
+  options?: { headers?: Record<string, string>; body?: string | object },
+  timeoutMs?: number,
+) => ReturnType<typeof req> {
+  return (url, method, path, options = {}, timeoutMs) =>
+    req(
+      url,
+      method,
+      path,
+      { ...options, headers: { ...bearerHeaders(secret), ...options.headers } },
+      timeoutMs,
+    );
 }
 
 /** One booted server process on a throwaway HOME. */
@@ -379,8 +403,8 @@ export class Battery {
   readonly port: number;
   readonly cases: readonly ProbeCase[];
   readonly stores: readonly string[];
-  readonly tokens: readonly TokenGrant[] | null;
-  readonly management: readonly ManagementToken[] | null;
+  readonly tokens: readonly StoreGrant[] | null;
+  readonly management: readonly ManagementGrant[] | null;
   readonly root: string;
   private phaseServed?: Server;
   document: unknown = null;
@@ -398,8 +422,8 @@ export class Battery {
     port: number;
     cases: readonly ProbeCase[];
     stores?: readonly string[];
-    tokens?: readonly TokenGrant[] | null;
-    management?: readonly ManagementToken[] | null;
+    tokens?: readonly StoreGrant[] | null;
+    management?: readonly ManagementGrant[] | null;
     /** The throwaway work dir for this run (fresh per invocation). */
     root: string;
   }) {
@@ -449,10 +473,10 @@ export class Battery {
     await this.writeConfig(this.management ? { management: this.management } : {});
     await server.boot(env);
     this.document = (await req(server.url, 'GET', '/doc')).json;
-    const ops = this.management?.[0];
+    const managementRow = this.management?.[0];
     for (const name of this.stores) {
       const made = await req(server.url, 'POST', '/stores', {
-        headers: ops ? bearerOf(ops.secret) : {},
+        headers: managementRow ? bearerHeaders(managementRow.secret) : {},
         body: { name },
       });
       if (made.status !== 201)

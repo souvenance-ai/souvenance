@@ -10,39 +10,26 @@
 //
 import {
   Battery,
-  bearerOf,
-  type ManagementToken,
+  bearerHeaders,
+  type ManagementGrant,
   type ProbeCase,
   type ProbeRecord,
   type ProbeVerdict,
-  type TokenGrant,
+  type StoreGrant,
   fail,
   ok,
   record,
   records,
+  requestAs,
   req,
 } from '../battery/battery.ts';
 
 /** The ambient identity (#63): the battery's alpha store grant. */
 const ALPH = 'souv-' + '4'.repeat(32);
 const OTHER_SECRET = 'souv-' + '5'.repeat(32);
-const OPS_SECRET = 'souv-' + '6'.repeat(32);
+const MANAGEMENT_SECRET = 'souv-' + '6'.repeat(32);
 
-function call(
-  url: string,
-  method: 'GET' | 'POST' | 'DELETE',
-  path: string,
-  options: { headers?: Record<string, string>; body?: string | object } = {},
-  timeoutMs?: number,
-): ReturnType<typeof req> {
-  return req(
-    url,
-    method,
-    path,
-    { ...options, headers: { ...bearerOf(ALPH), ...options.headers } },
-    timeoutMs,
-  );
-}
+const call = requestAs(ALPH);
 
 /** Refusal contract: the status carries the envelope {error: string}. */
 function refuses(
@@ -334,15 +321,15 @@ const cases: readonly ProbeCase[] = [
     run: async (b) => {
       // cursor-other is born at grandOpening — its grant rode the config (#63).
       await call(b.server!.url, 'POST', '/stores/cursor-other/memories', {
-        headers: bearerOf(OTHER_SECRET),
+        headers: bearerHeaders(OTHER_SECRET),
         body: { content: `stranger row ${Date.now()}`, kind: 'event' },
       });
       await call(b.server!.url, 'POST', '/stores/cursor-other/memories', {
-        headers: bearerOf(OTHER_SECRET),
+        headers: bearerHeaders(OTHER_SECRET),
         body: { content: `stranger row ${Date.now()}`, kind: 'event' },
       });
       const p1 = await call(b.server!.url, 'GET', '/stores/cursor-other/memories?limit=1', {
-        headers: bearerOf(OTHER_SECRET),
+        headers: bearerHeaders(OTHER_SECRET),
       });
       const reused = await call(
         b.server!.url,
@@ -481,7 +468,7 @@ const cases: readonly ProbeCase[] = [
         'a'.repeat(40),
       ]) {
         const r = await req(b.server!.url, 'POST', '/stores', {
-          headers: bearerOf(OPS_SECRET),
+          headers: bearerHeaders(MANAGEMENT_SECRET),
           body: { name },
         });
         const verdict = awaits(r, [400], `store name ${JSON.stringify(name.slice(0, 12))}`);
@@ -593,8 +580,8 @@ export function battery(root: string): Battery {
     tokens: [
       { agent: 'alpha-rw', secret: ALPH, store: 'alpha', mode: 'rw' },
       { agent: 'other-rw', secret: OTHER_SECRET, store: 'cursor-other', mode: 'rw' },
-    ] satisfies readonly TokenGrant[],
-    management: [{ agent: 'ops', secret: OPS_SECRET }] satisfies readonly ManagementToken[],
+    ] satisfies readonly StoreGrant[],
+    management: [{ agent: 'ops', secret: MANAGEMENT_SECRET }] satisfies readonly ManagementGrant[],
     root,
   });
 }

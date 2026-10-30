@@ -7,56 +7,27 @@
 //
 import {
   Battery,
-  bearerOf,
-  type ManagementToken,
+  bearerHeaders,
+  type ManagementGrant,
   type ProbeCase,
   type ProbeRecord,
-  type TokenGrant,
+  type StoreGrant,
   docAgrees,
   fail,
   ok,
   record,
   records,
-  req,
+  requestAs,
 } from '../battery/battery.ts';
 
 /** The ambient credentials (#63): the data probes ride the store grant. */
 const ALPH = 'souv-' + '1'.repeat(32);
 const PAGE_SECRET = 'souv-' + '2'.repeat(32);
-const OPS_SECRET = 'souv-' + '3'.repeat(32);
+const MANAGEMENT_SECRET = 'souv-' + '3'.repeat(32);
 
-function call(
-  url: string,
-  method: 'GET' | 'POST' | 'DELETE',
-  path: string,
-  options: { headers?: Record<string, string>; body?: string | object } = {},
-  timeoutMs?: number,
-): ReturnType<typeof req> {
-  return req(
-    url,
-    method,
-    path,
-    { ...options, headers: { ...bearerOf(ALPH), ...options.headers } },
-    timeoutMs,
-  );
-}
-
-/** The management surface's wrapper: the ops token, never the store grant. */
-function manage(
-  url: string,
-  method: 'GET' | 'POST' | 'DELETE',
-  path: string,
-  options: { headers?: Record<string, string>; body?: string | object } = {},
-  timeoutMs?: number,
-): ReturnType<typeof req> {
-  return req(
-    url,
-    method,
-    path,
-    { ...options, headers: { ...bearerOf(OPS_SECRET), ...options.headers } },
-    timeoutMs,
-  );
-}
+const call = requestAs(ALPH);
+/** The management surface's wrapper: the management grant, never the store grant. */
+const manage = requestAs(MANAGEMENT_SECRET);
 
 const uuid = (value: string | undefined): boolean =>
   typeof value === 'string' && /^[0-9a-f-]{36}$/.test(value);
@@ -260,15 +231,15 @@ const cases: readonly ProbeCase[] = [
     run: async (b) => {
       // page-test is born at grandOpening — its grant rode the config (#63).
       await call(b.server!.url, 'POST', '/stores/page-test/memories', {
-        headers: bearerOf(PAGE_SECRET),
+        headers: bearerHeaders(PAGE_SECRET),
         body: { content: `row 1 ${Date.now()}`, kind: 'event' },
       });
       await call(b.server!.url, 'POST', '/stores/page-test/memories', {
-        headers: bearerOf(PAGE_SECRET),
+        headers: bearerHeaders(PAGE_SECRET),
         body: { content: `row 2 ${Date.now()}`, kind: 'event' },
       });
       const p1 = await call(b.server!.url, 'GET', '/stores/page-test/memories?limit=1', {
-        headers: bearerOf(PAGE_SECRET),
+        headers: bearerHeaders(PAGE_SECRET),
       });
       const first = memoriesOf(record(p1.json));
       if (p1.status !== 200 || first.length !== 1)
@@ -282,7 +253,7 @@ const cases: readonly ProbeCase[] = [
         b.server!.url,
         'GET',
         `/stores/page-test/memories?limit=1&after=${encodeURIComponent(String(record(p1.json)?.next_after))}`,
-        { headers: bearerOf(PAGE_SECRET) },
+        { headers: bearerHeaders(PAGE_SECRET) },
       );
       if (tail.status !== 200) return fail(`after → ${tail.status} ${tail.text.slice(0, 160)}`);
       if (memoryIds(record(tail.json)).includes(String(first[0]?.id)))
@@ -653,8 +624,8 @@ export function battery(root: string): Battery {
     tokens: [
       { agent: 'alpha-rw', secret: ALPH, store: 'alpha', mode: 'rw' },
       { agent: 'page-rw', secret: PAGE_SECRET, store: 'page-test', mode: 'rw' },
-    ] satisfies readonly TokenGrant[],
-    management: [{ agent: 'ops', secret: OPS_SECRET }] satisfies readonly ManagementToken[],
+    ] satisfies readonly StoreGrant[],
+    management: [{ agent: 'ops', secret: MANAGEMENT_SECRET }] satisfies readonly ManagementGrant[],
     root,
   });
 }

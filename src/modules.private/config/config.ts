@@ -53,13 +53,23 @@ export interface ManagementGrant {
   readonly secret: string;
 }
 
+/**
+ * The two credential families as one unit (#63): resolution walks both
+ * arrays, the boot refuses when both are empty, and the config file
+ * carries them side by side — they travel together, so they are typed
+ * together. `tokens[]` rows are store grants (one agent = one store);
+ * `management[]` rows are the host's management surface.
+ */
+export interface CredentialFamilies {
+  readonly tokens: readonly StoreGrant[];
+  readonly management: readonly ManagementGrant[];
+}
+
 /** The resolved config: every field present, defaults applied. */
-export interface Config {
+export interface Config extends CredentialFamilies {
   readonly port: number;
   readonly host: string;
   readonly storesDir: string;
-  readonly tokens: readonly StoreGrant[];
-  readonly management: readonly ManagementGrant[];
 }
 
 /** The refusal that maps to the CLI's exit 78 (#17): bad file, bad shape. */
@@ -131,9 +141,9 @@ export function parseConfig(raw: unknown): Config {
     agents.push(grant.agent);
     bySecret.set(grant.secret, agents);
   }
-  const duplicated = [...bySecret.entries()].filter(([, agents]) => agents.length > 1);
-  if (duplicated.length > 0) {
-    const rows = duplicated.map(([, agents]) => `"${agents.join('", "')}"`).join(', ');
+  const duplicateEntries = [...bySecret.entries()].filter(([, agents]) => agents.length > 1);
+  if (duplicateEntries.length > 0) {
+    const rows = duplicateEntries.map(([, agents]) => `"${agents.join('", "')}"`).join(', ');
     throw new ConfigError(
       `invalid config: the rows ${rows} share one secret — ` +
         `every row's secret must be unique across tokens[] and management[]`,

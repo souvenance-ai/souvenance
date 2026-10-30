@@ -14,12 +14,12 @@ import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { Store } from '../../store/store.ts';
 import { StoreError } from '../../store/store-error/store-error.ts';
-import type { ServerEnv } from '../auth/auth.ts';
+import { isStoreGrant, type ServerEnv } from '../auth/auth.ts';
 import type { Registry } from '../registry/registry.ts';
 
 export function reachedStore(c: Context<ServerEnv>, registry: Registry, name: string): Store {
   const grant = c.get('grant');
-  if (grant.family !== 'store') {
+  if (!isStoreGrant(grant)) {
     throw new HTTPException(403, {
       message: 'a management grant reaches no store data — the data surface wants a store grant',
     });
@@ -39,7 +39,7 @@ export function reachedStore(c: Context<ServerEnv>, registry: Registry, name: st
 export function writableStore(c: Context<ServerEnv>, registry: Registry, name: string): Store {
   const store = reachedStore(c, registry, name);
   const grant = c.get('grant');
-  if (grant.family === 'store' && grant.mode !== 'rw') {
+  if (isStoreGrant(grant) && grant.mode !== 'rw') {
     throw new HTTPException(403, {
       message: 'this grant is read-only — writes need a grant with mode rw',
     });
