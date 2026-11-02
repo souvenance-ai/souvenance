@@ -30,7 +30,9 @@ The production posture, on the real host:
 
 - Life id: `life-<YYYYMMDD>-<slug>` — the slug names the run's variable.
   The id is the store's name, the runs directory's name, and the grant
-  row's identity.
+  row's identity. The id obeys the store name's grammar
+  (`^[a-z][a-z0-9-]{0,31}$` — 32 characters, the load refuses anything
+  longer): the slug yields; it truncates, the grammar never bends.
 - Before boot, the orchestrator appends one row to the real config's
   `tokens[]`: `agent` and `store` are the life id, the secret is freshly
   minted (`souv-` + 32 hex), the mode is `rw`. At death the row is
