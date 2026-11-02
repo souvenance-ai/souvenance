@@ -19,19 +19,24 @@ the contract, this skill is the hands. HITL at the closing ritual only.
 - Life id: `life-<YYYYMMDD>-<slug>` — the store name, the runs directory
   (`probes/living/runs/<life-id>/`), the grant row's identity. It obeys the
   store name's grammar — 32 characters at most; the slug truncates.
-- Mint the secret (`souv-` + 32 hex), append the row to the config's
-  `tokens[]` (`agent` and `store` = the life id, `mode: "rw"`) with a jq
-  edit that never prints secrets. Read the config back by shape only (row
-  counts), never by content.
+- Mint the secret (`souv-` + 32 hex) and hold it for the grant step. The
+  row waits: the boot refuses a token row naming a store the registry
+  never opened, and the birth needs a served server — mint-then-boot is a
+  deadlock.
 
 ## 2. Boot and birth
 
-- Boot the server in the background, output captured to the run's
-  directory. Verify the five public doors answer and the data door refuses
-  bare — the 401 is the posture speaking.
+- Boot the server WITHOUT the life's row — the config as it stands — in
+  the background, output captured to the run's directory. Verify the five
+  public doors answer and the data door refuses bare: the 401 is the
+  posture speaking.
 - Birth the individual's store over the wire, with the management
   credential: `POST /stores {name: <life-id>}` → expect 201. The store is
   born empty; the individual names itself in content.
+- Grant: append the row to `tokens[]` (`agent` and `store` = the life id,
+  `mode: "rw"`) with a jq edit that never prints secrets, and re-boot —
+  the individual's first waking happens on the granted boot. Read the
+  config back by shape only (row counts), never by content.
 
 ## 3. Sessions (four by default)
 
