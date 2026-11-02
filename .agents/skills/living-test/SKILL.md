@@ -10,6 +10,10 @@ the contract, this skill is the hands. HITL at the closing ritual only.
 
 - A checkout of `release/0.2.0` (or the working branch) that boots the
   server: `node src/cli/cli.ts serve --port 18601`.
+- The sanitized spawn posture: the life runs from a checkout stripped of
+  the workshop's skills — a worktree minus `.agents/` at the least — the
+  individual's context carries no protocol. The orchestrator reads this
+  skill before stripping.
 - The real `~/.souvenance/config.json` carries a management row — the
   orchestration credential. Read it, never print it.
 - No ticket is needed to run a life: the run's result decides what opens.
@@ -66,7 +70,17 @@ the individual's grant. The stats descriptor (`GET /stores/{name}`) sits
 on the management surface — a store grant reaches no management route —
 so it rides the management credential.
 
-## 5. The closing ritual (HITL)
+## 5. The terminal phase (the DB analysis)
+
+After the death capture, stop the server (the ownership lock releases)
+and open the life's store read-only offline. Read it as data: the
+per-column presence and density, the kinds' and edge kinds' spread, the
+metadata keys' usage, the search terms the FTS was asked, the cold
+columns and tables, and the fields the life's shape argues for. The
+analysis lands in the report's « La base » section; the dev validates the
+experiment's end against it.
+
+## 6. The closing ritual (HITL)
 
 Present the final state to the dev — the inventory, the stats, the
 verdict, the last recitation — and ask, in order: continue the experience
@@ -74,7 +88,7 @@ verdict, the last recitation — and ask, in order: continue the experience
 (default keep); validate the report (the archive ticket opens, carrying
 it).
 
-## 6. The closing
+## 7. The closing
 
 - Stop the server once, at the life's end: `pkill -f "cli[.]ts serve"` —
   the bracketed dot keeps the pattern from matching its own shell.

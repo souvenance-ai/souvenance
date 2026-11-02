@@ -43,6 +43,9 @@ individual folded against the wire's truth, marked `wire-verified` or
 - **Usage** — the APIs preferred and avoided, the verbs' economy, the
   memory functional in use: fed by the debriefs (the gestures in order,
   the refusals, the searches), folded against the store's truth.
+- **La base** — the terminal phase's database analysis: the columns,
+  tables, kinds, edge kinds and metadata keys the life used, the cold
+  ones, and the fields the life's shape argues for.
 - **Frictions** — the exact refusals and surprises, reproducible.
 - **État final** — the served inventory, the stats, the checkout verdict,
   the individual's last words.
