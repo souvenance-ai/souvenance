@@ -31,3 +31,16 @@ lands as a JSON file under the run's throwaway work dir (printed path survives i
 One honest retry rides `req()` for the keep-alive pool race (a client pool reusing a
 socket the server closed right after a 413 mid-body abort surfaces as `UND_ERR_SOCKET`)
 — visible as `[retry …]` lines; a repeated failure still fails its case.
+
+---
+
+## The living test
+
+One agent, one store, one life: an individual is born empty, lives four
+sessions (a restart between each, the waking line to open), and is judged on
+what its memory carried — the recitations against the served inventory, the
+frictions lived on the wire. The contract: [`living/protocol.md`](living/protocol.md);
+the prompt: [`living/prompt.md`](living/prompt.md); the grid:
+[`living/rubric.md`](living/rubric.md). Runs land in `living/runs/`
+(gitignored); the `living-test` skill drives a life and its closing ritual
+(issue #64).
