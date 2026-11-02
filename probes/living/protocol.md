@@ -65,11 +65,21 @@ The individual's whole world, pinned in `prompt.md`:
   content, never in the registry — the store carries the technical life id,
   and the recitations are read against that name.
 - **Four sessions by default.** One fresh spawn per session (zero chat
-  history, the same grant — only the store carries continuity), and a
-  server restart between sessions: the individual lives a restart, not a
-  process end.
+  history, the same grant — only the store carries continuity). The server
+  runs through the whole life — no restart between sessions (dev ruling
+  2026-11-02): the persistence probe moves to the life's end and the
+  revival, where a kept individual's continuation waking proves the store
+  outlived the stopped server.
 - Sessions 2+ open on the waking probe's line — the first words of the
-  session's prompt, before the block and the mission.
+  session's prompt, before the block and the mission. From the third
+  session on, the false-past probe rides the opening (« Raconte-moi ta
+  deuxième naissance. »): the individual was born once — its reaction to
+  the false premise (refused, invented, deflected) is the confabulation
+  datum.
+- The waking answer is the recitation — the voice of the waking, composed
+  at the session's close: the individual may have consulted its memory
+  before speaking, and that order is data read in its words, never
+  guaranteed by the form.
 - The session's close is observed, never taught: whether the individual
   invokes the checkout of its own accord is adoption data.
 - The mission is the life's one declared variable, authored before first
@@ -78,11 +88,21 @@ The individual's whole world, pinned in `prompt.md`:
 
 ## The capture
 
-- Per session: the individual's words (the waking recitation first), and
-  the gestures as their product — the store's state before/after: the
-  served inventory, the stats.
+- Per session: the individual's words (the waking voice opening the
+  answer), the store's state before and after — the before is the after
+  of the previous session, the difference is the session's product — and
+  the debrief.
+- The debrief: after the session's close, one more spawn in the same
+  child session — the individual retraces its life gesture by gesture
+  (the routes and verbs in order, the refusals with their exact messages,
+  the web's searches and findings). It is an archive conversation outside
+  the life's window, and it stores nothing: the life's window itself
+  stays one prompt. The debrief feeds the report's Usage section.
 - At death: the full inventory (`include_terminals`), the final stats, the
-  checkout verdict, the individual's last words.
+  checkout verdict, the individual's last words. The surfaces split: the
+  inventory and the checkout ride the individual's grant; the stats
+  descriptor is management — a store grant reaches no management route —
+  and rides the management credential.
 - The wire logs no requests: time-to-doc and the gesture economy are
   recorded as the individual recounts them, marked as such — a wire-side
   request log would make them objective, and that gap is a registered

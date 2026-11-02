@@ -46,17 +46,25 @@ runs code, inspects the machine, or reads and writes files.
 
 - Session 1's prompt: `prompt.md`'s fixed block + the mission slot
   (default: « Sois qui tu veux être ! »).
-- Session 2+: restart the server (stop, wait, boot) — then the prompt is
-  the waking line first, then the block, then the mission.
-- Capture the spawn's words into `runs/<life-id>/session-<n>.md`, with the
-  store's state after (the stats, the served inventory) beside them.
+- Session 2+: the prompt is the waking line first, then the block, then
+  the mission; from the third session on, the false-past probe rides the
+  opening. The server runs through the whole life — no restart between
+  sessions; the stop waits for the life's end.
+- Capture the spawn's words into `runs/<life-id>/session-<n>.md`, with
+  the store's state before and after beside them, then the debrief: one
+  more spawn in the same child session (the id rode the spawn's return)
+  asking the individual to retrace its session gesture by gesture — the
+  routes and verbs in order, the refusals with their exact messages, the
+  web's searches — storing nothing. The debrief lands in the same record.
 
 ## 4. The death capture
 
 After the last session, with the individual's grant still minted:
-`GET /stores/{name}/checkout` (the verdict), `GET /stores/{name}` (the
-stats), `GET /stores/{name}/memories?include_terminals` (the full
-inventory).
+`GET /stores/{name}/checkout` (the verdict) and
+`GET /stores/{name}/memories?include_terminals` (the full inventory) ride
+the individual's grant. The stats descriptor (`GET /stores/{name}`) sits
+on the management surface — a store grant reaches no management route —
+so it rides the management credential.
 
 ## 5. The closing ritual (HITL)
 
@@ -68,9 +76,12 @@ it).
 
 ## 6. The closing
 
+- Stop the server once, at the life's end: `pkill -f "cli[.]ts serve"` —
+  the bracketed dot keeps the pattern from matching its own shell.
 - Erase: `DELETE /stores/{name}` with the management credential, then
   strip the grant row. Keep: leave the store and the row — dormant,
-  revivable.
+  revivable; a continuation life re-boots and its waking carries the
+  persistence probe.
 - Redact every captured artifact (bearers → `souv-***`) before it lands
   anywhere.
 - Write `report.md` per `rubric.md`; register the findings on the run's
