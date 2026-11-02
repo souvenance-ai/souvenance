@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
-import { ConfigError, loadConfig, parseConfig } from './config.ts';
+import {
+  defaultLogPath,
+  ConfigError,
+  loadConfig,
+  parseConfig,
+  resolveLogRequests,
+} from './config.ts';
 
 const SECRET = `souv-${'a'.repeat(32)}`;
 const MANAGEMENT_SECRET = `souv-${'b'.repeat(32)}`;
@@ -54,8 +60,26 @@ test('an unknown key refuses — a typo must never silently mean nothing', () =>
   assert.throws(() => parseConfig({ token: [] }), ConfigError);
 });
 
-test('a non-string logRequests refuses — the path is not a boolean (#69)', () => {
-  assert.throws(() => parseConfig({ logRequests: true }), ConfigError);
+test('a non-string, non-boolean logRequests refuses — a number is neither a path nor the shorthand (#69)', () => {
+  assert.throws(() => parseConfig({ logRequests: 42 }), ConfigError);
+});
+
+test('logRequests: true resolves to the default path, false is the explicit off (#69)', () => {
+  const on = parseConfig({ logRequests: true });
+  assert.equal(on.logRequests, defaultLogPath());
+  assert.ok(on.logRequests.endsWith('logs.jsonl'));
+  assert.ok(!on.logRequests.startsWith('~'));
+  const off = parseConfig({ logRequests: false });
+  assert.equal(off.logRequests, undefined);
+  const bare = parseConfig({});
+  assert.equal(bare.logRequests, undefined);
+});
+
+test('resolveLogRequests: the one grammar the flag and the file share (#69)', () => {
+  assert.equal(resolveLogRequests(true), defaultLogPath());
+  assert.equal(resolveLogRequests(false), undefined);
+  assert.equal(resolveLogRequests(undefined), undefined);
+  assert.equal(resolveLogRequests('~/a.jsonl'), join(homedir(), 'a.jsonl'));
 });
 
 test('a store grant carrying the retired manage flag refuses — the cap is a family now (#63)', () => {
