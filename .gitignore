@@ -165,3 +165,7 @@ dist
 
 # vitest output artifacts (json reports)
 .vitest/
+
+# The living test's runs — local captures, redacted, never committed;
+# the durable archive is the run's archive ticket
+probes/living/runs/

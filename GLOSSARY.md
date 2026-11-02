@@ -117,3 +117,21 @@ _Avoid_: finish, close
 **Doctor**:
 The corruption audit of a store, for the operator: the states the write surface cannot produce (hand SQL, external tools), every finding payable in SQL. The checkout's complement — the agent's gate, the operator's audit.
 _Avoid_: diagnose, verify, integrity check
+
+### The experiment
+
+**Life**:
+The living test's unit: a fresh individual born empty in a pre-created store, four sessions by default (a restart between each, the waking line to open), and ruled at closing — continue, keep or erase, archive. One declared variable per life; the lives are comparable, not deterministic.
+_Avoid_: run (that's the artifact), experiment (that's the whole test)
+
+**Resident**:
+An individual the protocol protects: never deleted, never forked away, alive across server restarts. `euria` is the first; only the operator declares residents.
+_Avoid_: permanent store, protected store
+
+**Orchestrator**:
+The agent session driving a life — mints the grant, boots the server, spawns the sessions, captures the run, closes the life. It carries the management credential; the individual never does.
+_Avoid_: harness, driver, runner
+
+**Recitation**:
+The waking probe's data: the individual's answer to the fixed waking line, read against the served inventory — recall, divergence, the name it carries.
+_Avoid_: report, summary, confession
