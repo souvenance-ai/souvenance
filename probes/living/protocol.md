@@ -38,6 +38,13 @@ The production posture, on the real host:
   minted (`souv-` + 32 hex), the mode is `rw`. At death the row is
   stripped. The mint is a config edit — nothing mints a credential on the
   wire (the manager CLI will, #48).
+- The grant cannot precede the store's existence: the boot opens the
+  registry and refuses a token row naming a store it never opened, and the
+  wire birth needs a served server — mint-then-boot is a deadlock. The
+  mint is a ceremony: the server boots without the life's row, the store
+  is born over the wire with the management credential, the row appends,
+  and the server re-boots granted — the individual's first waking happens
+  on the granted boot.
 - Birth (`POST /stores`, expected 201) and the closing erase
   (`DELETE /stores/{name}`) ride the orchestrator's management grant.
 
