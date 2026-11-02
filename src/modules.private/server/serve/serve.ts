@@ -66,8 +66,19 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
   // The opt-in request log (#69): the file opens in append mode at boot —
   // a restart never truncates the history — and the banner names it, so
   // the operator can tail before the first request. Off: nothing here.
+  // An unopenable path refuses the boot with the teaching — the same
+  // fail-fast voice as every other exposure — and releases the claims it
+  // opened, like the unknown-grant refusal beside it.
   if (options.logRequests !== undefined) {
-    appendFileSync(options.logRequests, '', 'utf8');
+    try {
+      appendFileSync(options.logRequests, '', 'utf8');
+    } catch (err) {
+      registry.close();
+      throw new Error(
+        `refusing to start — cannot open the request log at ${options.logRequests}: ` +
+          `${(err as Error).message}`,
+      );
+    }
   }
   const app = createApp({
     registry,

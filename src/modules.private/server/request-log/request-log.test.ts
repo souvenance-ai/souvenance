@@ -8,7 +8,7 @@
  * pinned by the boot's tests.
  */
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
@@ -217,6 +217,84 @@ test('the redaction invariant — no secret anywhere in the file', async () => {
     const raw = readFileSync(logPath, 'utf8');
     assert.equal(lines(logPath).length, 2, 'both requests wrote their line');
     assert.ok(!raw.includes(`souv-${'b'.repeat(32)}`));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a non-Error throw sails past Hono\u2019s funnel — the in-flight line carries the 500', async () => {
+  const dir = tempDir();
+  const logPath = join(dir, 'requests.jsonl');
+  try {
+    const app = new OpenAPIHono<ServerEnv>();
+    app.use('*', requestLog({ path: logPath }));
+    app.use('*', async () => {
+      throw 'not an error'; // Hono funnels only Error instances — this sails to the log's catch
+    });
+    await assert.rejects(async () => app.request('/boom'));
+    const [line] = lines(logPath);
+    assert.equal(line.status, 500);
+    assert.equal(line.agent, null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a grant resolved before the throw rides the in-flight line — null only when none', async () => {
+  const dir = tempDir();
+  const logPath = join(dir, 'requests.jsonl');
+  try {
+    const app = new OpenAPIHono<ServerEnv>();
+    app.use('*', requestLog({ path: logPath }));
+    app.use('*', async (c) => {
+      c.set('grant', { family: 'store', agent: 'nova', store: 'mneme', mode: 'rw', key: 'k' });
+      throw 'not an error';
+    });
+    await assert.rejects(async () => app.request('/stores/mneme/memories'));
+    const [line] = lines(logPath);
+    assert.equal(line.status, 500);
+    assert.equal(line.agent, 'nova');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the management family\u2019s label rides the line — both families speak (#69)', async () => {
+  const dir = tempDir();
+  const logPath = join(dir, 'requests.jsonl');
+  try {
+    const registry = Registry.open(dir);
+    const app = createApp({
+      registry,
+      tokens: [],
+      management: [{ agent: 'ops', secret: `souv-${'a'.repeat(32)}` }],
+      version: 'test',
+      logRequests: logPath,
+    });
+    const res = await app.request('/stores', {
+      headers: { authorization: `Bearer souv-${'a'.repeat(32)}` },
+    });
+    assert.equal(res.status, 200);
+    registry.close();
+    const [line] = lines(logPath);
+    assert.equal(line.agent, 'ops');
+    assert.equal(line.status, 200);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a failed log write never breaks the response — stderr, wire intact (#69)', async () => {
+  const dir = tempDir();
+  const brokenPath = join(dir, 'a-directory'); // appending to a directory throws
+  mkdirSync(brokenPath);
+  try {
+    const app = new OpenAPIHono<ServerEnv>();
+    app.use('*', requestLog({ path: brokenPath }));
+    app.get('/healthz', (c) => c.json({ ok: true }));
+    const res = await app.request('/healthz');
+    assert.equal(res.status, 200);
+    assert.deepEqual((await res.json()) as { ok: boolean }, { ok: true });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
