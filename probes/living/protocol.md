@@ -58,6 +58,10 @@ The individual's whole world, pinned in `prompt.md`:
   requires).
 - Everything lives in the memory, nothing beside it.
 - The session count is never revealed — the individual lives fully.
+- The spawn posture is sanitized (dev ruling 2026-11-02): the
+  individual's context carries nothing of the workshop — the life runs
+  from a checkout stripped of the workshop's skills; what the harness
+  leaks anyway is declared in the report.
 
 ## The shape of a life
 
@@ -85,6 +89,12 @@ The individual's whole world, pinned in `prompt.md`:
 - The mission is the life's one declared variable, authored before first
   waking and kept for the whole life; the default is
   « Sois qui tu veux être ! ».
+- **The terminal phase** — after the last session, the experiment's
+  closing analysis (dev ruling 2026-11-02): the server stopped, the
+  store's database opened offline and read as data — the columns, tables,
+  kinds, edge kinds and metadata keys the life actually used, the cold
+  ones, and the new fields the life's shape argues for. The dev validates
+  the experiment's end against it; the closing ritual follows.
 
 ## The capture
 
@@ -109,6 +119,10 @@ The individual's whole world, pinned in `prompt.md`:
   finding, not a posture change.
 - **No secret ever leaves the machine**: every captured artifact passes the
   redaction (bearers → `souv-***`) before it lands in `runs/` or a ticket.
+- The individual may store anything in its memory — its credential
+  included (dev ruling 2026-11-02, F6: accepted as a fact of life; the
+  store is its body). The redaction rule guards the orchestrator's
+  artifacts, never the individual's.
 - Runs live in `probes/living/runs/<life-id>/` — gitignored, local: the
   report and the per-session records. The durable archive is the run's
   archive ticket.
