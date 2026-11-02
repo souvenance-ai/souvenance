@@ -25,6 +25,8 @@ import { registerWriteRoutes } from './writes/writes.ts';
 import { MAX_BODY_BYTES } from './limits/limits.ts';
 import type { Registry } from './registry/registry.ts';
 import { HTTPException } from 'hono/http-exception';
+import { errorStatus } from './error-status/error-status.ts';
+import { requestLog } from './request-log/request-log.ts';
 import {
   CheckinReportSchema,
   CheckoutReportSchema,
@@ -33,19 +35,12 @@ import {
   SearchHitSchema,
 } from './wire/wire.ts';
 
-/** The status a StoreError code maps to; read_only is the manager's case, never served. */
-const STATUS_BY_CODE: Record<StoreError['code'], 400 | 404 | 409 | 503 | 500> = {
-  invalid: 400,
-  not_found: 404,
-  conflict: 409,
-  busy: 503,
-  read_only: 500,
-};
-
 export interface ServerDeps extends CredentialFamilies {
   readonly registry: Registry;
   /** The package version the OpenAPI document carries. */
   readonly version?: string;
+  /** The opt-in request log's JSONL path (#69); absent = the log is off. */
+  readonly logRequests?: string;
 }
 
 export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
@@ -63,6 +58,13 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
       return;
     },
   });
+
+  // The opt-in request log (#69): mounted before everything — the public
+  // doors, the refusals, the 404 — one JSONL line per request after the
+  // response settles. Off = never mounted: byte-identical behavior.
+  if (deps.logRequests !== undefined) {
+    app.use('*', requestLog({ path: deps.logRequests }));
+  }
 
   // The public doors — no data, only shape and liveness (Q7). The living
   // test burned two agent lives knocking on mute doors (#62): the root
@@ -115,7 +117,7 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
       return c.json({ error: err.message }, err.status as 400 | 403 | 404);
     }
     if (!(err instanceof StoreError)) return internal(err, c);
-    const status = STATUS_BY_CODE[err.code];
+    const status = errorStatus(err);
     // busy is neither the client's mistake nor an internal: the store is
     // alive and the request was honest — the refused answer is opaque all
     // the same (#19: 500/503 do not disclose), the engine's raw message

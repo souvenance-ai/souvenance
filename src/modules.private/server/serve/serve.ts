@@ -12,6 +12,7 @@
  * first store.
  */
 import { serve, type ServerType } from '@hono/node-server';
+import { appendFileSync } from 'node:fs';
 import type { CredentialFamilies } from '../../config/config.ts';
 import { Registry } from '../registry/registry.ts';
 import { createApp } from '../server.ts';
@@ -31,6 +32,8 @@ export interface ServeOptions extends CredentialFamilies {
   readonly storesDir: string;
   /** The package version, surfaced in the OpenAPI document. */
   readonly version: string;
+  /** The opt-in request log's JSONL path (#69); absent = the log is off. */
+  readonly logRequests?: string;
 }
 
 export interface RunningServer {
@@ -60,11 +63,18 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
         `create the store(s) or fix the token rows`,
     );
   }
+  // The opt-in request log (#69): the file opens in append mode at boot —
+  // a restart never truncates the history — and the banner names it, so
+  // the operator can tail before the first request. Off: nothing here.
+  if (options.logRequests !== undefined) {
+    appendFileSync(options.logRequests, '', 'utf8');
+  }
   const app = createApp({
     registry,
     tokens: options.tokens,
     management: options.management,
     version: options.version,
+    logRequests: options.logRequests,
   });
   // The listening is awaited: the boot resolves only once the bound port
   // is known (the smoke test asks for 0 and reads the real one).
@@ -95,7 +105,9 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
   process.stderr.write(
     `souvenance · ${registry.names().length} store(s) · ` +
       `${options.tokens.length} grant(s) · ${options.management.length} management · ` +
-      `http://${info.address}:${info.port}\n`,
+      `http://${info.address}:${info.port}` +
+      (options.logRequests !== undefined ? ` · requests → ${options.logRequests}` : '') +
+      `\n`,
   );
 
   return {

@@ -7,7 +7,7 @@
  * resolution (the smoke test's contract) and the banner's two counts.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
@@ -104,6 +104,61 @@ test('a grant naming an open store boots and resolves the bound port', async () 
     seed.close();
     const running = await startServer(options(dir, 'atlas'));
     assert.ok(running.port > 0);
+    await running.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the request log\u2019s boot opens the file in append and the banner names it (#69)', async () => {
+  const dir = tempDir();
+  const logPath = join(dir, 'requests.jsonl');
+  writeFileSync(logPath, 'a previous boot\u2019s last line\n', 'utf8');
+  const lines: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: unknown) => {
+    lines.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    const seed = Registry.open(dir);
+    seed.create('atlas');
+    seed.close();
+    const running = await startServer({ ...options(dir, 'atlas'), logRequests: logPath });
+    const banner = lines.find((line) => line.includes('grant(s)')) ?? '';
+    assert.ok(banner.includes(`requests → ${logPath}`));
+    await running.close();
+    // The append semantics: a restart never truncates the history — the
+    // previous boot's last line survives this one.
+    assert.match(readFileSync(logPath, 'utf8'), /a previous boot\u2019s last line/);
+  } finally {
+    process.stderr.write = original;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the request log off: the boot creates nothing and the banner stays bare (#69)', async () => {
+  const dir = tempDir();
+  const logPath = join(dir, 'requests.jsonl');
+  try {
+    const seed = Registry.open(dir);
+    seed.create('atlas');
+    seed.close();
+    const captured: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown) => {
+      captured.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    let running;
+    try {
+      running = await startServer(options(dir, 'atlas'));
+    } finally {
+      process.stderr.write = original;
+    }
+    const banner = captured.find((line) => line.includes('grant(s)')) ?? '';
+    assert.ok(!banner.includes('requests'), 'the off banner names no log');
+    assert.ok(!existsSync(logPath), 'the off boot creates no file');
     await running.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -70,6 +70,8 @@ export interface Config extends CredentialFamilies {
   readonly port: number;
   readonly host: string;
   readonly storesDir: string;
+  /** The opt-in request log's JSONL path (#69); absent = the log is off. */
+  readonly logRequests?: string;
 }
 
 /** The refusal that maps to the CLI's exit 78 (#17): bad file, bad shape. */
@@ -96,6 +98,7 @@ const configSchema = z.strictObject({
   port: z.number().int().min(1).max(65_535).optional(),
   host: z.string().min(1).optional(),
   storesDir: z.string().min(1).optional(),
+  logRequests: z.string().min(1).optional(),
   tokens: z.array(storeGrantSchema).optional(),
   management: z.array(managementGrantSchema).optional(),
 });
@@ -153,6 +156,8 @@ export function parseConfig(raw: unknown): Config {
     port: parsed.data.port ?? DEFAULT_PORT,
     host: parsed.data.host ?? DEFAULT_HOST,
     storesDir: expandHome(parsed.data.storesDir ?? defaultStoresDir()),
+    logRequests:
+      parsed.data.logRequests === undefined ? undefined : expandHome(parsed.data.logRequests),
     tokens,
     management,
   };
