@@ -29,12 +29,17 @@ test('parseConfig keeps the given values and expands a leading ~', () => {
     port: 8080,
     host: '0.0.0.0',
     storesDir: '~/memory-stores',
+    logRequests: '~/requests.jsonl',
     tokens: [{ agent: 'atlas', secret: SECRET, store: 'main', mode: 'rw' }],
     management: [{ agent: 'ops', secret: MANAGEMENT_SECRET }],
   });
   assert.equal(config.port, 8080);
   assert.equal(config.host, '0.0.0.0');
   assert.ok(!config.storesDir.startsWith('~'));
+  // The request log's path rides the same one convenience (#69).
+  const logRequests = config.logRequests ?? '';
+  assert.ok(!logRequests.startsWith('~'));
+  assert.ok(logRequests.endsWith('requests.jsonl'));
   assert.equal(config.tokens.length, 1);
   assert.deepEqual(config.tokens[0], {
     agent: 'atlas',
@@ -47,6 +52,10 @@ test('parseConfig keeps the given values and expands a leading ~', () => {
 
 test('an unknown key refuses — a typo must never silently mean nothing', () => {
   assert.throws(() => parseConfig({ token: [] }), ConfigError);
+});
+
+test('a non-string logRequests refuses — the path is not a boolean (#69)', () => {
+  assert.throws(() => parseConfig({ logRequests: true }), ConfigError);
 });
 
 test('a store grant carrying the retired manage flag refuses — the cap is a family now (#63)', () => {
