@@ -132,11 +132,12 @@ test('checkout serves the verdict — green on a clean store, findings on debts'
     const greenReport = (await green.json()) as {
       healthy: boolean;
       findings: unknown[];
-      summary: { issues: number };
+      summary: { issues: number; edges: number };
     };
     assert.equal(greenReport.healthy, true);
     assert.deepEqual(greenReport.findings, []);
     assert.equal(greenReport.summary.issues, 0);
+    assert.equal(greenReport.summary.edges, 0);
 
     // Two isolated living memories: the consolidation debt (gated at >= 2).
     atlas.store('island one', { kind: 'note' });
@@ -145,10 +146,11 @@ test('checkout serves the verdict — green on a clean store, findings on debts'
     const redReport = (await red.json()) as {
       healthy: boolean;
       findings: { check: string; detail: string; hint: string }[];
-      summary: { checks: number; issues: number };
+      summary: { checks: number; issues: number; edges: number };
     };
     assert.equal(redReport.healthy, false);
     assert.ok(redReport.findings.some((finding) => finding.check === 'isolated_living'));
+    assert.equal(redReport.summary.edges, 0);
     assert.ok(
       redReport.findings.every((finding) => finding.hint.length > 0),
       'every finding teaches the pay-off',

@@ -60,6 +60,7 @@ test('checkout: a healthy pair has zero findings and a coherent summary', () => 
     assert.equal(report.summary.issues, 0);
     assert.equal(report.summary.memories, 2);
     assert.equal(report.summary.hot_memories, 1);
+    assert.equal(report.summary.edges, 1);
   } finally {
     cleanup();
   }
@@ -73,6 +74,7 @@ test('checkout: an empty fresh store is green — nothing to serve, nothing owed
     assert.deepEqual(report.findings, []);
     assert.equal(report.summary.memories, 0);
     assert.equal(report.summary.hot_memories, 0);
+    assert.equal(report.summary.edges, 0);
   } finally {
     cleanup();
   }
@@ -144,6 +146,7 @@ test('checkout: isolated_living — islands owe consolidation once others exist'
     report = store.checkout();
     assert.equal(report.healthy, true);
     assert.deepEqual(report.findings, []);
+    assert.equal(report.summary.edges, 2);
   } finally {
     cleanup();
   }

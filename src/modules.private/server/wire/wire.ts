@@ -144,6 +144,7 @@ export const CheckoutReportSchema: z.ZodType<CheckoutReport> = z.lazy(() =>
       issues: z.number(),
       memories: z.number(),
       hot_memories: z.number(),
+      edges: z.number(),
     }),
   }),
 );
