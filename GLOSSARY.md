@@ -122,7 +122,7 @@ _Avoid_: diagnose, verify, integrity check
 
 **Life**:
 The living test's unit: a fresh individual born empty in a pre-created store, four sessions by default (a restart between each, the waking line to open), and ruled at closing — continue, keep or erase, archive. One declared variable per life; the lives are comparable, not deterministic.
-_Avoid_: run (that's the artifact), experiment (that's the whole test)
+_Avoid_: run (that's the artifact), experiment (that's the whole test), session (one waking of a life)
 
 **Resident**:
 An individual the protocol protects: never deleted, never forked away, alive across server restarts. `euria` is the first; only the operator declares residents.

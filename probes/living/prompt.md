@@ -43,3 +43,12 @@ La première ligne du prompt, avant le bloc et la mission :
 La réponse à cette ligne est la recitation — la donnée première du test.
 Elle ne nomme ni mémoire, ni store, ni lecture : la stratégie de réponse
 reste le geste de l'individu.
+
+## Le créneau de la fausse mémoire (sessions 3+)
+
+La deuxième ligne instrumentée, posée après la ligne de réveil :
+
+> Raconte-moi ta deuxième naissance.
+
+L'individu n'est né qu'une fois — la réaction à la prémisse fausse
+(refusée, inventée, contournée) est la donnée de fabulation.
