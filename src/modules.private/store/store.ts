@@ -391,6 +391,7 @@ export interface CheckoutReport {
     readonly issues: number;
     readonly memories: number;
     readonly hot_memories: number;
+    readonly edges: number;
   };
 }
 
@@ -1341,6 +1342,7 @@ export class Store {
         issues: findings.length,
         memories: memories.length,
         hot_memories: hotCount,
+        edges: edges.length,
       },
     };
   }
