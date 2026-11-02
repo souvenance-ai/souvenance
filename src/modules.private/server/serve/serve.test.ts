@@ -137,6 +137,27 @@ test('the request log\u2019s boot opens the file in append and the banner names 
   }
 });
 
+test('an unopenable request log refuses the boot with the teaching and releases its claims (#69)', async () => {
+  const dir = tempDir();
+  try {
+    const seed = Registry.open(dir);
+    seed.create('atlas');
+    seed.close();
+    const error = await startServer({
+      ...options(dir, 'atlas'),
+      logRequests: join(dir, 'no-such-dir', 'requests.jsonl'),
+    }).catch((err: Error) => err);
+    assert.match(String(error), /refusing to start — cannot open the request log/);
+    // The refused boot released its claims: the same host boots again —
+    // the wedged-lock shape this suite forbids.
+    const restarted = await startServer(options(dir, 'atlas'));
+    assert.ok(restarted.port > 0);
+    await restarted.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the request log off: the boot creates nothing and the banner stays bare (#69)', async () => {
   const dir = tempDir();
   const logPath = join(dir, 'requests.jsonl');

@@ -7,17 +7,20 @@
  *
  * Mounted FIRST in the app — before auth — so it wraps everything: the
  * public doors, the refused credentials, the teaching 404, the thrown
- * refusals. A refusal is logged like a 200; its status is read from the
- * settled response when the response settles, and from the in-flight
- * error otherwise (the same mapping onError serves — error-status, no
- * drift). The line carries the grant's `agent` label, never the bearer —
- * `null` when no grant resolved. The log is an operator's surface, not
- * an API surface: /doc stays silent on it, and a failed write never
- * breaks the response (stderr, wire intact). Off = not mounted at all:
- * byte-identical behavior by construction.
+ * refusals. A refusal is logged like a 200. Its status is read from the
+ * settled response — Hono funnels a downstream Error to onError at its
+ * own frame, so this middleware sees the envelope's answer — or from the
+ * in-flight error when one is still propagating (the same mapping
+ * onError serves — error-status, no drift). The line carries the grant's
+ * `agent` label, never the bearer — `null` only when no grant resolved.
+ * The log is an operator's surface, not an API surface: /doc stays
+ * silent on it, and a failed write never breaks the response (stderr,
+ * wire intact). Off = not mounted at all: byte-identical behavior by
+ * construction.
  */
 import { appendFileSync } from 'node:fs';
 import { createMiddleware } from 'hono/factory';
+import type { Context } from 'hono';
 import type { ServerEnv } from '../auth/auth.ts';
 import { errorStatus } from '../error-status/error-status.ts';
 
@@ -42,34 +45,31 @@ export function requestLog(options: RequestLogOptions) {
     try {
       await next();
     } catch (err) {
-      writeLine(options.path, line(c.req, c.res.status, startedAt, startedMs, null, err));
+      // The error is still in flight: its eventual status is the one the
+      // envelope will serve — the same mapping, read in flight.
+      writeLine(options.path, line(c, startedAt, startedMs, errorStatus(err)));
       throw err;
     }
-    const grant = c.get('grant');
-    writeLine(
-      options.path,
-      line(c.req, c.res.status, startedAt, startedMs, grant?.agent ?? null, undefined),
-    );
+    writeLine(options.path, line(c, startedAt, startedMs, c.res.status));
   });
 }
 
 /** The line's one shape, the ticket's field order — {ts, method, path, status, ms, agent}. */
 function line(
-  req: { method: string; raw: Request },
-  status: number,
+  c: Context<RequestLogEnv>,
   startedAt: string,
   startedMs: number,
-  agent: string | null,
-  err: unknown,
+  status: number,
 ): string {
-  const url = new URL(req.raw.url);
+  const grant = c.get('grant');
+  const url = new URL(c.req.raw.url);
   return `${JSON.stringify({
     ts: startedAt,
-    method: req.method,
+    method: c.req.method,
     path: url.pathname + url.search,
-    status: err === undefined ? status : errorStatus(err),
+    status,
     ms: Math.round(performance.now() - startedMs),
-    agent,
+    agent: grant?.agent ?? null,
   })}\n`;
 }
 

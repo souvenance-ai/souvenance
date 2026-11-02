@@ -12,7 +12,7 @@ program
     '--log-requests <path>',
     'append one JSONL line per request to <path> (opt-in request log)',
   )
-  .action((options: { port?: number; logRequests?: string }): Promise<void> => {
+  .action((options: { readonly port?: number; readonly logRequests?: string }): Promise<void> => {
     return serve({ port: options.port, logRequests: options.logRequests });
   });
 

@@ -112,9 +112,10 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   };
   app.onError((err, c) => {
     // Hono's own HTTP exceptions — the data routes' reach refusals — ride
-    // the envelope with their status.
+    // the envelope with their status (read through the one mapping the
+    // request log reads in flight, #69 — no drift).
     if (err instanceof HTTPException) {
-      return c.json({ error: err.message }, err.status as 400 | 403 | 404);
+      return c.json({ error: err.message }, errorStatus(err));
     }
     if (!(err instanceof StoreError)) return internal(err, c);
     const status = errorStatus(err);
