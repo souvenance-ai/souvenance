@@ -17,7 +17,8 @@ the contract, this skill is the hands. HITL at the closing ritual only.
 ## 1. Mint
 
 - Life id: `life-<YYYYMMDD>-<slug>` — the store name, the runs directory
-  (`probes/living/runs/<life-id>/`), the grant row's identity.
+  (`probes/living/runs/<life-id>/`), the grant row's identity. It obeys the
+  store name's grammar — 32 characters at most; the slug truncates.
 - Mint the secret (`souv-` + 32 hex), append the row to the config's
   `tokens[]` (`agent` and `store` = the life id, `mode: "rw"`) with a jq
   edit that never prints secrets. Read the config back by shape only (row
