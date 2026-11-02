@@ -98,7 +98,7 @@ const configSchema = z.strictObject({
   port: z.number().int().min(1).max(65_535).optional(),
   host: z.string().min(1).optional(),
   storesDir: z.string().min(1).optional(),
-  logRequests: z.string().min(1).optional(),
+  logRequests: z.union([z.boolean(), z.string().min(1)]).optional(),
   tokens: z.array(storeGrantSchema).optional(),
   management: z.array(managementGrantSchema).optional(),
 });
@@ -111,6 +111,11 @@ export function defaultStoresDir(): string {
   return join(homedir(), '.souvenance', 'stores');
 }
 
+/** The request log's default path (#69) — the boolean shorthand's resolved home. */
+export function defaultLogPath(): string {
+  return join(homedir(), '.souvenance', 'logs.jsonl');
+}
+
 /**
  * Expands a leading `~` — the one convenience the file format allows;
  * everything else stays literal.
@@ -119,6 +124,18 @@ function expandHome(path: string): string {
   if (path === '~') return homedir();
   if (path.startsWith('~/')) return join(homedir(), path.slice(2));
   return path;
+}
+
+/**
+ * The one grammar the two surfaces share (#69): the config key and the
+ * CLI flag both carry `true` (the default path), `false` (the explicit
+ * off — same as absent), or a path (`~` expanded). The boolean dies
+ * here — every consumer downstream reads a path or nothing.
+ */
+export function resolveLogRequests(value: string | boolean | undefined): string | undefined {
+  if (value === undefined || value === false) return undefined;
+  if (value === true) return defaultLogPath();
+  return expandHome(value);
 }
 
 /**
@@ -156,8 +173,7 @@ export function parseConfig(raw: unknown): Config {
     port: parsed.data.port ?? DEFAULT_PORT,
     host: parsed.data.host ?? DEFAULT_HOST,
     storesDir: expandHome(parsed.data.storesDir ?? defaultStoresDir()),
-    logRequests:
-      parsed.data.logRequests === undefined ? undefined : expandHome(parsed.data.logRequests),
+    logRequests: resolveLogRequests(parsed.data.logRequests),
     tokens,
     management,
   };
