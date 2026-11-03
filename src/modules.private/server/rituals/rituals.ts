@@ -10,15 +10,20 @@ import type { OpenAPIHono } from '@hono/zod-openapi';
 import { reachedStore } from '../reached-store/reached-store.ts';
 import type { ServerEnv } from '../auth/auth.ts';
 import type { Registry } from '../registry/registry.ts';
+import type { Skills } from '../skills/skills.ts';
 import {
-  CheckinReportSchema,
   CheckoutReportSchema,
+  ServedCheckinReportSchema,
   checkinLimitShape,
   refusal,
   unknownStoreRefusal,
 } from '../wire/wire.ts';
 
-export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
+export function registerRitualRoutes(
+  app: OpenAPIHono<ServerEnv>,
+  registry: Registry,
+  skills: Skills,
+): void {
   const checkin = createRoute({
     method: 'get',
     path: '/checkin',
@@ -28,8 +33,9 @@ export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Regi
     },
     responses: {
       200: {
-        description: 'the hot block (newest first) and the store stats — the session opens here',
-        content: { 'application/json': { schema: CheckinReportSchema } },
+        description:
+          'the hot block (newest first) and the store stats — the session opens here, the waking voice beside the data (#82)',
+        content: { 'application/json': { schema: ServedCheckinReportSchema } },
       },
       400: refusal('the limit is not ours'),
       404: unknownStoreRefusal(),
@@ -38,7 +44,12 @@ export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Regi
   app.openapi(checkin, (c) => {
     const store = reachedStore(c, registry);
     const { limit } = c.req.valid('query');
-    return c.json(store.checkin({ limit }), 200);
+    const report = store.checkin({ limit });
+    // The wire's voice (#82): the served set rides the checkin — the
+    // continuity line on a living store, the unborn line overriding on
+    // an empty one. The code decides whether; the files decided what.
+    const guidance = skills.guidanceFor('checkin', { storeEmpty: report.stats.memories === 0 });
+    return c.json(guidance === undefined ? report : { ...report, guidance }, 200);
   });
 
   const checkout = createRoute({

@@ -23,6 +23,8 @@ import { registerManagementRoutes } from './management/management.ts';
 import { registerReadRoutes } from './reads/reads.ts';
 import { registerRitualRoutes } from './rituals/rituals.ts';
 import { registerWriteRoutes } from './writes/writes.ts';
+import { registerSkillRoutes } from './skills-routes/skills-routes.ts';
+import { START_SKILL_NAME, Skills } from './skills/skills.ts';
 import { MAX_BODY_BYTES } from './limits/limits.ts';
 import type { Registry } from './registry/registry.ts';
 import { HTTPException } from 'hono/http-exception';
@@ -42,6 +44,8 @@ export interface ServerDeps extends CredentialFamilies {
   readonly version?: string;
   /** The opt-in request log's JSONL path (#69); absent = the log is off. */
   readonly logRequests?: string;
+  /** The skills directory override (#82); absent = the package's shipped skills. */
+  readonly skillsDir?: string;
 }
 
 export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
@@ -72,9 +76,10 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   // pointer answers the bare-host knock, the conventional /openapi.json
   // answers the reflex, and /doc stays the canonical document.
   app.get('/healthz', (c) => c.json({ ok: true }));
+  const version = deps.version ?? '0.2.0';
   const docOptions = {
     openapi: '3.0.0',
-    info: { title: 'souvenance', version: deps.version ?? '0.2.0' },
+    info: { title: 'souvenance', version },
   };
   app.doc('/doc', docOptions);
   app.doc('/openapi.json', docOptions);
@@ -82,10 +87,13 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   app.get('/', (c) =>
     c.json({
       name: 'souvenance',
-      version: deps.version ?? '0.2.0',
+      version,
       healthz: '/healthz',
       doc: '/doc',
       docs: '/docs',
+      skills: '/skills',
+      start: `/skills/${START_SKILL_NAME}`,
+      waking: 'you are waking an individual — this store is your memory, not an API',
     }),
   );
 
@@ -132,8 +140,15 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
     return c.json({ error: err.message }, status);
   });
   // The 404 teaches: the envelope keeps its one shape, the message points
-  // the way in (#62 — a mute 404 nearly cost a session its life).
-  app.notFound((c) => c.json({ error: 'no such route — the API document serves at /doc' }, 404));
+  // the way in (#62 — a mute 404 nearly cost a session its life) — and
+  // now it teaches both families: the contract at /doc, the orientation
+  // at /skills (#82).
+  app.notFound((c) =>
+    c.json(
+      { error: 'no such route — the API document serves at /doc, orientation at /skills' },
+      404,
+    ),
+  );
 
   // The guarded namespaces (#74): management under /stores/* — names are
   // its subject — and the data routes at the root, where the grant IS
@@ -163,10 +178,18 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   app.use('/stores/:name', requireManagement());
   app.use('/stores/:name/fork', requireManagement());
 
+  // The skills surface (#82): the directory is the truth, like the
+  // registry — boot validates every skill or the boot fails, and half an
+  // orientation is a lie the wire would serve as truth. The doors are
+  // public: a skill teaches the grammar to whoever asks; it reaches no
+  // individual's data.
+  const skills = Skills.open(deps.skillsDir);
+
   registerManagementRoutes(app, deps.registry);
   registerReadRoutes(app, deps.registry);
-  registerRitualRoutes(app, deps.registry);
+  registerRitualRoutes(app, deps.registry, skills);
   registerWriteRoutes(app, deps.registry);
+  registerSkillRoutes(app, skills, version);
 
   return app;
 }

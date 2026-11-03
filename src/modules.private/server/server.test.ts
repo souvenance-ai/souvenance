@@ -71,6 +71,9 @@ test('the discovery door: the root points, the alias serves, the miss teaches (#
       healthz: '/healthz',
       doc: '/doc',
       docs: '/docs',
+      skills: '/skills',
+      start: '/skills/waking',
+      waking: 'you are waking an individual — this store is your memory, not an API',
     });
     const alias = await app.request('/openapi.json');
     assert.equal(alias.status, 200);
@@ -90,7 +93,7 @@ test('unknown routes answer the JSON envelope — never a bare-text 404', async 
     const res = await app.request('/nope');
     assert.equal(res.status, 404);
     assert.deepEqual((await res.json()) as { error: string }, {
-      error: 'no such route — the API document serves at /doc',
+      error: 'no such route — the API document serves at /doc, orientation at /skills',
     });
     registry.close();
   } finally {
@@ -106,12 +109,22 @@ test('every declared route is guarded — a bare request refuses 401, the doors 
     const document = (await (await app.request('/doc')).json()) as {
       paths: Record<string, unknown>;
     };
-    const doors = new Set(['/', '/healthz', '/doc', '/docs', '/openapi.json']);
+    const doors = new Set([
+      '/',
+      '/healthz',
+      '/doc',
+      '/docs',
+      '/openapi.json',
+      '/skills',
+      '/skills/{name}',
+    ]);
     for (const route of Object.keys(document.paths)) {
       // The route's own params substituted with grammar-honest dummies:
-      // the guard answers before any route logic can speak.
+      // the guard answers before any route logic can speak. The skills
+      // item is the one door carrying a param — it probes the start
+      // skill, the one name every boot must serve (#82).
       const probe = route
-        .replace('{name}', 'probe')
+        .replace('{name}', route === '/skills/{name}' ? 'waking' : 'probe')
         .replace('{id}', '00000000-0000-4000-8000-000000000000');
       if (doors.has(route)) {
         const open = await app.request(probe);

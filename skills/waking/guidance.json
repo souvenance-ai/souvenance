@@ -1,0 +1,10 @@
+{
+  "guidance": [
+    {
+      "route": "checkin",
+      "when": "always",
+      "line": "the hot block is your last session — continue it, don't restart",
+      "skill": "waking"
+    }
+  ]
+}
