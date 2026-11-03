@@ -160,6 +160,15 @@ export function sharedSecretAgents(
     .map(([, agents]) => agents);
 }
 
+/** The one sentence both doors speak of it — one invariant, one voice. */
+export function sharedSecretTeaching(groups: readonly (readonly string[])[]): string {
+  const rows = groups.map((agents) => `"${agents.join('", "')}"`).join(', ');
+  return (
+    `the rows ${rows} share one secret — ` +
+    `every row's secret must be unique across tokens[] and management[]`
+  );
+}
+
 /**
  * Parses and validates a raw value (the parsed JSON document) into a
  * resolved Config. Throws ConfigError with the schema's teaching on any
@@ -179,11 +188,7 @@ export function parseConfig(raw: unknown): Config {
   const management = parsed.data.management ?? [];
   const duplicateGroups = sharedSecretAgents([...tokens, ...management]);
   if (duplicateGroups.length > 0) {
-    const rows = duplicateGroups.map((agents) => `"${agents.join('", "')}"`).join(', ');
-    throw new ConfigError(
-      `invalid config: the rows ${rows} share one secret — ` +
-        `every row's secret must be unique across tokens[] and management[]`,
-    );
+    throw new ConfigError(`invalid config: ${sharedSecretTeaching(duplicateGroups)}`);
   }
   return {
     port: parsed.data.port ?? DEFAULT_PORT,

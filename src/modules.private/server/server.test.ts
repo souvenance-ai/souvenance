@@ -98,6 +98,35 @@ test('unknown routes answer the JSON envelope — never a bare-text 404', async 
   }
 });
 
+test('every declared route is guarded — a bare request refuses 401, the doors stay open (#74)', async () => {
+  const dir = tempDir();
+  try {
+    const registry = Registry.open(dir);
+    const app = createApp({ registry, tokens: [], management: [], version: 'test' });
+    const document = (await (await app.request('/doc')).json()) as {
+      paths: Record<string, unknown>;
+    };
+    const doors = new Set(['/', '/healthz', '/doc', '/docs', '/openapi.json']);
+    for (const route of Object.keys(document.paths)) {
+      // The route's own params substituted with grammar-honest dummies:
+      // the guard answers before any route logic can speak.
+      const probe = route
+        .replace('{name}', 'probe')
+        .replace('{id}', '00000000-0000-4000-8000-000000000000');
+      if (doors.has(route)) {
+        const open = await app.request(probe);
+        assert.equal(open.status, 200, `${probe} is a public door — it must stay bare`);
+      } else {
+        const bare = await app.request(probe);
+        assert.equal(bare.status, 401, `${probe} serves without a credential`);
+      }
+    }
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('an unknown store under the guarded namespace is a 404 once authenticated', async () => {
   const dir = tempDir();
   try {

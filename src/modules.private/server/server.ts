@@ -112,9 +112,9 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
     return c.json({ error: 'internal error' }, 500);
   };
   app.onError((err, c) => {
-    // Hono's own HTTP exceptions — the data routes' reach refusals — ride
-    // the envelope with their status (read through the one mapping the
-    // request log reads in flight, #69 — no drift).
+    // Hono's own HTTP exceptions — the data routes' family and mode
+    // refusals — ride the envelope with their status (read through the one
+    // mapping the request log reads in flight, #69 — no drift).
     if (err instanceof HTTPException) {
       return c.json({ error: err.message }, errorStatus(err));
     }
@@ -140,6 +140,9 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   // the address. Auth first, then the rate limit (it reads the grant),
   // then the cap. The public doors (/, /healthz, /doc, /docs,
   // /openapi.json) stay outside: no token, no bucket, no cap.
+  // `/memories/*` covers the bare `/memories` too (Hono's star matches
+  // the namespace's root) — and every declared route's guard coverage is
+  // pinned by the bare-401 sweep in server.test.ts.
   const guardedPaths = ['/stores/*', '/memories/*', '/search', '/merge', '/checkin', '/checkout'];
   const bearer = auth(deps);
   const limiter = rateLimit();
