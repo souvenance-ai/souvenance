@@ -14,8 +14,10 @@ local process the host's whole memory estate. It survives exactly once.
 
 - **Bearer-pure matrix.** Absent header, non-Bearer scheme, or unknown secret → 401,
   whatever the socket's peer; the peer is never read again. 403 is strictly
-  authorization: wrong family, foreign store, read-only writing — each teaching, each
-  refusing before existence is spoken.
+  authorization: wrong family, read-only writing — each teaching, each
+  refusing before existence is spoken. (The third refusal this ADR listed, the
+  foreign-store 403, retired with ADR 0007: the grant is the address, no data
+  request can name another store.)
 - **Two credential families, authored in the config.** A _store grant_ (`tokens[]`:
   one agent = one store, one mode `ro`/`rw`) serves the data surface. A _management
   grant_ (`management[]`: one agent) serves the host's surface — create, list,

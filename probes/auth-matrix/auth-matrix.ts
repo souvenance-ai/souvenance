@@ -33,7 +33,7 @@ const cases: readonly ProbeCase[] = [
     id: 'C01',
     name: 'the loopback bypass is dead — a bare request refuses 401',
     run: async (b) => {
-      const written = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const written = await req(b.server!.url, 'POST', '/memories', {
         body: { content: `freestyle row ${Date.now()}`, kind: 'note' },
       });
       if (written.status !== 401)
@@ -51,7 +51,7 @@ const cases: readonly ProbeCase[] = [
     id: 'C02',
     name: 'rw store grant: write passes, the management surface refuses',
     run: async (b) => {
-      const written = await req(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const written = await req(b.server!.url, 'POST', '/memories', {
         headers: bearerHeaders(ALPH),
         body: { content: `alpha rw row ${Date.now()}`, kind: 'note' },
       });
@@ -74,7 +74,7 @@ const cases: readonly ProbeCase[] = [
     id: 'C03',
     name: 'ro grant: reads pass, every write verb refuses',
     run: async (b) => {
-      const seeded = await req(b.server!.url, 'POST', '/stores/beta/memories', {
+      const seeded = await req(b.server!.url, 'POST', '/memories', {
         headers: bearerHeaders(BETA_WRITER_SECRET),
         body: { content: `ro seed ${Date.now()}`, kind: 'note' },
       });
@@ -82,28 +82,28 @@ const cases: readonly ProbeCase[] = [
         return fail(`beta seed by the rw grant → ${seeded.status} ${seeded.text.slice(0, 120)}`);
       const target = String(record(seeded.json)?.id);
       for (const [method, path] of [
-        ['GET', '/stores/beta/memories'],
-        ['GET', '/stores/beta/checkin'],
-        ['GET', '/stores/beta/checkout'],
-        ['GET', '/stores/beta/search?q=x'],
+        ['GET', '/memories'],
+        ['GET', '/checkin'],
+        ['GET', '/checkout'],
+        ['GET', '/search?q=x'],
       ] as const) {
         const r = await req(b.server!.url, method, path, { headers: bearerHeaders(BET) });
         if (r.status !== 200) return fail(`ro read ${path} → ${r.status} ${r.text.slice(0, 120)}`);
       }
       const writes: readonly (readonly [string, string, object | null, number[]])[] = [
-        ['POST', '/stores/beta/memories', { content: 'ro attack', kind: 'noun' }, [403]],
-        ['POST', `/stores/beta/memories/${target}/hot`, { hot: true }, [403]],
-        ['POST', `/stores/beta/memories/${target}/supersede`, { content: 'ro attack' }, [403]],
-        ['POST', `/stores/beta/memories/${target}/deprecate`, {}, [403]],
-        ['POST', `/stores/beta/memories/${target}/link`, { to: target, kind: 'relates-to' }, [403]],
-        ['DELETE', `/stores/beta/memories/${target}/link`, { to: target }, [403]],
-        ['POST', '/stores/beta/merge', { ids: [target], content: 'x' }, [403]],
+        ['POST', '/memories', { content: 'ro attack', kind: 'noun' }, [403]],
+        ['POST', `/memories/${target}/hot`, { hot: true }, [403]],
+        ['POST', `/memories/${target}/supersede`, { content: 'ro attack' }, [403]],
+        ['POST', `/memories/${target}/deprecate`, {}, [403]],
+        ['POST', `/memories/${target}/link`, { to: target, kind: 'relates-to' }, [403]],
+        ['DELETE', `/memories/${target}/link`, { to: target }, [403]],
+        ['POST', '/merge', { ids: [target], content: 'x' }, [403]],
         ['POST', '/stores/beta/fork', { name: 'ro-fork' }, [403]],
         ['DELETE', '/stores/beta', null, [403]],
         // body-schema ordering probe: a malformed body teaches 400 before the
         // grant pair is judged — schema-then-authZ is the wire's order; assert
         // explicitly so a silent re-order lands on the report next shot.
-        ['POST', `/stores/beta/memories/${target}/link`, {}, [400, 403]],
+        ['POST', `/memories/${target}/link`, {}, [400, 403]],
       ];
       for (const [method, path, body, expectedStatuses] of writes) {
         const r = await req(b.server!.url, method as 'GET' | 'POST' | 'DELETE', path, {
@@ -123,14 +123,25 @@ const cases: readonly ProbeCase[] = [
   },
   {
     id: 'C04',
-    name: 'grant scope: beta bearer cannot reach alpha',
+    name: 'the path names no store anymore — an old-shape URL teaches 404 (#74)',
     run: async (b) => {
+      // The grant IS the address: /stores/alpha/memories is an old-shape
+      // URL the wire no longer speaks — the teaching 404 answers, even
+      // authenticated. And the family gate stays: a store grant knocking
+      // on the management surface refuses 403.
       const r = await req(b.server!.url, 'GET', '/stores/alpha/memories', {
-        headers: bearerHeaders(BET),
+        headers: bearerHeaders(ALPH),
       });
-      if (r.status !== 403)
-        return fail(`foreign store read → ${r.status} (${r.text.slice(0, 140)})`);
-      return ok('foreign grant refused');
+      if (r.status !== 404) return fail(`old-shape URL → ${r.status} (${r.text.slice(0, 140)})`);
+      const taught = String(record(r.json)?.error ?? '');
+      if (!taught.includes('/doc'))
+        return fail(`the 404 does not teach: ${r.text.slice(0, 140)}`, 'doc-gap');
+      const family = await req(b.server!.url, 'GET', '/stores', {
+        headers: bearerHeaders(ALPH),
+      });
+      if (family.status !== 403)
+        return fail(`store grant on management → ${family.status}`, 'doc-gap');
+      return ok('old-shape URL teaches 404; the family gate stays');
     },
   },
   {
@@ -174,7 +185,7 @@ const cases: readonly ProbeCase[] = [
     id: 'C06',
     name: 'bad bearers and wrong families all refused with envelope',
     run: async (b) => {
-      const bare = await req(b.server!.url, 'GET', '/stores/alpha/memories', {});
+      const bare = await req(b.server!.url, 'GET', '/memories', {});
       if (bare.status !== 401) return fail(`no-header should refuse 401 (#63), got ${bare.status}`);
       const attempts: readonly (readonly [string, Record<string, string> | null])[] = [
         ['wrong scheme', { authorization: `Basic ${ALPH}` }],
@@ -183,7 +194,7 @@ const cases: readonly ProbeCase[] = [
         ['empty bearer', { authorization: 'Bearer ' }],
       ];
       for (const [tag, headers] of attempts) {
-        const r = await req(b.server!.url, 'GET', '/stores/alpha/memories', {
+        const r = await req(b.server!.url, 'GET', '/memories', {
           headers: headers ?? {},
         });
         if (r.status !== 401) return fail(`${tag} → ${r.status}`, 'doc-gap');
@@ -192,7 +203,7 @@ const cases: readonly ProbeCase[] = [
       }
       // Wrong family: a management credential on a data route — 403 with
       // the envelope (401 stays strictly identity).
-      const family = await req(b.server!.url, 'GET', '/stores/alpha/memories', {
+      const family = await req(b.server!.url, 'GET', '/memories', {
         headers: bearerHeaders(GAMM),
       });
       if (family.status !== 403)
@@ -263,7 +274,7 @@ const cases: readonly ProbeCase[] = [
         const listed = await req(fresh.url, 'GET', '/stores', { headers: bearerHeaders(GAMM) });
         if (listed.status !== 200)
           return fail(`the fresh host's registry → ${listed.status}`, 'doc-gap');
-        const bare = await req(fresh.url, 'GET', '/stores/first-born/memories', {});
+        const bare = await req(fresh.url, 'GET', '/memories', {});
         if (bare.status !== 401)
           return fail(`data without a store grant → ${bare.status}`, 'doc-gap');
         return ok('the fresh host booted management-only, birthed its first store');
@@ -278,13 +289,7 @@ const cases: readonly ProbeCase[] = [
     run: async (b) => {
       const storm = await Promise.allSettled(
         Array.from({ length: 130 }, () =>
-          req(
-            b.server!.url,
-            'GET',
-            '/stores/alpha/memories?limit=1',
-            { headers: bearerHeaders(ALPH) },
-            20_000,
-          ),
+          req(b.server!.url, 'GET', '/memories?limit=1', { headers: bearerHeaders(ALPH) }, 20_000),
         ),
       );
       const byStatus = new Map<string, number>();
@@ -298,7 +303,7 @@ const cases: readonly ProbeCase[] = [
       const other = await req(
         b.server!.url,
         'GET',
-        '/stores/beta/memories?limit=1',
+        '/memories?limit=1',
         { headers: bearerHeaders(BET) },
         20_000,
       );
@@ -312,7 +317,7 @@ const cases: readonly ProbeCase[] = [
         const probe = await req(
           b.server!.url,
           'GET',
-          '/stores/alpha/memories?limit=1',
+          '/memories?limit=1',
           { headers: bearerHeaders(ALPH) },
           20_000,
         );

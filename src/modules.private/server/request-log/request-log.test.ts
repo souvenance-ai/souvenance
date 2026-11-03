@@ -63,13 +63,13 @@ test("one JSONL line per request, the ticket's shape and field order", async () 
   const logPath = join(dir, 'requests.jsonl');
   try {
     const { app, registry } = boot(dir, logPath);
-    const res = await app.request('/stores/mneme/memories', { headers: NOVA });
+    const res = await app.request('/memories', { headers: NOVA });
     assert.equal(res.status, 200);
     registry.close();
     const [line] = lines(logPath);
     assert.deepEqual(Object.keys(line), ['ts', 'method', 'path', 'status', 'ms', 'agent']);
     assert.equal(line.method, 'GET');
-    assert.equal(line.path, '/stores/mneme/memories');
+    assert.equal(line.path, '/memories');
     assert.equal(line.status, 200);
     assert.ok(line.ms >= 0, 'the duration is a non-negative whole ms');
     assert.equal(line.agent, 'nova');
@@ -87,9 +87,9 @@ test('the query string rides the path — the capture arbitrates the filters', a
     await app.request('/healthz');
     const [first] = lines(logPath);
     assert.equal(first.path, '/healthz');
-    await app.request('/stores/mneme/memories?kind=note&include_terminals', { headers: NOVA });
+    await app.request('/memories?kind=note&include_terminals', { headers: NOVA });
     const [, second] = lines(logPath);
-    assert.equal(second.path, '/stores/mneme/memories?kind=note&include_terminals');
+    assert.equal(second.path, '/memories?kind=note&include_terminals');
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -101,7 +101,7 @@ test('a refused credential is logged like a 200 — agent null, never the bearer
   const logPath = join(dir, 'requests.jsonl');
   try {
     const { app, registry } = boot(dir, logPath);
-    const res = await app.request('/stores/mneme/memories', {
+    const res = await app.request('/memories', {
       headers: { authorization: `Bearer souv-${'c'.repeat(32)}` },
     });
     assert.equal(res.status, 401);
@@ -136,15 +136,26 @@ test('a thrown reach refusal is logged with its eventual status, not the opaque 
   const dir = tempDir();
   const logPath = join(dir, 'requests.jsonl');
   try {
-    const { app, registry } = boot(dir, logPath);
-    // A valid grant, a store it never reaches: the reach check throws the
-    // HTTPException whose 403 the envelope will serve.
-    const res = await app.request('/stores/other/memories', { headers: NOVA });
+    const registry = Registry.open(dir);
+    registry.create('mneme');
+    const app = createApp({
+      registry,
+      tokens: [],
+      management: [{ agent: 'ops', secret: `souv-${'a'.repeat(32)}` }],
+      version: 'test',
+      logRequests: logPath,
+    });
+    // A management grant on the data surface: the family gate throws the
+    // HTTPException whose 403 the envelope will serve (#74 — the only
+    // reach refusal left, the foreign family retired with the path).
+    const res = await app.request('/memories', {
+      headers: { authorization: `Bearer souv-${'a'.repeat(32)}` },
+    });
     assert.equal(res.status, 403);
     registry.close();
     const [line] = lines(logPath);
     assert.equal(line.status, 403);
-    assert.equal(line.agent, 'nova');
+    assert.equal(line.agent, 'ops');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -159,7 +170,7 @@ test('a thrown StoreError refusal is logged with its mapped status too', async (
     // not_found throws, the envelope serves its mapped 404 — the line
     // must carry that 404, never the opaque 500.
     const absent = '00000000-0000-0000-0000-000000000000';
-    const res = await app.request(`/stores/mneme/memories/${absent}`, { headers: NOVA });
+    const res = await app.request(`/memories/${absent}`, { headers: NOVA });
     assert.equal(res.status, 404);
     registry.close();
     const [line] = lines(logPath);
@@ -179,7 +190,7 @@ test('a refusal settled by an inner middleware is logged like the 200s (429)', a
     app.use('*', async (c) =>
       c.json({ error: 'rate limit exceeded — 120 requests per 60s window' }, 429),
     );
-    const res = await app.request('/stores/mneme/memories');
+    const res = await app.request('/memories');
     assert.equal(res.status, 429);
     const [line] = lines(logPath);
     assert.equal(line.status, 429);
@@ -211,8 +222,8 @@ test('the redaction invariant — no secret anywhere in the file', async () => {
   const logPath = join(dir, 'requests.jsonl');
   try {
     const { app, registry } = boot(dir, logPath);
-    await app.request('/stores/mneme/memories', { headers: NOVA });
-    await app.request('/stores/mneme/memories');
+    await app.request('/memories', { headers: NOVA });
+    await app.request('/memories');
     registry.close();
     const raw = readFileSync(logPath, 'utf8');
     assert.equal(lines(logPath).length, 2, 'both requests wrote their line');
@@ -250,7 +261,7 @@ test('a grant resolved before the throw rides the in-flight line — null only w
       c.set('grant', { family: 'store', agent: 'nova', store: 'mneme', mode: 'rw', key: 'k' });
       throw 'not an error';
     });
-    await assert.rejects(async () => app.request('/stores/mneme/memories'));
+    await assert.rejects(async () => app.request('/memories'));
     const [line] = lines(logPath);
     assert.equal(line.status, 500);
     assert.equal(line.agent, 'nova');

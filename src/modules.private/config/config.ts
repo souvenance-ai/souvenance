@@ -139,6 +139,28 @@ export function resolveLogRequests(value: string | boolean | undefined): string 
 }
 
 /**
+ * The rows that share one secret, as agent groups — the one cross-row
+ * ambiguity the credential grammar refuses (#63). Both doors walk it:
+ * the config file at load (the operator's teaching) and the programmatic
+ * boot (#74's rider — `resolveBearer` resolves a duplicate by first
+ * match, and with the grant as the address a duplicated secret is
+ * silent arbitrary addressing, never a guess).
+ */
+export function sharedSecretAgents(
+  rows: readonly { readonly agent: string; readonly secret: string }[],
+): readonly (readonly string[])[] {
+  const bySecret = new Map<string, string[]>();
+  for (const row of rows) {
+    const agents = bySecret.get(row.secret) ?? [];
+    agents.push(row.agent);
+    bySecret.set(row.secret, agents);
+  }
+  return [...bySecret.entries()]
+    .filter(([, agents]) => agents.length > 1)
+    .map(([, agents]) => agents);
+}
+
+/**
  * Parses and validates a raw value (the parsed JSON document) into a
  * resolved Config. Throws ConfigError with the schema's teaching on any
  * refusal — unknown keys included (strictObject) — and on a secret
@@ -155,15 +177,9 @@ export function parseConfig(raw: unknown): Config {
   }
   const tokens = parsed.data.tokens ?? [];
   const management = parsed.data.management ?? [];
-  const bySecret = new Map<string, string[]>();
-  for (const grant of [...tokens, ...management]) {
-    const agents = bySecret.get(grant.secret) ?? [];
-    agents.push(grant.agent);
-    bySecret.set(grant.secret, agents);
-  }
-  const duplicateEntries = [...bySecret.entries()].filter(([, agents]) => agents.length > 1);
-  if (duplicateEntries.length > 0) {
-    const rows = duplicateEntries.map(([, agents]) => `"${agents.join('", "')}"`).join(', ');
+  const duplicateGroups = sharedSecretAgents([...tokens, ...management]);
+  if (duplicateGroups.length > 0) {
+    const rows = duplicateGroups.map((agents) => `"${agents.join('", "')}"`).join(', ');
     throw new ConfigError(
       `invalid config: the rows ${rows} share one secret — ` +
         `every row's secret must be unique across tokens[] and management[]`,

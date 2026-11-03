@@ -1,10 +1,10 @@
 /**
  * The data routes' doors, unit-pinned: the family gate refuses a
- * management grant before anything else, the reach refuses a foreign
- * store BEFORE existence is spoken — the registry's contents are not a
- * foreign grant's business (Q8) — and the write door walks family,
- * reach, then mode, in that order, structurally. The route files call
- * these; this file pins the gates themselves.
+ * management grant before anything else, the registry speaks existence —
+ * an orphaned grant (its store gone mid-run) serves 404, the one
+ * existence answer left (#74) — and the write door walks family,
+ * existence, then mode, in that order, structurally. The route files
+ * call these; this file pins the gates themselves.
  */
 import assert from 'node:assert/strict';
 import type { Context } from 'hono';
@@ -47,26 +47,14 @@ function httpStatusOf(operation: () => unknown): number {
   throw new Error('expected the gate to refuse');
 }
 
-test('the reach refuses a foreign store before existence is spoken', () => {
+test('an orphaned grant serves not_found — the registry speaks existence (#74)', () => {
   const dir = tempDir();
   try {
     const registry = Registry.open(dir);
-    const status = httpStatusOf(() =>
-      reachedStore(context(grantAt('atlas', 'ro')), registry, 'elsewhere'),
-    );
-    assert.equal(status, 403);
-    registry.close();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('a reached store that does not exist refuses not_found — the order already held', () => {
-  const dir = tempDir();
-  try {
-    const registry = Registry.open(dir);
+    // The grant names a store the registry never opened — the mid-run
+    // delete's shape: the grant survives, its store is gone.
     try {
-      reachedStore(context(grantAt('atlas', 'ro')), registry, 'atlas');
+      reachedStore(context(grantAt('atlas', 'ro')), registry);
       throw new Error('expected the gate to refuse');
     } catch (err) {
       assert.equal((err as { code?: string }).code, 'not_found');
@@ -77,14 +65,14 @@ test('a reached store that does not exist refuses not_found — the order alread
   }
 });
 
-test('a management grant refuses at the family gate — before reach is even asked', () => {
+test('a management grant refuses at the family gate — before existence is even asked', () => {
   const dir = tempDir();
   try {
     const registry = Registry.open(dir);
-    const status = httpStatusOf(() => reachedStore(context(managementGrant()), registry, 'atlas'));
+    const status = httpStatusOf(() => reachedStore(context(managementGrant()), registry));
     assert.equal(status, 403);
     try {
-      writableStore(context(managementGrant()), registry, 'atlas');
+      writableStore(context(managementGrant()), registry);
       throw new Error('expected the gate to refuse');
     } catch (err) {
       assert.ok(err instanceof HTTPException);
@@ -101,14 +89,10 @@ test('the write door hands the store to a grant that reaches AND may write', () 
   try {
     const registry = Registry.open(dir);
     const atlas = registry.create('atlas');
-    const reached = writableStore(context(grantAt('atlas', 'rw')), registry, 'atlas');
+    const reached = writableStore(context(grantAt('atlas', 'rw')), registry);
     assert.equal(reached, atlas, 'the door is the store, not a copy');
     assert.equal(
-      httpStatusOf(() => writableStore(context(grantAt('atlas', 'ro')), registry, 'atlas')),
-      403,
-    );
-    assert.equal(
-      httpStatusOf(() => writableStore(context(grantAt('atlas', 'rw')), registry, 'elsewhere')),
+      httpStatusOf(() => writableStore(context(grantAt('atlas', 'ro')), registry)),
       403,
     );
     registry.close();

@@ -14,7 +14,8 @@
  * The secret comparison is timing-safe the honest way: both sides are
  * hashed to fixed-length digests before timingSafeEqual — no length
  * leak, no early exit. The resolution walks both families; a secret
- * naming two rows was refused at config load.
+ * naming two rows is refused at both doors — the config file at load
+ * and the programmatic boot (#74's rider).
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createMiddleware } from 'hono/factory';

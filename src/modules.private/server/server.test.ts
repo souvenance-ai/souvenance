@@ -90,7 +90,7 @@ test('unknown routes answer the JSON envelope — never a bare-text 404', async 
     const res = await app.request('/nope');
     assert.equal(res.status, 404);
     assert.deepEqual((await res.json()) as { error: string }, {
-      error: 'no such route — the API document serves at /doc, the API lives under /stores',
+      error: 'no such route — the API document serves at /doc',
     });
     registry.close();
   } finally {
@@ -196,7 +196,7 @@ test('a bad bearer under the guard refuses 401 before any route exists', async (
       tokens: [{ agent: 'atlas', secret: `souv-${'b'.repeat(32)}`, store: 'atlas', mode: 'rw' }],
       management: [],
     });
-    const res = await app.request('/stores/atlas/memories', {
+    const res = await app.request('/memories', {
       headers: { authorization: 'Bearer souv-00000000000000000000000000000000' },
     });
     assert.equal(res.status, 401);

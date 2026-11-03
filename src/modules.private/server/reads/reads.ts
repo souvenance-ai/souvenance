@@ -11,8 +11,8 @@
  * refuses 400; ABSENT takes the server's DEFAULT_LIMIT (Q18 revised with
  * the dev, 2026-10-28: the unbounded verbatim let the facade's own
  * default truncate silently — an explicit page every time keeps the peek
- * honest); the reach gate refuses a foreign store before existence is
- * spoken (Q8).
+ * honest); the grant IS the address (#74) — the credential pins the
+ * store, an orphaned grant serves 404.
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
@@ -26,14 +26,12 @@ import type { Registry } from '../registry/registry.ts';
 import type { MetadataFilters } from '../../store/utils/compile-read-filters/compile-read-filters.ts';
 import {
   ErrorSchema,
-  foreignRefusal,
   invalidRefusal,
   limitShape,
   MemoryIdParamsSchema,
   MemoryNodeSchema,
   SearchHitSchema,
   depthShape,
-  StoreParamsSchema,
   unknownStoreRefusal,
 } from '../wire/wire.ts';
 
@@ -90,10 +88,9 @@ function metadataFilters(raw: string | undefined): MetadataFilters | undefined {
 export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
   const listMemories = createRoute({
     method: 'get',
-    path: '/stores/{name}/memories',
+    path: '/memories',
     tags: ['memories'],
     request: {
-      params: StoreParamsSchema,
       query: z.object({
         after: z.string().optional(),
         limit: limitShape,
@@ -117,13 +114,11 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
         },
       },
       400: invalidRefusal('a cursor, limit or filter is not ours'),
-      403: foreignRefusal(),
       404: unknownStoreRefusal(),
     },
   });
   app.openapi(listMemories, (c) => {
-    const { name } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
+    const store = reachedStore(c, registry);
     const query = c.req.valid('query');
     const after = query.after !== undefined ? decodeCursor(query.after) : undefined;
     if (query.after !== undefined && after === undefined) {
@@ -163,7 +158,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
 
   const getMemory = createRoute({
     method: 'get',
-    path: '/stores/{name}/memories/{id}',
+    path: '/memories/{id}',
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
@@ -175,7 +170,6 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
         content: { 'application/json': { schema: MemoryNodeSchema } },
       },
       400: invalidRefusal('the id or the depth is not ours'),
-      403: foreignRefusal(),
       404: {
         description: 'no such memory',
         content: { 'application/json': { schema: ErrorSchema } },
@@ -183,8 +177,8 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
     },
   });
   app.openapi(getMemory, (c) => {
-    const { name, id } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
+    const { id } = c.req.valid('param');
+    const store = reachedStore(c, registry);
     const { depth } = c.req.valid('query');
     const memory = store.get(id, { depth });
     if (memory === null) {
@@ -195,10 +189,9 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
 
   const searchMemories = createRoute({
     method: 'get',
-    path: '/stores/{name}/search',
+    path: '/search',
     tags: ['memories'],
     request: {
-      params: StoreParamsSchema,
       query: z.object({
         q: z.string(),
         limit: limitShape,
@@ -213,13 +206,11 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
         content: { 'application/json': { schema: z.array(SearchHitSchema) } },
       },
       400: invalidRefusal('the query or a filter is not ours — q must be non-empty'),
-      403: foreignRefusal(),
       404: unknownStoreRefusal(),
     },
   });
   app.openapi(searchMemories, (c) => {
-    const { name } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
+    const store = reachedStore(c, registry);
     const query = c.req.valid('query');
     const hits = store.search(query.q, {
       limit: query.limit ?? DEFAULT_LIMIT,

@@ -54,12 +54,12 @@ test('create answers 201 with the id — the memory serves, relations rode the o
   try {
     const { app, registry } = boot(dir);
     registry.create('atlas');
-    const target = await call(app, 'POST', '/stores/atlas/memories', {
+    const target = await call(app, 'POST', '/memories', {
       content: 'the target',
       kind: 'note',
     });
     assert.equal(target.status, 201);
-    const created = await call(app, 'POST', '/stores/atlas/memories', {
+    const created = await call(app, 'POST', '/memories', {
       content: 'the source',
       kind: 'note',
       summary: 'condensed',
@@ -69,7 +69,7 @@ test('create answers 201 with the id — the memory serves, relations rode the o
     assert.equal(created.status, 201);
     const id = (created.body as { id: string }).id;
     assert.match(id, /^[0-9a-f-]{36}$/);
-    const served = await call(app, 'GET', `/stores/atlas/memories/${id}`);
+    const served = await call(app, 'GET', `/memories/${id}`);
     assert.equal(served.body.content, 'the source');
     assert.equal(served.body.summary, 'condensed');
     assert.deepEqual(served.body.metadata, { project: 'x' });
@@ -88,7 +88,7 @@ test('the oversized body serves 413 — the /doc declares what the wire serves (
     const oversize = await call(
       app,
       'POST',
-      '/stores/atlas/memories',
+      '/memories',
       JSON.stringify({ content: 'x'.repeat(1_300_000), kind: 'note' }),
     );
     assert.equal(oversize.status, 413);
@@ -98,7 +98,7 @@ test('the oversized body serves 413 — the /doc declares what the wire serves (
       (await doc.json()) as {
         paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
       }
-    ).paths['/stores/{name}/memories']['post'].responses;
+    ).paths['/memories']['post'].responses;
     assert.ok(
       '413' in declared,
       `/doc must declare 413 on the body routes, has ${Object.keys(declared).join(',')}`,
@@ -114,21 +114,21 @@ test('create refuses non-scalar metadata values — the one grammar, both surfac
   try {
     const { app, registry } = boot(dir);
     registry.create('atlas');
-    const arrayValue = await call(app, 'POST', '/stores/atlas/memories', {
+    const arrayValue = await call(app, 'POST', '/memories', {
       content: 'x',
       kind: 'note',
       metadata: { tags: ['a', 'b'] },
     });
     assert.equal(arrayValue.status, 400);
     assert.match((arrayValue.body as { error: string }).error, /may not be arrays/);
-    const nullValue = await call(app, 'POST', '/stores/atlas/memories', {
+    const nullValue = await call(app, 'POST', '/memories', {
       content: 'x',
       kind: 'note',
       metadata: { owner: null },
     });
     assert.equal(nullValue.status, 400);
     assert.match((nullValue.body as { error: string }).error, /may not be null/);
-    const nestedOk = await call(app, 'POST', '/stores/atlas/memories', {
+    const nestedOk = await call(app, 'POST', '/memories', {
       content: 'x',
       kind: 'note',
       metadata: { tree: { ab: 9, mark: 'z' } },
@@ -145,25 +145,25 @@ test('create refusals ride the facade teaching — kind, metadata.kind, summary 
   try {
     const { app, registry } = boot(dir);
     registry.create('atlas');
-    const noKind = await call(app, 'POST', '/stores/atlas/memories', { content: 'x' });
+    const noKind = await call(app, 'POST', '/memories', { content: 'x' });
     assert.equal(noKind.status, 400);
     // The schema speaks first (the document says kind required) — the
     // facade's richer teaching keeps the cases the schema lets through.
     assert.match((noKind.body as { error: string }).error, /kind/);
-    const kindInMetadata = await call(app, 'POST', '/stores/atlas/memories', {
+    const kindInMetadata = await call(app, 'POST', '/memories', {
       content: 'x',
       kind: 'note',
       metadata: { kind: 'note' },
     });
     assert.equal(kindInMetadata.status, 400);
     assert.match((kindInMetadata.body as { error: string }).error, /kind is a column/);
-    const longContent = await call(app, 'POST', '/stores/atlas/memories', {
+    const longContent = await call(app, 'POST', '/memories', {
       content: 'x'.repeat(401),
       kind: 'note',
     });
     assert.equal(longContent.status, 400);
     assert.match((longContent.body as { error: string }).error, /provide a summary/);
-    const emptyContent = await call(app, 'POST', '/stores/atlas/memories', {
+    const emptyContent = await call(app, 'POST', '/memories', {
       content: '',
       kind: 'note',
     });
@@ -179,14 +179,14 @@ test('unknown body keys refuse 400 naming the key — the wire teaches, never st
   try {
     const { app, registry } = boot(dir);
     registry.create('atlas');
-    const unknown = await call(app, 'POST', '/stores/atlas/memories', {
+    const unknown = await call(app, 'POST', '/memories', {
       title: 'a v0.1 habit',
       content: 'x',
       kind: 'note',
     });
     assert.equal(unknown.status, 400);
     assert.match((unknown.body as { error: string }).error, /title/);
-    const nested = await call(app, 'POST', '/stores/atlas/memories', {
+    const nested = await call(app, 'POST', '/memories', {
       content: 'x',
       kind: 'note',
       relations: [{ to: '00000000-0000-4000-8000-000000000000', kind: 'references', armor: true }],
@@ -206,7 +206,7 @@ test('unknown body keys refuse 400 naming the key — the wire teaches, never st
           >
         >;
       }
-    ).paths['/stores/{name}/memories']['post'].requestBody.content['application/json'].schema;
+    ).paths['/memories']['post'].requestBody.content['application/json'].schema;
     assert.equal(
       declared['additionalProperties'],
       false,
@@ -223,24 +223,24 @@ test('supersede answers 201 with the successor id — the old one leaves the liv
   try {
     const { app, registry } = boot(dir);
     registry.create('atlas');
-    const first = await call(app, 'POST', '/stores/atlas/memories', {
+    const first = await call(app, 'POST', '/memories', {
       content: 'old',
       kind: 'note',
     });
     const oldId = (first.body as { id: string }).id;
-    const superseded = await call(app, 'POST', `/stores/atlas/memories/${oldId}/supersede`, {
+    const superseded = await call(app, 'POST', `/memories/${oldId}/supersede`, {
       content: 'new',
       kind: 'decision',
     });
     assert.equal(superseded.status, 201);
     const newId = (superseded.body as { id: string }).id;
     assert.notEqual(newId, oldId);
-    const living = await call(app, 'GET', '/stores/atlas/memories');
+    const living = await call(app, 'GET', '/memories');
     assert.deepEqual(
       (living.body as { memories: { id: string }[] }).memories.map((memory) => memory.id),
       [newId],
     );
-    const reclassified = await call(app, 'GET', `/stores/atlas/memories/${newId}`);
+    const reclassified = await call(app, 'GET', `/memories/${newId}`);
     assert.equal(
       (reclassified.body as { kind: string }).kind,
       'decision',
@@ -248,12 +248,9 @@ test('supersede answers 201 with the successor id — the old one leaves the liv
     );
     assert.equal(
       (
-        await call(
-          app,
-          'POST',
-          '/stores/atlas/memories/00000000-0000-4000-8000-000000000000/supersede',
-          { content: 'x' },
-        )
+        await call(app, 'POST', '/memories/00000000-0000-4000-8000-000000000000/supersede', {
+          content: 'x',
+        })
       ).status,
       404,
     );
@@ -268,38 +265,23 @@ test('deprecate and hot answer 204; a second deprecate fights the status (409)',
   try {
     const { app, registry } = boot(dir);
     registry.create('atlas');
-    const created = await call(app, 'POST', '/stores/atlas/memories', {
+    const created = await call(app, 'POST', '/memories', {
       content: 'x',
       kind: 'note',
     });
     const id = (created.body as { id: string }).id;
-    assert.equal((await call(app, 'POST', `/stores/atlas/memories/${id}/deprecate`)).status, 204);
-    const again = await call(app, 'POST', `/stores/atlas/memories/${id}/deprecate`);
+    assert.equal((await call(app, 'POST', `/memories/${id}/deprecate`)).status, 204);
+    const again = await call(app, 'POST', `/memories/${id}/deprecate`);
     assert.equal(again.status, 409);
     assert.match((again.body as { error: string }).error, /status 'deprecated'/);
     // hot on a terminal fights the machine; on a living memory it lands.
-    assert.equal(
-      (await call(app, 'POST', `/stores/atlas/memories/${id}/hot`, { hot: true })).status,
-      409,
-    );
-    const other = await call(app, 'POST', '/stores/atlas/memories', { content: 'y', kind: 'note' });
+    assert.equal((await call(app, 'POST', `/memories/${id}/hot`, { hot: true })).status, 409);
+    const other = await call(app, 'POST', '/memories', { content: 'y', kind: 'note' });
     const otherId = (other.body as { id: string }).id;
+    assert.equal((await call(app, 'POST', `/memories/${otherId}/hot`, { hot: true })).status, 204);
+    assert.equal((await call(app, 'POST', `/memories/${otherId}/hot`, { hot: false })).status, 204);
     assert.equal(
-      (await call(app, 'POST', `/stores/atlas/memories/${otherId}/hot`, { hot: true })).status,
-      204,
-    );
-    assert.equal(
-      (await call(app, 'POST', `/stores/atlas/memories/${otherId}/hot`, { hot: false })).status,
-      204,
-    );
-    assert.equal(
-      (
-        await call(
-          app,
-          'POST',
-          `/stores/atlas/memories/00000000-0000-4000-8000-000000000000/deprecate`,
-        )
-      ).status,
+      (await call(app, 'POST', `/memories/00000000-0000-4000-8000-000000000000/deprecate`)).status,
       404,
     );
     registry.close();
@@ -313,32 +295,33 @@ test('link echoes the edge (201); unlink takes the body and answers 204', async 
   try {
     const { app, registry } = boot(dir);
     registry.create('atlas');
-    const from = (
-      await call(app, 'POST', '/stores/atlas/memories', { content: 'from', kind: 'note' })
-    ).body as { id: string };
-    const to = (await call(app, 'POST', '/stores/atlas/memories', { content: 'to', kind: 'note' }))
-      .body as { id: string };
-    const linked = await call(app, 'POST', `/stores/atlas/memories/${from.id}/link`, {
+    const from = (await call(app, 'POST', '/memories', { content: 'from', kind: 'note' })).body as {
+      id: string;
+    };
+    const to = (await call(app, 'POST', '/memories', { content: 'to', kind: 'note' })).body as {
+      id: string;
+    };
+    const linked = await call(app, 'POST', `/memories/${from.id}/link`, {
       to: to.id,
       kind: 'references',
       metadata: { why: 'test' },
     });
     assert.equal(linked.status, 201);
     assert.deepEqual(linked.body, { from_id: from.id, to_id: to.id, kind: 'references' });
-    const served = await call(app, 'GET', `/stores/atlas/memories/${from.id}`);
+    const served = await call(app, 'GET', `/memories/${from.id}`);
     assert.equal(served.body.relations.out[0].kind, 'references');
-    const self = await call(app, 'POST', `/stores/atlas/memories/${from.id}/link`, {
+    const self = await call(app, 'POST', `/memories/${from.id}/link`, {
       to: from.id,
       kind: 'self',
     });
     assert.equal(self.status, 400);
     assert.match((self.body as { error: string }).error, /self-edge/);
-    const unlinked = await call(app, 'DELETE', `/stores/atlas/memories/${from.id}/link`, {
+    const unlinked = await call(app, 'DELETE', `/memories/${from.id}/link`, {
       to: to.id,
     });
     assert.equal(unlinked.status, 204);
     assert.equal(
-      (await call(app, 'DELETE', `/stores/atlas/memories/${from.id}/link`, { to: to.id })).status,
+      (await call(app, 'DELETE', `/memories/${from.id}/link`, { to: to.id })).status,
       404,
     );
     registry.close();
@@ -352,13 +335,14 @@ test('an ambiguous unlink serves the facade refusal — kind named, no flag idio
   try {
     const { app, registry } = boot(dir);
     registry.create('atlas');
-    const from = (
-      await call(app, 'POST', '/stores/atlas/memories', { content: 'from', kind: 'note' })
-    ).body as { id: string };
-    const to = (await call(app, 'POST', '/stores/atlas/memories', { content: 'to', kind: 'note' }))
-      .body as { id: string };
+    const from = (await call(app, 'POST', '/memories', { content: 'from', kind: 'note' })).body as {
+      id: string;
+    };
+    const to = (await call(app, 'POST', '/memories', { content: 'to', kind: 'note' })).body as {
+      id: string;
+    };
     for (const edgeKind of ['references', 'extends']) {
-      const linked = await call(app, 'POST', `/stores/atlas/memories/${from.id}/link`, {
+      const linked = await call(app, 'POST', `/memories/${from.id}/link`, {
         to: to.id,
         kind: edgeKind,
       });
@@ -366,7 +350,7 @@ test('an ambiguous unlink serves the facade refusal — kind named, no flag idio
     }
     // The living test's exact friction: a body without kind on a doubled
     // edge — the 400 must name the parameter, never a CLI flag.
-    const refused = await call(app, 'DELETE', `/stores/atlas/memories/${from.id}/link`, {
+    const refused = await call(app, 'DELETE', `/memories/${from.id}/link`, {
       to: to.id,
     });
     assert.equal(refused.status, 400);
@@ -375,7 +359,7 @@ test('an ambiguous unlink serves the facade refusal — kind named, no flag idio
       `ambiguous: 2 edges between ${from.id} and ${to.id}, pass kind: extends, references`,
     );
     // The refusal is not destructive: both edges survive on the wire too.
-    const served = await call(app, 'GET', `/stores/atlas/memories/${from.id}`);
+    const served = await call(app, 'GET', `/memories/${from.id}`);
     assert.equal((served.body as { relations: { out: unknown[] } }).relations.out.length, 2);
     registry.close();
   } finally {
@@ -388,22 +372,22 @@ test('merge answers 201 with the fusion id — the facade teaches arity and kind
   try {
     const { app, registry } = boot(dir);
     registry.create('atlas');
-    const one = (
-      await call(app, 'POST', '/stores/atlas/memories', { content: 'one', kind: 'note' })
-    ).body as { id: string };
-    const two = (
-      await call(app, 'POST', '/stores/atlas/memories', { content: 'two', kind: 'note' })
-    ).body as { id: string };
-    const fused = await call(app, 'POST', '/stores/atlas/merge', {
+    const one = (await call(app, 'POST', '/memories', { content: 'one', kind: 'note' })).body as {
+      id: string;
+    };
+    const two = (await call(app, 'POST', '/memories', { content: 'two', kind: 'note' })).body as {
+      id: string;
+    };
+    const fused = await call(app, 'POST', '/merge', {
       ids: [one.id, two.id],
       content: 'the fusion',
     });
     assert.equal(fused.status, 201);
     const fusionId = (fused.body as { id: string }).id;
-    const served = await call(app, 'GET', `/stores/atlas/memories/${fusionId}`);
+    const served = await call(app, 'GET', `/memories/${fusionId}`);
     assert.equal(served.body.content, 'the fusion');
     assert.equal(served.body.kind, 'note', 'the sources agree — kind inherits');
-    const arity = await call(app, 'POST', '/stores/atlas/merge', { ids: [one.id], content: 'x' });
+    const arity = await call(app, 'POST', '/merge', { ids: [one.id], content: 'x' });
     assert.equal(arity.status, 400);
     assert.match((arity.body as { error: string }).error, /at least 2/);
     registry.close();
@@ -417,19 +401,19 @@ test('a ro grant reads everything and writes nothing — 403 on every write rout
   try {
     const { app, registry } = boot(dir);
     registry.create('atlas');
-    const created = await call(app, 'POST', '/stores/atlas/memories', {
+    const created = await call(app, 'POST', '/memories', {
       content: 'x',
       kind: 'note',
     });
     const id = (created.body as { id: string }).id;
     const attempts: readonly (readonly [string, string, unknown?])[] = [
-      ['POST', '/stores/atlas/memories', { content: 'x', kind: 'note' }],
-      ['POST', `/stores/atlas/memories/${id}/supersede`, { content: 'y' }],
-      ['POST', `/stores/atlas/memories/${id}/deprecate`],
-      ['POST', `/stores/atlas/memories/${id}/hot`, { hot: true }],
-      ['POST', `/stores/atlas/memories/${id}/link`, { to: id, kind: 'x' }],
-      ['DELETE', `/stores/atlas/memories/${id}/link`, { to: id }],
-      ['POST', '/stores/atlas/merge', { ids: [id, id], content: 'x' }],
+      ['POST', '/memories', { content: 'x', kind: 'note' }],
+      ['POST', `/memories/${id}/supersede`, { content: 'y' }],
+      ['POST', `/memories/${id}/deprecate`],
+      ['POST', `/memories/${id}/hot`, { hot: true }],
+      ['POST', `/memories/${id}/link`, { to: id, kind: 'x' }],
+      ['DELETE', `/memories/${id}/link`, { to: id }],
+      ['POST', '/merge', { ids: [id, id], content: 'x' }],
     ];
     for (const [method, path, body] of attempts) {
       const { status, body: responseBody } = await call(app, method, path, body, RO);
@@ -437,31 +421,10 @@ test('a ro grant reads everything and writes nothing — 403 on every write rout
       assert.match((responseBody as { error: string }).error, /read-only/);
     }
     assert.equal(
-      (await call(app, 'GET', '/stores/atlas/memories', undefined, RO)).status,
+      (await call(app, 'GET', '/memories', undefined, RO)).status,
       200,
       'reads stay open',
     );
-    registry.close();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('a foreign store refuses writes on reach, before the mode is even asked', async () => {
-  const dir = tempDir();
-  try {
-    const { app, registry } = boot(dir);
-    registry.create('atlas');
-    registry.create('other');
-    const foreign = await call(
-      app,
-      'POST',
-      '/stores/other/memories',
-      { content: 'x', kind: 'note' },
-      RW,
-    );
-    assert.equal(foreign.status, 403);
-    assert.match((foreign.body as { error: string }).error, /reaches store "atlas" only/);
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

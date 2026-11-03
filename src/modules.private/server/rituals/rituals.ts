@@ -14,19 +14,16 @@ import {
   CheckinReportSchema,
   CheckoutReportSchema,
   checkinLimitShape,
-  foreignRefusal,
   refusal,
-  StoreParamsSchema,
   unknownStoreRefusal,
 } from '../wire/wire.ts';
 
 export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
   const checkin = createRoute({
     method: 'get',
-    path: '/stores/{name}/checkin',
+    path: '/checkin',
     tags: ['rituals'],
     request: {
-      params: StoreParamsSchema,
       query: z.object({ limit: checkinLimitShape }),
     },
     responses: {
@@ -35,34 +32,29 @@ export function registerRitualRoutes(app: OpenAPIHono<ServerEnv>, registry: Regi
         content: { 'application/json': { schema: CheckinReportSchema } },
       },
       400: refusal('the limit is not ours'),
-      403: foreignRefusal(),
       404: unknownStoreRefusal(),
     },
   });
   app.openapi(checkin, (c) => {
-    const { name } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
+    const store = reachedStore(c, registry);
     const { limit } = c.req.valid('query');
     return c.json(store.checkin({ limit }), 200);
   });
 
   const checkout = createRoute({
     method: 'get',
-    path: '/stores/{name}/checkout',
+    path: '/checkout',
     tags: ['rituals'],
-    request: { params: StoreParamsSchema },
     responses: {
       200: {
         description: 'the consolidation verdict — healthy or the payable findings',
         content: { 'application/json': { schema: CheckoutReportSchema } },
       },
-      403: foreignRefusal(),
       404: unknownStoreRefusal(),
     },
   });
   app.openapi(checkout, (c) => {
-    const { name } = c.req.valid('param');
-    const store = reachedStore(c, registry, name);
+    const store = reachedStore(c, registry);
     return c.json(store.checkout(), 200);
   });
 }

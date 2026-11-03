@@ -9,10 +9,8 @@ import { Registry } from './registry/registry.ts';
 import type { Store, StoreOptions } from '../store/store.ts';
 
 const ATLAS_SECRET = `souv-${'f'.repeat(32)}`;
-const OTHER_SECRET = `souv-${'1'.repeat(32)}`;
 const TOKENS: readonly StoreGrant[] = [
   { agent: 'atlas', secret: ATLAS_SECRET, store: 'atlas', mode: 'rw' },
-  { agent: 'other', secret: OTHER_SECRET, store: 'other', mode: 'rw' },
 ];
 
 const ATLAS = { authorization: `Bearer ${ATLAS_SECRET}` };
@@ -80,14 +78,14 @@ test('the list pages by the opaque cursor — {memories, next_after}, null when 
       seed(atlas, content, { kind: 'note' });
       await nextMillisecond();
     }
-    const first = await get(app, `/stores/atlas/memories?limit=2`);
+    const first = await get(app, `/memories?limit=2`);
     assert.equal(first.status, 200);
     assert.equal(first.body.memories.length, 2);
     assert.equal(first.body.memories[0].content, 'four', 'serving order is newest first');
     assert.equal(typeof first.body.next_after, 'string');
     const second = await get(
       app,
-      `/stores/atlas/memories?limit=2&after=${encodeURIComponent(first.body.next_after)}`,
+      `/memories?limit=2&after=${encodeURIComponent(first.body.next_after)}`,
     );
     assert.equal(second.status, 200);
     assert.deepEqual(
@@ -108,18 +106,15 @@ test('limit absent takes the server default (Q18 revised) — 100, and the curso
     for (let index = 0; index < 101; index++) seed(atlas, `memory ${index}`, { kind: 'note' });
     // Silent page: 100, NOT the facade's own default of 20, and the
     // cursor admits there is more (the review probe, pinned).
-    const first = await get(app, `/stores/atlas/memories`);
+    const first = await get(app, `/memories`);
     assert.equal(first.body.memories.length, 100);
     assert.equal(typeof first.body.next_after, 'string');
-    const second = await get(
-      app,
-      `/stores/atlas/memories?after=${encodeURIComponent(first.body.next_after)}`,
-    );
+    const second = await get(app, `/memories?after=${encodeURIComponent(first.body.next_after)}`);
     assert.equal(second.body.memories.length, 1);
     assert.equal(second.body.next_after, null);
     // The cap still judges only the explicit.
-    assert.equal((await get(app, `/stores/atlas/memories?limit=1001`)).status, 400);
-    assert.equal((await get(app, `/stores/atlas/memories?limit=1000`)).status, 200);
+    assert.equal((await get(app, `/memories?limit=1001`)).status, 400);
+    assert.equal((await get(app, `/memories?limit=1000`)).status, 200);
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -131,14 +126,10 @@ test('an explicit limit past the cap refuses 400 — the cap judges only the exp
   try {
     const { app, registry, atlas } = boot(dir);
     seed(atlas, 'one', { kind: 'note' });
-    assert.equal((await get(app, `/stores/atlas/memories?limit=1001`)).status, 400);
-    assert.equal((await get(app, `/stores/atlas/memories?limit=0`)).status, 400);
-    assert.equal((await get(app, `/stores/atlas/memories?limit=abc`)).status, 400);
-    assert.equal(
-      (await get(app, `/stores/atlas/memories?limit=1000`)).status,
-      200,
-      'at the cap passes',
-    );
+    assert.equal((await get(app, `/memories?limit=1001`)).status, 400);
+    assert.equal((await get(app, `/memories?limit=0`)).status, 400);
+    assert.equal((await get(app, `/memories?limit=abc`)).status, 400);
+    assert.equal((await get(app, `/memories?limit=1000`)).status, 200, 'at the cap passes');
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -153,7 +144,7 @@ test('repeated kind params narrow with IN semantics (Q17)', async () => {
     seed(atlas, 'a decision', { kind: 'decision' });
     seed(atlas, 'a dream', { kind: 'dream' });
     const query = jsonQuery({ kind: ['note', 'dream'] });
-    const { body } = await get(app, `/stores/atlas/memories?${query}`);
+    const { body } = await get(app, `/memories?${query}`);
     assert.deepEqual(body.memories.map((memory: { kind: string }) => memory.kind).sort(), [
       'dream',
       'note',
@@ -172,14 +163,14 @@ test('a lone kind param narrows as its singleton array — the form idiom (#62)'
     seed(atlas, 'a decision', { kind: 'decision' });
     // The living agent's friction: one kind refused 400 demanding an
     // array — the only idiom left was doubling the parameter.
-    const lone = await get(app, `/stores/atlas/memories?kind=note`);
+    const lone = await get(app, `/memories?kind=note`);
     assert.equal(lone.status, 200);
     assert.deepEqual(
       (lone.body as { memories: Array<{ kind: string }> }).memories.map((memory) => memory.kind),
       ['note'],
     );
     // Doubling stays legal and serves the same rows.
-    const doubled = await get(app, `/stores/atlas/memories?kind=note&kind=note`);
+    const doubled = await get(app, `/memories?kind=note&kind=note`);
     assert.equal(doubled.status, 200);
     assert.deepEqual(
       (doubled.body as { memories: Array<{ id: string }> }).memories.map((memory) => memory.id),
@@ -210,7 +201,7 @@ test('/doc declares the kind filter as an array — the idiom the wire now speak
         }
       >;
     };
-    const kind = document.paths['/stores/{name}/memories']?.get?.parameters?.find(
+    const kind = document.paths['/memories']?.get?.parameters?.find(
       (parameter) => parameter.name === 'kind' && parameter.in === 'query',
     );
     assert.ok(kind, 'the kind query parameter is declared');
@@ -229,31 +220,26 @@ test('the metadata filter is one URL-encoded JSON object — typed equality', as
     seed(atlas, 'the project memory', { kind: 'note', metadata: { project: 'souvenance' } });
     seed(atlas, 'another memory', { kind: 'note', metadata: { project: 'other' } });
     const filter = jsonQuery({ metadata: JSON.stringify({ project: 'souvenance' }) });
-    const { body } = await get(app, `/stores/atlas/memories?${filter}`);
+    const { body } = await get(app, `/memories?${filter}`);
     assert.equal(body.memories.length, 1);
     assert.equal(body.memories[0].content, 'the project memory');
     // A number is not the string of the number — typed equality (Q3).
     seed(atlas, 'a count', { kind: 'note', metadata: { count: 42 } });
     const numeric = await get(
       app,
-      `/stores/atlas/memories?${jsonQuery({ metadata: JSON.stringify({ count: '42' }) })}`,
+      `/memories?${jsonQuery({ metadata: JSON.stringify({ count: '42' }) })}`,
     );
     assert.equal(numeric.body.memories.length, 0, 'the string 42 does not match the number 42');
     // Bad JSON and non-objects refuse with the teaching.
-    assert.equal((await get(app, `/stores/atlas/memories?metadata=not-json`)).status, 400);
+    assert.equal((await get(app, `/memories?metadata=not-json`)).status, 400);
     assert.equal(
-      (await get(app, `/stores/atlas/memories?${jsonQuery({ metadata: JSON.stringify([1]) })}`))
-        .status,
+      (await get(app, `/memories?${jsonQuery({ metadata: JSON.stringify([1]) })}`)).status,
       400,
     );
     // A path breaking the grammar refuses through the facade's own voice.
     assert.equal(
-      (
-        await get(
-          app,
-          `/stores/atlas/memories?${jsonQuery({ metadata: JSON.stringify({ 'bad path!': 1 }) })}`,
-        )
-      ).status,
+      (await get(app, `/memories?${jsonQuery({ metadata: JSON.stringify({ 'bad path!': 1 }) })}`))
+        .status,
       400,
     );
     registry.close();
@@ -268,9 +254,9 @@ test('the terminals join only when include_terminals is present', async () => {
     const { app, registry, atlas } = boot(dir);
     const old = seed(atlas, 'the old truth', { kind: 'note' });
     atlas.supersede(old, 'the new truth', {});
-    const living = await get(app, `/stores/atlas/memories`);
+    const living = await get(app, `/memories`);
     assert.equal(living.body.memories.length, 1, 'the successor alone is living');
-    const everything = await get(app, `/stores/atlas/memories?include_terminals`);
+    const everything = await get(app, `/memories?include_terminals`);
     assert.equal(everything.body.memories.length, 2, 'the superseded joins');
     registry.close();
   } finally {
@@ -287,33 +273,29 @@ test('get serves the projection — raw edges at the default depth, expansion on
     const c = seed(atlas, 'c', { kind: 'note' });
     atlas.link(a, b, 'next');
     atlas.link(b, c, 'next');
-    const raw = await get(app, `/stores/atlas/memories/${a}`);
+    const raw = await get(app, `/memories/${a}`);
     assert.equal(raw.status, 200);
     assert.equal(raw.body.relations.out.length, 1);
     assert.equal(raw.body.relations.out[0].to_id, b, 'the raw edge names the target');
     assert.equal(raw.body.relations.out[0].target, null, 'depth 1 serves raw edges');
-    const one = await get(app, `/stores/atlas/memories/${a}?depth=2`);
+    const one = await get(app, `/memories/${a}?depth=2`);
     assert.equal(one.body.relations.out[0].target.content, 'b');
     assert.equal(
       one.body.relations.out[0].target.relations.out[0].target,
       null,
       'the budget stops after b',
     );
-    const two = await get(app, `/stores/atlas/memories/${a}?depth=3`);
+    const two = await get(app, `/memories/${a}?depth=3`);
     assert.equal(two.body.relations.out[0].target.relations.out[0].target.content, 'c');
-    assert.equal(
-      (await get(app, `/stores/atlas/memories/${c}`)).status,
-      200,
-      'c has no out edges — still 200',
-    );
-    const deep = await get(app, `/stores/atlas/memories/${a}?depth=4`);
+    assert.equal((await get(app, `/memories/${c}`)).status, 200, 'c has no out edges — still 200');
+    const deep = await get(app, `/memories/${a}?depth=4`);
     assert.equal(deep.status, 200, 'the wire cap leaves 4 to the walk');
     assert.equal(
-      (await get(app, `/stores/atlas/memories/${a}?depth=5`)).status,
+      (await get(app, `/memories/${a}?depth=5`)).status,
       400,
       'the wire caps the projection walk (MAX_DEPTH) — the facade leaves the pace to callers; over the wire the caller is remote',
     );
-    const unknown = await get(app, `/stores/atlas/memories/00000000-0000-4000-8000-000000000000`);
+    const unknown = await get(app, `/memories/00000000-0000-4000-8000-000000000000`);
     assert.equal(unknown.status, 404);
     assert.match((unknown.body as { error: string }).error, /memory not found/);
     registry.close();
@@ -328,50 +310,48 @@ test('search serves bare hits with their rank — no cursor', async () => {
     const { app, registry, atlas } = boot(dir);
     seed(atlas, 'the quick brown fox', { kind: 'note' });
     seed(atlas, 'something else entirely', { kind: 'note' });
-    const { status, body } = await get(app, `/stores/atlas/search?q=fox`);
+    const { status, body } = await get(app, `/search?q=fox`);
     assert.equal(status, 200);
     assert.ok(Array.isArray(body), 'a bare array');
     assert.equal(body.length, 1);
     assert.equal(body[0].content, 'the quick brown fox');
     assert.equal(typeof body[0].rank, 'number');
     assert.equal(body[0].next_after, undefined, 'no cursor on search');
-    assert.equal((await get(app, `/stores/atlas/search?q=`)).status, 400, 'empty q refuses');
+    assert.equal((await get(app, `/search?q=`)).status, 400, 'empty q refuses');
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('a foreign grant refuses 403 before existence is spoken; management reaches no data', async () => {
+test('the grant IS the address — management reaches no data, an orphaned grant serves 404 (#74)', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
-    // 'other' exists: the atlas grant still refuses — reach, not existence.
-    registry.create('other');
-    const foreign = await get(app, `/stores/other/memories`);
-    assert.equal(foreign.status, 403);
-    assert.match((foreign.body as { error: string }).error, /reaches store "atlas" only/);
-    // Foreign AND unknown: still 403 — the registry's contents are not the grant's business.
-    const foreignUnknown = await get(app, `/stores/nowhere/memories`);
-    assert.equal(foreignUnknown.status, 403);
     // A management grant reaches no store's data — wrong family, 403 teaching.
-    const management = await get(app, `/stores/other/memories`, MANAGEMENT);
+    const management = await get(app, `/memories`, MANAGEMENT);
     assert.equal(management.status, 403);
     assert.match(
       (management.body as { error: string }).error,
       /a management grant reaches no store data/,
     );
+    // The orphaned grant: management deleted the store mid-run — the
+    // grant survives, the registry speaks existence, 404 in the envelope.
+    registry.remove('atlas');
+    const orphaned = await get(app, `/memories`);
+    assert.equal(orphaned.status, 404);
+    assert.equal(orphaned.body.error, 'no store "atlas" in the registry');
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('a bare request refuses even before reach — every store access carries a token', async () => {
+test('a bare request refuses even before existence — every store access carries a token', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
-    const res = await app.request('/stores/atlas/memories');
+    const res = await app.request('/memories');
     assert.equal(res.status, 401);
     registry.close();
   } finally {
