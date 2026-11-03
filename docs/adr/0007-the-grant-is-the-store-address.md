@@ -42,9 +42,9 @@ naming which stores exist.
 - **One Bearer = N stores** (the multi-store token, a supervisor persona) —
   rejected for v0.2.x and registered on the backlog (#28): it re-adds `{name}`
   to the data routes (a breaking URL re-design of this very surface), returns
-  the foreign-403 oracle, and grows the waking line back to base URL + secret
-  - the addressable names. The multi-grant posture serves the same persona
-    today: N rows, one per store, revoke per terminal, blast radius one store.
+  the foreign-403 oracle, and grows the waking line back to base URL, secret,
+  and the addressable names. The multi-grant posture serves the same persona
+  today: N rows, one per store, revoke per terminal, blast radius one store.
 - **The config as a directory** (`tokens` keyed by the secret) — weighed and
   retired with `agent`'s survival: as value metadata the directory bought file
   ergonomics only, and the array grammar already refuses the ambiguous state

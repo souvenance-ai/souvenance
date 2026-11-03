@@ -121,7 +121,8 @@ export function auth(credentials: CredentialFamilies) {
  * The management gate (#63): the management routes demand the management
  * family — a store grant refuses 403, whatever its mode. Bound per route
  * on the exact management paths, never as a blanket `/stores/*`
- * middleware: the data routes live deeper and serve store grants.
+ * middleware: the data routes live at the root (#74) and serve store
+ * grants.
  */
 export function requireManagement() {
   return createMiddleware<ServerEnv>(async (c, next) => {

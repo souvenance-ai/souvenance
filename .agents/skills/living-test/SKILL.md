@@ -64,11 +64,11 @@ runs code, inspects the machine, or reads and writes files.
 ## 4. The death capture
 
 After the last session, with the individual's grant still minted:
-`GET /stores/{name}/checkout` (the verdict) and
-`GET /stores/{name}/memories?include_terminals` (the full inventory) ride
-the individual's grant. The stats descriptor (`GET /stores/{name}`) sits
-on the management surface — a store grant reaches no management route —
-so it rides the management credential.
+`GET /checkout` (the verdict) and `GET /memories?include_terminals` (the full
+inventory) ride the individual's grant — the grant IS the address (ADR 0007):
+no store name rides the data surface. The stats descriptor
+(`GET /stores/{name}`) sits on the management surface — a store grant reaches
+no management route — so it rides the management credential.
 
 ## 5. The terminal phase (the DB analysis)
 

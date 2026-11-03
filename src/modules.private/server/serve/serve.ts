@@ -13,7 +13,11 @@
  */
 import { serve, type ServerType } from '@hono/node-server';
 import { appendFileSync } from 'node:fs';
-import { sharedSecretAgents, type CredentialFamilies } from '../../config/config.ts';
+import {
+  sharedSecretAgents,
+  sharedSecretTeaching,
+  type CredentialFamilies,
+} from '../../config/config.ts';
 import { Registry } from '../registry/registry.ts';
 import { createApp } from '../server.ts';
 
@@ -56,11 +60,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
   // is silent arbitrary addressing: refused here, not hidden.
   const shared = sharedSecretAgents([...options.tokens, ...options.management]);
   if (shared.length > 0) {
-    const rows = shared.map((agents) => `"${agents.join('", "')}"`).join(', ');
-    throw new Error(
-      `refusing to start — the rows ${rows} share one secret — ` +
-        `every row's secret must be unique across tokens[] and management[]`,
-    );
+    throw new Error(`refusing to start — ${sharedSecretTeaching(shared)}`);
   }
   const registry = Registry.open(options.storesDir);
   // The #19 boot validation: a grant naming a store the registry does not

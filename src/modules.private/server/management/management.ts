@@ -8,7 +8,7 @@
  * /stores/:name` (204, hard — the cap is the confirmation, Q13).
  *
  * Refusals ride the envelope: grammar → 400 (the zod schemas carry the
- * store-name grammar; the defaultHook formats), foreign cap → 403
+ * store-name grammar; the defaultHook formats), wrong family → 403
  * (mounted on the exact management paths in the assembly), unknown store
  * → 404, collisions → 409. The bodies are strict (#60): an unknown key
  * refuses 400 with the envelope teaching, never strips. One route group

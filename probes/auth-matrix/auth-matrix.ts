@@ -134,8 +134,11 @@ const cases: readonly ProbeCase[] = [
       });
       if (r.status !== 404) return fail(`old-shape URL → ${r.status} (${r.text.slice(0, 140)})`);
       const taught = String(record(r.json)?.error ?? '');
-      if (!taught.includes('/doc'))
-        return fail(`the 404 does not teach: ${r.text.slice(0, 140)}`, 'doc-gap');
+      if (taught !== 'no such route — the API document serves at /doc')
+        return fail(
+          `the 404 does not teach the envelope's sentence: ${r.text.slice(0, 140)}`,
+          'doc-gap',
+        );
       const family = await req(b.server!.url, 'GET', '/stores', {
         headers: bearerHeaders(ALPH),
       });

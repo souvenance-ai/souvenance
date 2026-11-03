@@ -146,8 +146,9 @@ test('a thrown reach refusal is logged with its eventual status, not the opaque 
       logRequests: logPath,
     });
     // A management grant on the data surface: the family gate throws the
-    // HTTPException whose 403 the envelope will serve (#74 — the only
-    // reach refusal left, the foreign family retired with the path).
+    // HTTPException whose 403 the envelope will serve (#74 — the only 403
+    // left on the data surface is the family gate; the foreign family
+    // retired with the path).
     const res = await app.request('/memories', {
       headers: { authorization: `Bearer souv-${'a'.repeat(32)}` },
     });
