@@ -64,6 +64,10 @@ _Avoid_: clone, copy, self-duplication, continuity
 The serving key of the last memory served — the pair (`created_at`, `id`). `list` takes the next page strictly after it; the server hands it to its clients opaque and rebuilds it from the last served node. The UUID's lexicographic order breaks any millisecond tie.
 _Avoid_: offset (retired), page token, bookmark
 
+**Skill**:
+The orientation document the product serves the agent that consumes it: posture and practice for waking, sessioning, and consolidating. The product's voice, embedded in the package, served globally and publicly — never the individual's data: never stored in a store, never authored by an agent. Pull, not push: the index stays complete, the waking teaches restraint, and an installed copy in a project's harness only bootstraps the waking — the wire stays the canon of orientation.
+_Avoid_: prompt template, guide, documentation, INSTRUCTIONS (the legacy MCP string)
+
 ### The surfaces
 
 **Server**:
@@ -81,6 +85,10 @@ _Avoid_: proxy CLI
 **MCP bridge**:
 The stdio MCP server as a pure client of the server — never a second owner of stores.
 _Avoid_: MCP server (ambiguous with the HTTP server)
+
+**Guidance**:
+The wire's voice beside the data: the optional envelope section that marks a need-moment and points at the skill that answers it. It speaks only where the data alone cannot install the posture — the waking, the continuity of the hot, the empty store — and falls silent where the data already teaches: the checkout's verdict names the debts and their payment. Its mechanism is contract, its texts are content: the lines live with the skills they point at.
+_Avoid_: hint, tip, banner, notification
 
 ### Access
 
@@ -109,6 +117,10 @@ _Avoid_: declared stores, store list, catalog
 **Checkin**:
 The session-start ritual: the hot memories (with their relations) and the store's stats in one call.
 _Avoid_: recover, boot, restore
+
+**Waking line**:
+The minimal contract that opens a session: the waking posture plus the pair (mount, grant) — a URL pointing straight at the store and the token that opens it. Holding only that, the agent finds its way on the wire: the root pointer names the first skill, and everything else is pulled at need, never pushed.
+_Avoid_: bootstrap, onboarding, credentials block
 
 **Checkout**:
 The agent's session-end verdict: the store reports its consolidation debts — the register's curation and its islands — in one call; the light goes green only when every debt is paid, each payable with the raw verbs. Corruption is not the gate's business.
