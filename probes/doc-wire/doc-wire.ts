@@ -138,30 +138,24 @@ const cases: readonly ProbeCase[] = [
     id: 'A08',
     name: 'POST memories {content,kind} → 201 {id}',
     run: async (b) => {
-      const made = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const made = await call(b.server!.url, 'POST', '/memories', {
         body: { content: 'remember: first deployment X1', kind: 'note' },
       });
       if (made.status !== 201) return fail(`→ ${made.status} ${made.text}`);
       if (!uuid(String(record(made.json)?.id))) return fail(`id ${made.text}`);
-      return docAgrees(b, '/stores/{name}/memories', 'POST', made.status, made.json);
+      return docAgrees(b, '/memories', 'POST', made.status, made.json);
     },
   },
   {
     id: 'A09',
     name: 'POST memories metadata dot-path accepted',
     run: async (b) => {
-      const made = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const made = await call(b.server!.url, 'POST', '/memories', {
         body: { content: 'scalar metadata', kind: 'note', metadata: { source: 'prod', ntag: 7 } },
       });
       if (made.status !== 201) return fail(`→ ${made.status} ${made.text}`);
       const served = record(
-        (
-          await call(
-            b.server!.url,
-            'GET',
-            `/stores/alpha/memories/${String(record(made.json)?.id)}`,
-          )
-        ).json,
+        (await call(b.server!.url, 'GET', `/memories/${String(record(made.json)?.id)}`)).json,
       );
       const meta = record(served?.metadata);
       if (meta?.source !== 'prod' || meta?.ntag !== 7)
@@ -176,22 +170,18 @@ const cases: readonly ProbeCase[] = [
     id: 'A10',
     name: 'GET memory serves MemoryNode (active, out/in)',
     run: async (b) => {
-      const made = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const made = await call(b.server!.url, 'POST', '/memories', {
         body: { content: 'node probe', kind: 'note' },
       });
       if (made.status !== 201) return fail(`seed → ${made.status} ${made.text}`);
-      const served = await call(
-        b.server!.url,
-        'GET',
-        `/stores/alpha/memories/${String(record(made.json)?.id)}`,
-      );
+      const served = await call(b.server!.url, 'GET', `/memories/${String(record(made.json)?.id)}`);
       if (served.status !== 200) return fail(`→ ${served.status} ${served.text}`);
       const row = record(served.json);
       if (row?.status !== 'active') return fail(`status ${String(row?.status)}`);
       const relations = record(row?.relations);
       if (!Array.isArray(relations?.out) || !Array.isArray(relations?.in))
         return fail(`relations.out/in missing: ${served.text.slice(0, 300)}`, 'doc-gap');
-      return docAgrees(b, '/stores/{name}/memories/{id}', 'GET', served.status, served.json);
+      return docAgrees(b, '/memories/{id}', 'GET', served.status, served.json);
     },
   },
   {
@@ -199,11 +189,11 @@ const cases: readonly ProbeCase[] = [
     name: 'GET memories list — {memories,next_after}, order (created_at,id) DESC',
     run: async (b) => {
       for (let i = 0; i < 3; i++) {
-        await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+        await call(b.server!.url, 'POST', '/memories', {
           body: { content: `order row ${Date.now()} ${i}`, kind: 'event' },
         });
       }
-      const served = await call(b.server!.url, 'GET', '/stores/alpha/memories');
+      const served = await call(b.server!.url, 'GET', '/memories');
       if (served.status !== 200) return fail(`→ ${served.status}`);
       const rows = memoriesOf(record(served.json));
       const pairs = rows.map((entry) => [String(entry.created_at), String(entry.id)]);
@@ -222,7 +212,7 @@ const cases: readonly ProbeCase[] = [
         return fail(
           `next_after should be null on a full page, got ${JSON.stringify(record(served.json)?.next_after)}`,
         );
-      return docAgrees(b, '/stores/{name}/memories', 'GET', served.status, served.json);
+      return docAgrees(b, '/memories', 'GET', served.status, served.json);
     },
   },
   {
@@ -230,15 +220,15 @@ const cases: readonly ProbeCase[] = [
     name: 'keyset paging: two-row store, peek truth per page, no overlap',
     run: async (b) => {
       // page-test is born at grandOpening — its grant rode the config (#63).
-      await call(b.server!.url, 'POST', '/stores/page-test/memories', {
+      await call(b.server!.url, 'POST', '/memories', {
         headers: bearerHeaders(PAGE_SECRET),
         body: { content: `row 1 ${Date.now()}`, kind: 'event' },
       });
-      await call(b.server!.url, 'POST', '/stores/page-test/memories', {
+      await call(b.server!.url, 'POST', '/memories', {
         headers: bearerHeaders(PAGE_SECRET),
         body: { content: `row 2 ${Date.now()}`, kind: 'event' },
       });
-      const p1 = await call(b.server!.url, 'GET', '/stores/page-test/memories?limit=1', {
+      const p1 = await call(b.server!.url, 'GET', '/memories?limit=1', {
         headers: bearerHeaders(PAGE_SECRET),
       });
       const first = memoriesOf(record(p1.json));
@@ -252,7 +242,7 @@ const cases: readonly ProbeCase[] = [
       const tail = await call(
         b.server!.url,
         'GET',
-        `/stores/page-test/memories?limit=1&after=${encodeURIComponent(String(record(p1.json)?.next_after))}`,
+        `/memories?limit=1&after=${encodeURIComponent(String(record(p1.json)?.next_after))}`,
         { headers: bearerHeaders(PAGE_SECRET) },
       );
       if (tail.status !== 200) return fail(`after → ${tail.status} ${tail.text.slice(0, 160)}`);
@@ -263,25 +253,25 @@ const cases: readonly ProbeCase[] = [
           `next_after non-null though no page remains: ${tail.text.slice(0, 160)}`,
           'doc-gap',
         );
-      return docAgrees(b, '/stores/{name}/memories', 'GET', tail.status, tail.json);
+      return docAgrees(b, '/memories', 'GET', tail.status, tail.json);
     },
   },
   {
     id: 'A13',
     name: '?kind filter — a lone param is its singleton, repeated params IN',
     run: async (b) => {
-      await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      await call(b.server!.url, 'POST', '/memories', {
         body: { content: `event row ${Date.now()}`, kind: 'event' },
       });
       // The singleton must REALLY filter: this half passed vacuously when
       // a lone kind refused 400 (the empty row list can't leak) — #62.
-      const one = await call(b.server!.url, 'GET', '/stores/alpha/memories?kind=note');
+      const one = await call(b.server!.url, 'GET', '/memories?kind=note');
       if (one.status !== 200) return fail(`?kind=note → ${one.status}`, 'doc-gap');
       const lone = memoriesOf(record(one.json));
       if (lone.length === 0) return fail('the singleton kind filter served nothing — vacuous');
       if (lone.some((entry) => entry.kind !== 'note'))
         return fail(`kind filter leak: ${one.text.slice(0, 200)}`);
-      const both = await call(b.server!.url, 'GET', '/stores/alpha/memories?kind=note&kind=event');
+      const both = await call(b.server!.url, 'GET', '/memories?kind=note&kind=event');
       const kinds = new Set(memoriesOf(record(both.json)).map((entry) => String(entry.kind)));
       if (![...kinds].includes('note') || ![...kinds].includes('event'))
         return fail(`IN filter lost: ${both.text.slice(0, 200)}`, 'doc-gap');
@@ -292,13 +282,13 @@ const cases: readonly ProbeCase[] = [
     id: 'A14',
     name: '?metadata filter dot-path equality',
     run: async (b) => {
-      await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      await call(b.server!.url, 'POST', '/memories', {
         body: { content: 'filtered on', kind: 'note', metadata: { source: 'prod', ntag: 7 } },
       });
       const served = await call(
         b.server!.url,
         'GET',
-        `/stores/alpha/memories?metadata=${encodeURIComponent(JSON.stringify({ source: 'prod' }))}`,
+        `/memories?metadata=${encodeURIComponent(JSON.stringify({ source: 'prod' }))}`,
       );
       if (served.status !== 200) return fail(`→ ${served.status} ${served.text.slice(0, 160)}`);
       const hits = memoriesOf(record(served.json));
@@ -318,33 +308,33 @@ const cases: readonly ProbeCase[] = [
       const served = await call(
         b.server!.url,
         'GET',
-        `/stores/alpha/search?q=${encodeURIComponent('deployment')}`,
+        `/search?q=${encodeURIComponent('deployment')}`,
       );
       if (served.status !== 200) return fail(`→ ${served.status} ${served.text.slice(0, 160)}`);
       const hits = records(served.json);
       const relevant = JSON.stringify(served.json).includes('deployment');
       if (!Array.isArray(served.json) || (hits.length > 0 && !relevant))
         return fail(`bm25 empty for 'deployment': ${served.text.slice(0, 200)}`, 'doc-gap');
-      return docAgrees(b, '/stores/{name}/search', 'GET', served.status, served.json);
+      return docAgrees(b, '/search', 'GET', served.status, served.json);
     },
   },
   {
     id: 'A16',
     name: 'checkin ritual {hot,stats}',
     run: async (b) => {
-      const served = await call(b.server!.url, 'GET', '/stores/alpha/checkin');
+      const served = await call(b.server!.url, 'GET', '/checkin');
       if (served.status !== 200) return fail(`→ ${served.status} ${served.text.slice(0, 160)}`);
       const row = record(served.json);
       if (!Array.isArray(row?.hot) || typeof row?.stats !== 'object')
         return fail(`shape ${served.text.slice(0, 200)}`);
-      return docAgrees(b, '/stores/{name}/checkin', 'GET', served.status, served.json);
+      return docAgrees(b, '/checkin', 'GET', served.status, served.json);
     },
   },
   {
     id: 'A17',
     name: 'checkin ?limit obeys',
     run: async (b) => {
-      const served = await call(b.server!.url, 'GET', '/stores/alpha/checkin?limit=0');
+      const served = await call(b.server!.url, 'GET', '/checkin?limit=0');
       if (served.status !== 400)
         return fail(
           `limit=0 should refuse (cap 1000 → 400 per map): ${served.status} ${served.text.slice(0, 160)}`,
@@ -357,31 +347,31 @@ const cases: readonly ProbeCase[] = [
     id: 'A18',
     name: 'checkout verdict shape',
     run: async (b) => {
-      const served = await call(b.server!.url, 'GET', '/stores/alpha/checkout');
+      const served = await call(b.server!.url, 'GET', '/checkout');
       if (served.status !== 200) return fail(`→ ${served.status} ${served.text.slice(0, 160)}`);
-      return docAgrees(b, '/stores/{name}/checkout', 'GET', served.status, served.json);
+      return docAgrees(b, '/checkout', 'GET', served.status, served.json);
     },
   },
   {
     id: 'A19',
     name: 'hot true/false toggles status',
     run: async (b) => {
-      const made = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const made = await call(b.server!.url, 'POST', '/memories', {
         body: { content: `hot toggle ${Date.now()}`, kind: 'note' },
       });
       const id = String(record(made.json)?.id);
-      let served = await call(b.server!.url, 'POST', `/stores/alpha/memories/${id}/hot`, {
+      let served = await call(b.server!.url, 'POST', `/memories/${id}/hot`, {
         body: { hot: true },
       });
       if (served.status !== 204) return fail(`hot:true → ${served.status} ${served.text}`);
-      let node = record((await call(b.server!.url, 'GET', `/stores/alpha/memories/${id}`)).json);
+      let node = record((await call(b.server!.url, 'GET', `/memories/${id}`)).json);
       if (node?.status !== 'hot')
         return fail(`status after hot:true: ${String(node?.status)}`, 'doc-gap');
-      served = await call(b.server!.url, 'POST', `/stores/alpha/memories/${id}/hot`, {
+      served = await call(b.server!.url, 'POST', `/memories/${id}/hot`, {
         body: { hot: false },
       });
       if (served.status !== 204) return fail(`hot:false → ${served.status} ${served.text}`);
-      node = record((await call(b.server!.url, 'GET', `/stores/alpha/memories/${id}`)).json);
+      node = record((await call(b.server!.url, 'GET', `/memories/${id}`)).json);
       if (node?.status !== 'active')
         return fail(`status after hot:false: ${String(node?.status)}`, 'doc-gap');
       return ok('204 toggles, status flips hot↔active');
@@ -394,7 +384,7 @@ const cases: readonly ProbeCase[] = [
       const from = String(
         record(
           (
-            await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+            await call(b.server!.url, 'POST', '/memories', {
               body: { content: `link from ${Date.now()}`, kind: 'event' },
             })
           ).json,
@@ -403,18 +393,18 @@ const cases: readonly ProbeCase[] = [
       const to = String(
         record(
           (
-            await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+            await call(b.server!.url, 'POST', '/memories', {
               body: { content: `link to ${Date.now()}`, kind: 'event' },
             })
           ).json,
         )?.id,
       );
-      let served = await call(b.server!.url, 'POST', `/stores/alpha/memories/${from}/link`, {
+      let served = await call(b.server!.url, 'POST', `/memories/${from}/link`, {
         body: { to, kind: 'relates-to' },
       });
       if (served.status !== 201) return fail(`link → ${served.status} ${served.text}`);
       const walkedRow = record(
-        (await call(b.server!.url, 'GET', `/stores/alpha/memories/${from}?depth=1`)).json,
+        (await call(b.server!.url, 'GET', `/memories/${from}?depth=1`)).json,
       );
       const walked = JSON.stringify(record(walkedRow?.relations)?.out ?? null);
       if (!walked.includes(to))
@@ -422,13 +412,11 @@ const cases: readonly ProbeCase[] = [
           `out edge not walked: ${walkedRow ? walked.slice(0, 240) : 'no row'}`,
           'doc-gap',
         );
-      served = await call(b.server!.url, 'DELETE', `/stores/alpha/memories/${from}/link`, {
+      served = await call(b.server!.url, 'DELETE', `/memories/${from}/link`, {
         body: { to },
       });
       if (served.status !== 204) return fail(`unlink → ${served.status} ${served.text}`);
-      const cleaned = record(
-        (await call(b.server!.url, 'GET', `/stores/alpha/memories/${from}?depth=1`)).json,
-      );
+      const cleaned = record((await call(b.server!.url, 'GET', `/memories/${from}?depth=1`)).json);
       if (((record(cleaned?.relations)?.out as unknown[]) ?? []).length !== 0)
         return fail(
           `edge still there: ${cleaned ? JSON.stringify(record(cleaned.relations)?.out) : 'no row'}`,
@@ -444,36 +432,25 @@ const cases: readonly ProbeCase[] = [
       const target = String(
         record(
           (
-            await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+            await call(b.server!.url, 'POST', '/memories', {
               body: { content: `supersede me ${Date.now()}`, kind: 'event' },
             })
           ).json,
         )?.id,
       );
-      const revision = await call(
-        b.server!.url,
-        'POST',
-        `/stores/alpha/memories/${target}/supersede`,
-        { body: { content: 'superseded — the revision faces the light' } },
-      );
+      const revision = await call(b.server!.url, 'POST', `/memories/${target}/supersede`, {
+        body: { content: 'superseded — the revision faces the light' },
+      });
       if (revision.status !== 201)
         return fail(`→ ${revision.status} ${revision.text.slice(0, 200)}`);
       if (!uuid(String(record(revision.json)?.id)))
         return fail(`id ${revision.text.slice(0, 200)}`);
       const head = String(record(revision.json)?.id);
-      const old = record(
-        (await call(b.server!.url, 'GET', `/stores/alpha/memories/${target}`)).json,
-      );
-      const now = record((await call(b.server!.url, 'GET', `/stores/alpha/memories/${head}`)).json);
+      const old = record((await call(b.server!.url, 'GET', `/memories/${target}`)).json);
+      const now = record((await call(b.server!.url, 'GET', `/memories/${head}`)).json);
       if (old?.status !== 'superseded') return fail(`old status ${String(old?.status)}`, 'doc-gap');
       if (now?.status !== 'active') return fail(`new status ${String(now?.status)}`, 'doc-gap');
-      return docAgrees(
-        b,
-        '/stores/{name}/memories/{id}/supersede',
-        'POST',
-        revision.status,
-        revision.json,
-      );
+      return docAgrees(b, '/memories/{id}/supersede', 'POST', revision.status, revision.json);
     },
   },
   {
@@ -483,32 +460,30 @@ const cases: readonly ProbeCase[] = [
       const mark = String(
         record(
           (
-            await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+            await call(b.server!.url, 'POST', '/memories', {
               body: { content: `deprecate me ${Date.now()}`, kind: 'event' },
             })
           ).json,
         )?.id,
       );
-      const served = await call(b.server!.url, 'POST', `/stores/alpha/memories/${mark}/deprecate`);
+      const served = await call(b.server!.url, 'POST', `/memories/${mark}/deprecate`);
       if (served.status !== 204) return fail(`→ ${served.status} ${served.text}`);
-      const node = record(
-        (await call(b.server!.url, 'GET', `/stores/alpha/memories/${mark}`)).json,
-      );
+      const node = record((await call(b.server!.url, 'GET', `/memories/${mark}`)).json);
       if (node?.status !== 'deprecated') return fail(`status ${String(node?.status)}`, 'doc-gap');
-      return docAgrees(b, '/stores/{name}/memories/{id}/deprecate', 'POST', served.status, null);
+      return docAgrees(b, '/memories/{id}/deprecate', 'POST', served.status, null);
     },
   },
   {
     id: 'A23',
     name: 'merge {ids,content} → 201 {id}',
     run: async (b) => {
-      const first = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const first = await call(b.server!.url, 'POST', '/memories', {
         body: { content: `merge source kind note A${Date.now()}`, kind: 'note' },
       });
-      const second = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const second = await call(b.server!.url, 'POST', '/memories', {
         body: { content: `merge source kind note B${Date.now()}`, kind: 'note' },
       });
-      const merged = await call(b.server!.url, 'POST', '/stores/alpha/merge', {
+      const merged = await call(b.server!.url, 'POST', '/merge', {
         body: {
           ids: [String(record(first.json)?.id), String(record(second.json)?.id)],
           content: 'merged text',
@@ -516,7 +491,7 @@ const cases: readonly ProbeCase[] = [
       });
       if (merged.status !== 201) return fail(`→ ${merged.status} ${merged.text.slice(0, 200)}`);
       if (!uuid(String(record(merged.json)?.id))) return fail(`id ${merged.text.slice(0, 200)}`);
-      return docAgrees(b, '/stores/{name}/merge', 'POST', merged.status, merged.json);
+      return docAgrees(b, '/merge', 'POST', merged.status, merged.json);
     },
   },
   {

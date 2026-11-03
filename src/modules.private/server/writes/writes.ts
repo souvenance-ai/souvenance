@@ -5,10 +5,12 @@
  * inheritance the kind column ruled, #31). The created answer is the id
  * (Q21); the mute writes answer 204 (Q19); the created edge echoes
  * itself without inventing a created_at the facade never returned (Q20).
- * Every handler walks the gates in order: reach (403 foreign, slice 3's
- * door), then mode (403 ro — reads are open to ro, writes never), then
- * the facade, whose refusals ride the envelope (400 invalid, 404
- * unknown, 409 status fights).
+ * Every handler walks the gates in order: family (403 — management
+ * reaches no store's data), then existence in the registry (404 — the
+ * orphaned grant's answer), then mode (403 ro — reads are open to ro,
+ * writes never), then the facade, whose refusals ride the envelope
+ * (400 invalid, 404 unknown, 409 status fights). The grant IS the
+ * address (ADR 0007): no path segment names the store.
  *
  * Every body is strict (#60): an unknown key refuses 400 with the
  * envelope teaching, never strips — a silently-dropped authored field is
@@ -21,12 +23,10 @@ import { writableStore } from '../reached-store/reached-store.ts';
 import type { ServerEnv } from '../auth/auth.ts';
 import type { Registry } from '../registry/registry.ts';
 import {
-  foreignRefusal,
   invalidRefusal,
   MemoryIdParamsSchema,
   payloadRefusal,
   refusal,
-  StoreParamsSchema,
   unknownMemoryRefusal,
   unknownStoreRefusal,
 } from '../wire/wire.ts';
@@ -99,10 +99,9 @@ const statusRefusal = () => refusal('the memory fights its status');
 export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
   const createMemory = createRoute({
     method: 'post',
-    path: '/stores/{name}/memories',
+    path: '/memories',
     tags: ['memories'],
     request: {
-      params: StoreParamsSchema,
       body: { content: { 'application/json': { schema: StoreBodySchema } }, required: true },
     },
     responses: {
@@ -111,14 +110,12 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
         content: { 'application/json': { schema: CreatedSchema } },
       },
       400: invalidRefusal('the body refuses — kind required, summary ceiling, grammar'),
-      403: foreignRefusal(),
       404: unknownStoreRefusal(),
       413: payloadRefusal(),
     },
   });
   app.openapi(createMemory, (c) => {
-    const { name } = c.req.valid('param');
-    const store = writableStore(c, registry, name);
+    const store = writableStore(c, registry);
     const body = c.req.valid('json');
     const id = store.store(body.content, {
       kind: body.kind,
@@ -133,7 +130,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
 
   const supersedeMemory = createRoute({
     method: 'post',
-    path: '/stores/{name}/memories/{id}/supersede',
+    path: '/memories/{id}/supersede',
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
@@ -145,15 +142,14 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
         content: { 'application/json': { schema: CreatedSchema } },
       },
       400: invalidRefusal('the body refuses — summary ceiling, kind grammar'),
-      403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       409: statusRefusal(),
       413: payloadRefusal(),
     },
   });
   app.openapi(supersedeMemory, (c) => {
-    const { name, id } = c.req.valid('param');
-    const store = writableStore(c, registry, name);
+    const { id } = c.req.valid('param');
+    const store = writableStore(c, registry);
     const body = c.req.valid('json');
     const successor = store.supersede(id, body.content, {
       kind: body.kind,
@@ -170,27 +166,26 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
 
   const deprecateMemory = createRoute({
     method: 'post',
-    path: '/stores/{name}/memories/{id}/deprecate',
+    path: '/memories/{id}/deprecate',
     tags: ['memories'],
     request: { params: MemoryIdParamsSchema },
     responses: {
       204: { description: 'deprecated — nothing to say' },
-      403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       409: statusRefusal(),
       413: payloadRefusal(),
     },
   });
   app.openapi(deprecateMemory, (c) => {
-    const { name, id } = c.req.valid('param');
-    const store = writableStore(c, registry, name);
+    const { id } = c.req.valid('param');
+    const store = writableStore(c, registry);
     store.deprecate(id);
     return c.body(null, 204);
   });
 
   const setHot = createRoute({
     method: 'post',
-    path: '/stores/{name}/memories/{id}/hot',
+    path: '/memories/{id}/hot',
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
@@ -199,15 +194,14 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     responses: {
       204: { description: 'the status lands — nothing to say' },
       400: invalidRefusal('the body is not ours'),
-      403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       409: statusRefusal(),
       413: payloadRefusal(),
     },
   });
   app.openapi(setHot, (c) => {
-    const { name, id } = c.req.valid('param');
-    const store = writableStore(c, registry, name);
+    const { id } = c.req.valid('param');
+    const store = writableStore(c, registry);
     const { hot } = c.req.valid('json');
     store.setHot(id, hot);
     return c.body(null, 204);
@@ -215,7 +209,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
 
   const linkMemories = createRoute({
     method: 'post',
-    path: '/stores/{name}/memories/{id}/link',
+    path: '/memories/{id}/link',
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
@@ -227,14 +221,13 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
         content: { 'application/json': { schema: EdgeEchoSchema } },
       },
       400: invalidRefusal('the body refuses — self-edges refuse, kind must be non-empty'),
-      403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       413: payloadRefusal(),
     },
   });
   app.openapi(linkMemories, (c) => {
-    const { name, id } = c.req.valid('param');
-    const store = writableStore(c, registry, name);
+    const { id } = c.req.valid('param');
+    const store = writableStore(c, registry);
     const body = c.req.valid('json');
     store.link(id, body.to, body.kind, { metadata: body.metadata });
     return c.json({ from_id: id, to_id: body.to, kind: body.kind }, 201);
@@ -242,7 +235,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
 
   const unlinkMemories = createRoute({
     method: 'delete',
-    path: '/stores/{name}/memories/{id}/link',
+    path: '/memories/{id}/link',
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
@@ -251,15 +244,14 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     responses: {
       204: { description: 'the edge is gone — nothing to say' },
       400: invalidRefusal('the body is not ours — ambiguous edges need the kind'),
-      403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       409: statusRefusal(),
       413: payloadRefusal(),
     },
   });
   app.openapi(unlinkMemories, (c) => {
-    const { name, id } = c.req.valid('param');
-    const store = writableStore(c, registry, name);
+    const { id } = c.req.valid('param');
+    const store = writableStore(c, registry);
     const body = c.req.valid('json');
     store.unlink(id, body.to, body.kind);
     return c.body(null, 204);
@@ -267,10 +259,9 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
 
   const mergeMemories = createRoute({
     method: 'post',
-    path: '/stores/{name}/merge',
+    path: '/merge',
     tags: ['memories'],
     request: {
-      params: StoreParamsSchema,
       body: { content: { 'application/json': { schema: MergeBodySchema } }, required: true },
     },
     responses: {
@@ -279,15 +270,13 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
         content: { 'application/json': { schema: CreatedSchema } },
       },
       400: invalidRefusal('the body refuses — at least two memories, non-empty content'),
-      403: foreignRefusal(),
       404: unknownMemoryRefusal(),
       409: statusRefusal(),
       413: payloadRefusal(),
     },
   });
   app.openapi(mergeMemories, (c) => {
-    const { name } = c.req.valid('param');
-    const store = writableStore(c, registry, name);
+    const store = writableStore(c, registry);
     const body = c.req.valid('json');
     const fused = store.merge(body.ids, body.content, {
       kind: body.kind,

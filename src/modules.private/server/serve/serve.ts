@@ -13,7 +13,7 @@
  */
 import { serve, type ServerType } from '@hono/node-server';
 import { appendFileSync } from 'node:fs';
-import type { CredentialFamilies } from '../../config/config.ts';
+import { sharedSecretAgents, type CredentialFamilies } from '../../config/config.ts';
 import { Registry } from '../registry/registry.ts';
 import { createApp } from '../server.ts';
 
@@ -47,6 +47,19 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     throw new Error(
       `refusing to start — zero credentials: no token, no memory; ` +
         `mint a grant in tokens[] or management[] of ~/.souvenance/config.json`,
+    );
+  }
+  // The #74 rider: the duplicate-secret walk at the programmatic boot.
+  // The file path refuses a shared secret at parse; a hand-built
+  // ServeOptions never met it — and resolveBearer resolves a duplicate
+  // by first match. With the grant as the address, a duplicated secret
+  // is silent arbitrary addressing: refused here, not hidden.
+  const shared = sharedSecretAgents([...options.tokens, ...options.management]);
+  if (shared.length > 0) {
+    const rows = shared.map((agents) => `"${agents.join('", "')}"`).join(', ');
+    throw new Error(
+      `refusing to start — the rows ${rows} share one secret — ` +
+        `every row's secret must be unique across tokens[] and management[]`,
     );
   }
   const registry = Registry.open(options.storesDir);

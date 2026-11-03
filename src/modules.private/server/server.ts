@@ -2,13 +2,14 @@
  * The HTTP server's skeleton (#20 slice 1): the public doors (/healthz,
  * /doc + its conventional alias /openapi.json, /docs, the root pointer —
  * shape disclosure only, Q7; the living test burned two agent lives
- * knocking on mute doors — #62), the guarded /stores/*
- * namespace every slice's routes mount into, the refusal envelope
- * ({error: message}), and the caps. StoreError codes map to statuses
- * once, here — the honest mapping the typed refusals exist for (Q2);
- * a non-StoreError is an internal error and busy is an opaque 503, both
- * keeping their internals on the operator's stderr, never on the wire
- * (#19: 500/503 do not disclose).
+ * knocking on mute doors — #62), the guarded namespaces every
+ * credential-bearing route mounts into (#74: management under /stores/*,
+ * the data surface at the root — the grant IS the address), the refusal
+ * envelope ({error: message}), and the caps. StoreError codes map to
+ * statuses once, here — the honest mapping the typed refusals exist for
+ * (Q2); a non-StoreError is an internal error and busy is an opaque 503,
+ * both keeping their internals on the operator's stderr, never on the
+ * wire (#19: 500/503 do not disclose).
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { swaggerUI } from '@hono/swagger-ui';
@@ -132,29 +133,29 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   });
   // The 404 teaches: the envelope keeps its one shape, the message points
   // the way in (#62 — a mute 404 nearly cost a session its life).
-  app.notFound((c) =>
-    c.json(
-      { error: 'no such route — the API document serves at /doc, the API lives under /stores' },
-      404,
-    ),
-  );
+  app.notFound((c) => c.json({ error: 'no such route — the API document serves at /doc' }, 404));
 
-  // The guarded namespace: the whole API lives under /stores/* (#19 Mount).
-  // Auth first, then the rate limit (it reads the grant), then the cap.
-  app.use('/stores/*', auth(deps));
-  app.use('/stores/*', rateLimit());
-  app.use(
-    '/stores/*',
-    bodyLimit({
-      maxSize: MAX_BODY_BYTES,
-      onError: (c) => c.json({ error: `body exceeds ${MAX_BODY_BYTES} bytes` }, 413),
-    }),
-  );
+  // The guarded namespaces (#74): management under /stores/* — names are
+  // its subject — and the data routes at the root, where the grant IS
+  // the address. Auth first, then the rate limit (it reads the grant),
+  // then the cap. The public doors (/, /healthz, /doc, /docs,
+  // /openapi.json) stay outside: no token, no bucket, no cap.
+  const guardedPaths = ['/stores/*', '/memories/*', '/search', '/merge', '/checkin', '/checkout'];
+  const bearer = auth(deps);
+  const limiter = rateLimit();
+  const capped = bodyLimit({
+    maxSize: MAX_BODY_BYTES,
+    onError: (c) => c.json({ error: `body exceeds ${MAX_BODY_BYTES} bytes` }, 413),
+  });
+  for (const path of guardedPaths) {
+    app.use(path, bearer);
+    app.use(path, limiter);
+    app.use(path, capped);
+  }
 
   // The management gate (#63): the exact management paths only — the
   // management family serves them, a store grant refuses 403. The data
-  // routes (slices 3–4) live deeper under /stores/:name/… and serve
-  // store grants.
+  // routes live at the root (#74) and serve store grants.
   app.use('/stores', requireManagement());
   app.use('/stores/:name', requireManagement());
   app.use('/stores/:name/fork', requireManagement());

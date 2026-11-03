@@ -358,7 +358,8 @@ export interface ServedDocument {
 /**
  * Fold one observed exchange against the served document: the status must
  * be declared for the route+method and the body must satisfy the declared
- * schema. routePath is the literal OpenAPI path ('/stores/{name}…').
+ * schema. routePath is the literal OpenAPI path (e.g. '/memories',
+ * '/stores/{name}').
  */
 export function docAgrees(
   battery: Battery,

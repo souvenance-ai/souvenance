@@ -60,7 +60,7 @@ const cases: readonly ProbeCase[] = [
         ['just null', 'null'],
         ['nul byte', '{"content":"a\u0000b","kind":"note"}'],
       ] as const) {
-        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', { body: raw });
+        const r = await call(b.server!.url, 'POST', '/memories', { body: raw });
         const verdict = awaits(r, [400, 413, 415], tag);
         if (verdict) return verdict;
       }
@@ -79,7 +79,7 @@ const cases: readonly ProbeCase[] = [
         ['kind empty', { content: 'x', kind: '' }],
         ['kind null', { content: 'x', kind: null }],
       ] as const) {
-        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const r = await call(b.server!.url, 'POST', '/memories', {
           body: body as object,
         });
         const verdict = awaits(r, [400], tag);
@@ -92,7 +92,7 @@ const cases: readonly ProbeCase[] = [
     id: 'B03',
     name: 'extra keys refuse — the wire teaches what it does not serve (#60)',
     run: async (b) => {
-      const made = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const made = await call(b.server!.url, 'POST', '/memories', {
         body: { content: 'x', kind: 'note', armor: true },
       });
       if (made.status !== 400) return fail(`extra key → ${made.status} ${made.text.slice(0, 140)}`);
@@ -112,7 +112,7 @@ const cases: readonly ProbeCase[] = [
         ['kind number', { content: 'x', kind: 42 }],
         ['kind object', { content: 'x', kind: { a: 1 } }],
       ] as const) {
-        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const r = await call(b.server!.url, 'POST', '/memories', {
           body: body as object,
         });
         const verdict = awaits(r, [400], tag);
@@ -126,7 +126,7 @@ const cases: readonly ProbeCase[] = [
     name: 'kind is a free vocabulary, not an enum',
     run: async (b) => {
       for (const kind of ['dream', 'X1', 'note-2', 'latin1_é']) {
-        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const r = await call(b.server!.url, 'POST', '/memories', {
           body: { content: `kind probe ${kind}`, kind },
         });
         if (r.status !== 201)
@@ -149,13 +149,13 @@ const cases: readonly ProbeCase[] = [
         ['unicode', 'clé'],
         ['star', 'a*b'],
       ] as const) {
-        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const r = await call(b.server!.url, 'POST', '/memories', {
           body: { content: 'metadata probe', kind: 'note', metadata: { [key]: 'v' } },
         });
         const verdict = awaits(r, [400], `metadata key ${JSON.stringify(key)}`);
         if (verdict) return verdict;
       }
-      const plain = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const plain = await call(b.server!.url, 'POST', '/memories', {
         body: { content: 'metadata ok probe', kind: 'note', metadata: { 'a-b_C9': 'v' } },
       });
       if (plain.status !== 201)
@@ -170,7 +170,7 @@ const cases: readonly ProbeCase[] = [
     id: 'B07',
     name: 'metadata value grammar: trees serve, arrays/null refuse (#51 fix)',
     run: async (b) => {
-      const tree = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const tree = await call(b.server!.url, 'POST', '/memories', {
         body: {
           content: `tree row ${Date.now()}`,
           kind: 'note',
@@ -185,12 +185,12 @@ const cases: readonly ProbeCase[] = [
         ['null', { owner: null }],
         ['non-finite', { rank: NaN }],
       ] as const) {
-        const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const r = await call(b.server!.url, 'POST', '/memories', {
           body: { content: 'x', kind: 'note', metadata },
         });
         if (r.json === null && tag === 'non-finite') {
           // the wire's JSON cannot even carry a NaN literal — the gate holds
-          const raw = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+          const raw = await call(b.server!.url, 'POST', '/memories', {
             body: '{"content":"nan case","kind":"note","metadata":{"rank":NaN}}',
           });
           if (raw.status !== 400)
@@ -209,7 +209,7 @@ const cases: readonly ProbeCase[] = [
       const walked = await call(
         b.server!.url,
         'GET',
-        `/stores/alpha/memories?metadata=${encodeURIComponent(JSON.stringify({ 'tree.ab': 9 }))}`,
+        `/memories?metadata=${encodeURIComponent(JSON.stringify({ 'tree.ab': 9 }))}`,
       );
       const hits = memoriesOf(record(walked.json));
       if (hits.length !== 1 || hits[0]?.id !== record(tree.json)?.id)
@@ -229,19 +229,13 @@ const cases: readonly ProbeCase[] = [
         ['bom', '\ufeffcloaked'],
         ['quotes', '"p"q\'r\ts'],
       ] as const) {
-        const made = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+        const made = await call(b.server!.url, 'POST', '/memories', {
           body: { content: text, kind: 'note' },
         });
         if (made.status !== 201)
           return fail(`${tag} refused: ${made.status} ${made.text.slice(0, 160)}`);
         const node = record(
-          (
-            await call(
-              b.server!.url,
-              'GET',
-              `/stores/alpha/memories/${String(record(made.json)?.id)}`,
-            )
-          ).json,
+          (await call(b.server!.url, 'GET', `/memories/${String(record(made.json)?.id)}`)).json,
         );
         if (node?.content !== text)
           return fail(`${tag} round-trip drift: got ${JSON.stringify(node?.content)}`, 'doc-gap');
@@ -254,7 +248,7 @@ const cases: readonly ProbeCase[] = [
     name: 'oversized body → refusal, no hang',
     run: async (b) => {
       const big = 'b'.repeat(1_300_000);
-      const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const r = await call(b.server!.url, 'POST', '/memories', {
         body: JSON.stringify({ content: big, kind: 'note' }),
       });
       if (!r.status.toString().startsWith('4'))
@@ -267,7 +261,7 @@ const cases: readonly ProbeCase[] = [
       const declared = b.document as {
         paths?: Record<string, Record<string, { responses?: Record<string, unknown> }>>;
       };
-      const responses = declared.paths?.['/stores/{name}/memories']?.post?.responses ?? {};
+      const responses = declared.paths?.['/memories']?.post?.responses ?? {};
       if (!('413' in responses))
         return fail(
           `wire serves 413, /doc declares ${Object.keys(responses).join(',')} only`,
@@ -288,11 +282,11 @@ const cases: readonly ProbeCase[] = [
         ['exponent', 1e15],
         ['huge', 99999999999999999999],
       ] as const) {
-        const r = await call(b.server!.url, 'GET', `/stores/alpha/memories?limit=${q}`);
+        const r = await call(b.server!.url, 'GET', `/memories?limit=${q}`);
         const verdict = awaits(r, [400], `limit=${tag}`);
         if (verdict) return verdict;
       }
-      const capOk = await call(b.server!.url, 'GET', '/stores/alpha/memories?limit=1000');
+      const capOk = await call(b.server!.url, 'GET', '/memories?limit=1000');
       if (capOk.status !== 200) return fail(`limit=1000 (cap) refused: ${capOk.status}`, 'doc-gap');
       return ok('hostile limits refused, cap accepted');
     },
@@ -308,7 +302,7 @@ const cases: readonly ProbeCase[] = [
         ['raw json', encodeURIComponent('{"a":1}')],
         ['url junk', '%2F..%2F..%2Fetc'],
       ] as const) {
-        const r = await call(b.server!.url, 'GET', `/stores/alpha/memories?after=${after}`);
+        const r = await call(b.server!.url, 'GET', `/memories?after=${after}`);
         const verdict = awaits(r, [400], `after=${tag}`);
         if (verdict) return verdict;
       }
@@ -320,21 +314,21 @@ const cases: readonly ProbeCase[] = [
     name: 'cross-store cursor reuse — bloodless',
     run: async (b) => {
       // cursor-other is born at grandOpening — its grant rode the config (#63).
-      await call(b.server!.url, 'POST', '/stores/cursor-other/memories', {
+      await call(b.server!.url, 'POST', '/memories', {
         headers: bearerHeaders(OTHER_SECRET),
         body: { content: `stranger row ${Date.now()}`, kind: 'event' },
       });
-      await call(b.server!.url, 'POST', '/stores/cursor-other/memories', {
+      await call(b.server!.url, 'POST', '/memories', {
         headers: bearerHeaders(OTHER_SECRET),
         body: { content: `stranger row ${Date.now()}`, kind: 'event' },
       });
-      const p1 = await call(b.server!.url, 'GET', '/stores/cursor-other/memories?limit=1', {
+      const p1 = await call(b.server!.url, 'GET', '/memories?limit=1', {
         headers: bearerHeaders(OTHER_SECRET),
       });
       const reused = await call(
         b.server!.url,
         'GET',
-        `/stores/alpha/memories?limit=1&after=${encodeURIComponent(String(record(p1.json)?.next_after))}`,
+        `/memories?limit=1&after=${encodeURIComponent(String(record(p1.json)?.next_after))}`,
       );
       if (reused.status === 200) {
         if (
@@ -355,18 +349,18 @@ const cases: readonly ProbeCase[] = [
     id: 'B13',
     name: 'deleted-cursor row — gap or clean serve',
     run: async (b) => {
-      const gone = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const gone = await call(b.server!.url, 'POST', '/memories', {
         body: { content: `page anchor ${Date.now()}`, kind: 'event' },
       });
-      const first = await call(b.server!.url, 'GET', '/stores/alpha/memories?limit=1');
+      const first = await call(b.server!.url, 'GET', '/memories?limit=1');
       const anchor = String(record(first.json)?.next_after);
-      await call(b.server!.url, 'POST', `/stores/alpha/memories/${String(record(gone.json)?.id)}`, {
+      await call(b.server!.url, 'POST', `/memories/${String(record(gone.json)?.id)}`, {
         body: undefined,
       });
       const next = await call(
         b.server!.url,
         'GET',
-        `/stores/alpha/memories?limit=1&after=${encodeURIComponent(anchor)}`,
+        `/memories?limit=1&after=${encodeURIComponent(anchor)}`,
       );
       return awaits(next, [200, 400], `after (deleted anchor) ${anchor.slice(0, 8)}`);
     },
@@ -382,7 +376,7 @@ const cases: readonly ProbeCase[] = [
         ['overflow', 'z'.repeat(300)],
         ['embedded slash', '12b19538-1c07-43b4-b471-b518cbae75ad/x'],
       ] as const) {
-        const r = await call(b.server!.url, 'GET', `/stores/alpha/memories/${idPart}`);
+        const r = await call(b.server!.url, 'GET', `/memories/${idPart}`);
         const verdict = awaits(r, [400, 404], `id ${tag}`);
         if (verdict) return verdict;
       }
@@ -402,7 +396,7 @@ const cases: readonly ProbeCase[] = [
         const r = await call(
           b.server!.url,
           'GET',
-          `/stores/alpha/memories/${crypto.randomUUID()}?depth=${depth}`,
+          `/memories/${crypto.randomUUID()}?depth=${depth}`,
         );
         const verdict = awaits(r, [400, 404], `depth=${tag}`);
         if (verdict) return verdict;
@@ -424,11 +418,7 @@ const cases: readonly ProbeCase[] = [
         ['quote-pair', '"unterminated'],
         ['unicode', '日本語 🔍'],
       ] as const) {
-        const r = await call(
-          b.server!.url,
-          'GET',
-          `/stores/alpha/search?q=${encodeURIComponent(q)}`,
-        );
+        const r = await call(b.server!.url, 'GET', `/search?q=${encodeURIComponent(q)}`);
         const verdict = awaits(r, [200, 400], `q=${tag}`);
         if (verdict) return verdict;
       }
@@ -439,14 +429,13 @@ const cases: readonly ProbeCase[] = [
     id: 'B17',
     name: 'duplicate JSON keys — last wins, nothing corrupts',
     run: async (b) => {
-      const r = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const r = await call(b.server!.url, 'POST', '/memories', {
         body: '{"content":"dup keys","kind":"note","kind":"the-winner"}',
       });
       const verdict = awaits(r, [400, 201], 'duplicate kind key');
       if (verdict.ok) {
         const node = record(
-          (await call(b.server!.url, 'GET', `/stores/alpha/memories/${String(record(r.json)?.id)}`))
-            .json,
+          (await call(b.server!.url, 'GET', `/memories/${String(record(r.json)?.id)}`)).json,
         );
         if (node?.kind !== 'the-winner')
           return fail(`duplicate keys: served kind ${String(node?.kind)}`, 'doc-gap');
@@ -482,10 +471,10 @@ const cases: readonly ProbeCase[] = [
     name: 'removed surfaces 404, nothing resurrects',
     run: async (b) => {
       for (const [method, path] of [
-        ['POST', '/stores/alpha/relations'],
-        ['GET', '/stores/alpha/stats'],
-        ['DELETE', '/stores/alpha/recover'],
-        ['POST', '/stores/alpha/export'],
+        ['POST', '/relations'],
+        ['GET', '/stats'],
+        ['DELETE', '/recover'],
+        ['POST', '/export'],
       ] as const) {
         const r = await call(b.server!.url, method, path, {
           body: method === 'POST' ? {} : undefined,
@@ -500,50 +489,20 @@ const cases: readonly ProbeCase[] = [
     id: 'B20',
     name: 'link/hot/supersede/merge adversarial bodies teach',
     run: async (b) => {
-      const anchor = await call(b.server!.url, 'POST', '/stores/alpha/memories', {
+      const anchor = await call(b.server!.url, 'POST', '/memories', {
         body: { content: `anchor ${Date.now()}`, kind: 'event' },
       });
       const id = String(record(anchor.json)?.id);
       if (!uuidLike(id)) return fail('could not seed anchor');
       for (const [tag, method, path, body, expected] of [
-        [
-          'self link',
-          'POST',
-          `/stores/alpha/memories/${id}/link`,
-          { to: id, kind: 'relates-to' },
-          [400, 409],
-        ],
-        [
-          'link missing to',
-          'POST',
-          `/stores/alpha/memories/${id}/link`,
-          { kind: 'relates-to' },
-          [400],
-        ],
-        ['hot wrong type', 'POST', `/stores/alpha/memories/${id}/hot`, { hot: 'yes' }, [400]],
-        ['hot missing', 'POST', `/stores/alpha/memories/${id}/hot`, {}, [400]],
-        [
-          'supersede empty',
-          'POST',
-          `/stores/alpha/memories/${id}/supersede`,
-          { content: '' },
-          [400],
-        ],
-        ['merge empty ids', 'POST', '/stores/alpha/merge', { ids: [], content: 'x' }, [400]],
-        [
-          'merge duplicate id',
-          'POST',
-          '/stores/alpha/merge',
-          { ids: [id, id], content: 'x' },
-          [400],
-        ],
-        [
-          'unlink never-linked',
-          'DELETE',
-          `/stores/alpha/memories/${id}/link`,
-          { to: id },
-          [400, 409, 404],
-        ],
+        ['self link', 'POST', `/memories/${id}/link`, { to: id, kind: 'relates-to' }, [400, 409]],
+        ['link missing to', 'POST', `/memories/${id}/link`, { kind: 'relates-to' }, [400]],
+        ['hot wrong type', 'POST', `/memories/${id}/hot`, { hot: 'yes' }, [400]],
+        ['hot missing', 'POST', `/memories/${id}/hot`, {}, [400]],
+        ['supersede empty', 'POST', `/memories/${id}/supersede`, { content: '' }, [400]],
+        ['merge empty ids', 'POST', '/merge', { ids: [], content: 'x' }, [400]],
+        ['merge duplicate id', 'POST', '/merge', { ids: [id, id], content: 'x' }, [400]],
+        ['unlink never-linked', 'DELETE', `/memories/${id}/link`, { to: id }, [400, 409, 404]],
       ] as const) {
         const r = await call(b.server!.url, method, path, { body: JSON.stringify(body) });
         const verdict = awaits(r, [...expected], tag);

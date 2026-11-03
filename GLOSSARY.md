@@ -53,8 +53,8 @@ One SQLite memory database — an individual's memory. The unit of ownership (on
 _Avoid_: database, memory bank, bucket
 
 **Mount**:
-The `/stores/<name>/…` URL scheme: a store the server serves under its name in the one guarded namespace — management and data alike. No root store, no routes outside it.
-_Avoid_: mount point, attachment, root store, top-level routes
+The management surface's URL scheme: `/stores`, `/stores/<name>`, `/stores/<name>/fork` — a store named by the path on the one surface whose subject stores are. The data surface dropped the name (ADR 0007): the grant is the address, the data routes live at the root.
+_Avoid_: mount point, attachment, root store, top-level routes (retired — the data routes are top-level)
 
 **Fork**:
 An exact copy of a store as a new store — a backup, or a state set aside to examine. Born from the management surface and born unreached: no credential reaches the copy until one is minted for it. Never self-service — an individual cannot duplicate itself; forking never makes one individual two.
@@ -105,7 +105,7 @@ A manager operation that opens the store directly; refuses while the server owns
 _Avoid_: direct verb, local verb
 
 **Grant**:
-A bearer credential's authority, authored in the config — nothing else exists to present. Two families: a **store grant** (one agent, one store, one mode `ro`/`rw` — a row of `tokens[]`) and a **management grant** (one agent over the host's management surface — create, fork, list, describe, delete stores — reaching no store's data, a row of `management[]`).
+A bearer credential's authority, authored in the config — nothing else exists to present. Two families: a **store grant** (one agent, one store, one mode `ro`/`rw` — a row of `tokens[]`) and a **management grant** (one agent over the host's management surface — create, fork, list, describe, delete stores — reaching no store's data, a row of `management[]`). The store grant is the store's address on the wire (ADR 0007): one Bearer pins one store, the data routes carry no name.
 _Avoid_: token file (retired), API key, manage cap (retired)
 
 **Registry**:
@@ -119,7 +119,7 @@ The session-start ritual: the hot memories (with their relations) and the store'
 _Avoid_: recover, boot, restore
 
 **Waking line**:
-The minimal contract that opens a session: the waking posture plus the pair (mount, grant) — a URL pointing straight at the store and the token that opens it. Holding only that, the agent finds its way on the wire: the root pointer names the first skill, and everything else is pulled at need, never pushed.
+The minimal contract that opens a session: the waking posture plus the pair (base URL, grant) — the token that opens the store (ADR 0007: the grant is the address, no store name to communicate). Holding only that, the agent finds its way on the wire: the root pointer names the first skill, and everything else is pulled at need, never pushed.
 _Avoid_: bootstrap, onboarding, credentials block
 
 **Checkout**:

@@ -2,9 +2,11 @@
  * The boot ceremony's own tests (#50): the zero-credential refusal (#63 —
  * no token, no memory), the #19 grant validation — a grant naming a store
  * the registry does not open refuses the start with the teaching — and
- * the refused boot releases every claim it opened, so the same host boots
- * again without a manual lock hunt. The happy path pins the bound port's
- * resolution (the smoke test's contract) and the banner's two counts.
+ * the duplicate-secret walk at the programmatic boot (#74's rider — the
+ * one invariant, both doors). The refused boot releases every claim it
+ * opened, so the same host boots again without a manual lock hunt. The
+ * happy path pins the bound port's resolution (the smoke test's
+ * contract) and the banner's two counts.
  */
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -71,6 +73,35 @@ test('a management-only boot serves — a fresh host is bootable and the banner 
     assert.match(banner, /0 grant\(s\) · 1 management/);
   } finally {
     process.stderr.write = original;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rows sharing one secret refuse the start — the invariant lives at both doors (#74)', async () => {
+  const dir = tempDir();
+  try {
+    // The programmatic path never met parseConfig's walk: two rows, one
+    // secret, two stores — with the grant as the address that is silent
+    // arbitrary addressing, so the boot refuses it here too.
+    const shared = `souv-${'d'.repeat(32)}`;
+    const seed = Registry.open(dir);
+    seed.create('atlas');
+    seed.create('other');
+    seed.close();
+    const error = await startServer({
+      host: '127.0.0.1',
+      port: 0,
+      storesDir: dir,
+      tokens: [
+        { agent: 'laptop', secret: shared, store: 'atlas', mode: 'rw' },
+        { agent: 'desktop', secret: shared, store: 'other', mode: 'rw' },
+      ],
+      management: [],
+      version: 'test',
+    }).catch((err: Error) => err);
+    assert.match(String(error), /"laptop", "desktop" share one secret/);
+    assert.match(String(error), /must be unique across tokens\[\] and management\[\]/);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

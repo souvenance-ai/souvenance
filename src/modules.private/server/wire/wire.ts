@@ -20,18 +20,16 @@ import { STORE_NAME } from '../../config/config.ts';
 import { MAX_BODY_BYTES, MAX_DEPTH, MAX_LIMIT } from '../limits/limits.ts';
 
 // ——— The routes' shared vocabulary: the shapes every route file speaks
-// (the error envelope, the store-name param, the capped limit) live here
-// once — three route files declared them apart before the review caught
-// the drift waiting to happen.
+// (the error envelope, the addressed-memory id param, the capped limit)
+// live here once — three route files declared them apart before the
+// review caught the drift waiting to happen.
 
 export const ErrorSchema = z.object({ error: z.string() });
 
 export const StoreNameSchema = z.string().regex(STORE_NAME);
 
-export const StoreParamsSchema = z.object({ name: StoreNameSchema });
-
-/** The addressed-memory params: the store the grant reaches, the memory id. */
-export const MemoryIdParamsSchema = z.object({ name: StoreNameSchema, id: z.uuid() });
+/** The addressed-memory params: the id — the store rides the grant (#74). */
+export const MemoryIdParamsSchema = z.object({ id: z.uuid() });
 
 /** The explicit limit's shape: the cap judges only the explicit (Q18). */
 export const limitShape = z.coerce.number().int().min(1).max(MAX_LIMIT).optional();
@@ -65,9 +63,10 @@ export function refusal(description: string) {
 }
 
 // ——— The refusals every route family shares, named once: the drift the
-// reviews keep catching is the same teaching re-typed apart.
+// reviews keep catching is the same teaching re-typed apart. The
+// foreign-store refusal retired with the nameless data routes (#74) —
+// the grant IS the address, no request can name another store.
 
-export const foreignRefusal = () => refusal('the grant reaches another store');
 export const unknownStoreRefusal = () => refusal('no such store');
 export const unknownMemoryRefusal = () => refusal('no such memory');
 export const invalidRefusal = (description: string) => refusal(description);

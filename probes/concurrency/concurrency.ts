@@ -53,7 +53,7 @@ const cases: readonly ProbeCase[] = [
         call(
           b.server!.url,
           'POST',
-          '/stores/alpha/memories',
+          '/memories',
           { body: { content: `parallel ${Date.now()} #${i}`, kind: 'event' } },
           20_000,
         ),
@@ -75,7 +75,7 @@ const cases: readonly ProbeCase[] = [
       const gone = await call(
         b.server!.url,
         'POST',
-        '/stores/alpha/memories',
+        '/memories',
         { body: { content: `survives the kill ${Date.now()}`, kind: 'event' } },
         20_000,
       );
@@ -120,13 +120,7 @@ const cases: readonly ProbeCase[] = [
         }
       }
       if (revived === null) return fail(`no takeover in 48s: ${lastError}`, 'doc-gap');
-      const after = await call(
-        revived.url,
-        'GET',
-        `/stores/alpha/memories/${doomedId}`,
-        {},
-        20_000,
-      );
+      const after = await call(revived.url, 'GET', `/memories/${doomedId}`, {}, 20_000);
       if (after.status !== 200) {
         await revived.stop().catch(() => {});
         return fail(
@@ -240,7 +234,7 @@ const cases: readonly ProbeCase[] = [
       const anchor = await call(
         b.server!.url,
         'POST',
-        '/stores/alpha/memories',
+        '/memories',
         { body: { content: `supersede anchor ${Date.now()}`, kind: 'event' } },
         20_000,
       );
@@ -249,14 +243,14 @@ const cases: readonly ProbeCase[] = [
         call(
           b.server!.url,
           'POST',
-          `/stores/alpha/memories/${anchorId}/supersede`,
+          `/memories/${anchorId}/supersede`,
           { body: { content: `rev A ${Date.now()}` } },
           20_000,
         ),
         call(
           b.server!.url,
           'POST',
-          `/stores/alpha/memories/${anchorId}/supersede`,
+          `/memories/${anchorId}/supersede`,
           { body: { content: `rev B ${Date.now()}` } },
           20_000,
         ),
@@ -270,15 +264,13 @@ const cases: readonly ProbeCase[] = [
         (shot) => shot.status === 'fulfilled' && teachable(shot.value.status),
       );
       const node = record(
-        (await call(b.server!.url, 'GET', `/stores/alpha/memories/${anchorId}`, {}, 20_000)).json,
+        (await call(b.server!.url, 'GET', `/memories/${anchorId}`, {}, 20_000)).json,
       );
       if (!respectable) return fail(`supersede race surfaced: ${statuses.join(',')}`, 'doc-gap');
       if (node?.status !== 'superseded')
         return fail(`anchor status after race: ${String(node?.status)}`, 'doc-gap');
       const activeRevisions = memoriesOf(
-        record(
-          (await call(b.server!.url, 'GET', '/stores/alpha/memories?limit=1000', {}, 20_000)).json,
-        ),
+        record((await call(b.server!.url, 'GET', '/memories?limit=1000', {}, 20_000)).json),
       ).filter((row) =>
         ['rev A', 'rev B'].some(
           (word) => String(row.content).includes(word) && row.status === 'active',
@@ -296,7 +288,7 @@ const cases: readonly ProbeCase[] = [
       await b.server!.stop('SIGTERM');
       const revived = await reboot(b, b.port, 'handover');
       b.adopt(revived);
-      const proof = await call(revived.url, 'GET', '/stores/alpha/memories?limit=1', {}, 20_000);
+      const proof = await call(revived.url, 'GET', '/memories?limit=1', {}, 20_000);
       if (proof.status !== 200)
         return fail(
           `post-TERM reboot refuses: ${proof.status} ${proof.text.slice(0, 120)}`,

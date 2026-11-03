@@ -34,7 +34,7 @@ test('checkin serves the hot block and the stats in one call', async () => {
     const first = atlas.store('first curated', { kind: 'note' });
     atlas.store('a plain memory', { kind: 'note' });
     atlas.setHot(first, true);
-    const res = await app.request('/stores/atlas/checkin', { headers: ATLAS });
+    const res = await app.request('/checkin', { headers: ATLAS });
     assert.equal(res.status, 200);
     const report = (await res.json()) as {
       hot: { content: string }[];
@@ -56,7 +56,7 @@ test('checkin on an empty store serves the empty block and zeroed stats', async 
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
-    const res = await app.request('/stores/atlas/checkin', { headers: ATLAS });
+    const res = await app.request('/checkin', { headers: ATLAS });
     assert.equal(res.status, 200);
     const report = (await res.json()) as { hot: unknown[]; stats: { memories: number } };
     assert.deepEqual(report.hot, []);
@@ -80,7 +80,7 @@ test('checkin honors the limit — order guides attention, the cap truncates', a
     const second = atlas.store('second hot', { kind: 'note' });
     atlas.setHot(first, true);
     atlas.setHot(second, true);
-    const res = await app.request('/stores/atlas/checkin?limit=1', { headers: ATLAS });
+    const res = await app.request('/checkin?limit=1', { headers: ATLAS });
     const report = (await res.json()) as { hot: { content: string }[] };
     assert.equal(report.hot.length, 1);
     assert.equal(report.hot[0]?.content, 'second hot', 'newest first, then truncate');
@@ -96,14 +96,11 @@ test('an explicit checkin limit past 1000 serves — the ceiling is list/search 
     const { app, registry, atlas } = boot(dir);
     atlas.store('a hot memory', { kind: 'note' });
     atlas.setHot(atlas.list()[0]?.id ?? '', true);
-    const res = await app.request('/stores/atlas/checkin?limit=2000', { headers: ATLAS });
+    const res = await app.request('/checkin?limit=2000', { headers: ATLAS });
     assert.equal(res.status, 200, 'the 1000 ceiling never judged checkin (#50)');
     const report = (await res.json()) as { hot: unknown[] };
     assert.equal(report.hot.length, 1, 'the facade judged the limit — attention, not the cap');
-    assert.equal(
-      (await app.request('/stores/atlas/checkin?limit=abc', { headers: ATLAS })).status,
-      400,
-    );
+    assert.equal((await app.request('/checkin?limit=abc', { headers: ATLAS })).status, 400);
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -115,8 +112,8 @@ test('a ro grant reads the rituals — reading the register is not writing it', 
   try {
     const { app, registry } = boot(dir);
     const ro = { authorization: `Bearer ${SECRET_RO}` };
-    assert.equal((await app.request('/stores/atlas/checkin', { headers: ro })).status, 200);
-    assert.equal((await app.request('/stores/atlas/checkout', { headers: ro })).status, 200);
+    assert.equal((await app.request('/checkin', { headers: ro })).status, 200);
+    assert.equal((await app.request('/checkout', { headers: ro })).status, 200);
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -127,7 +124,7 @@ test('checkout serves the verdict — green on a clean store, findings on debts'
   const dir = tempDir();
   try {
     const { app, registry, atlas } = boot(dir);
-    const green = await app.request('/stores/atlas/checkout', { headers: ATLAS });
+    const green = await app.request('/checkout', { headers: ATLAS });
     assert.equal(green.status, 200);
     const greenReport = (await green.json()) as {
       healthy: boolean;
@@ -142,7 +139,7 @@ test('checkout serves the verdict — green on a clean store, findings on debts'
     // Two isolated living memories: the consolidation debt (gated at >= 2).
     atlas.store('island one', { kind: 'note' });
     atlas.store('island two', { kind: 'note' });
-    const red = await app.request('/stores/atlas/checkout', { headers: ATLAS });
+    const red = await app.request('/checkout', { headers: ATLAS });
     const redReport = (await red.json()) as {
       healthy: boolean;
       findings: { check: string; detail: string; hint: string }[];
@@ -161,15 +158,17 @@ test('checkout serves the verdict — green on a clean store, findings on debts'
   }
 });
 
-test('the rituals refuse a foreign store like every data route', async () => {
+test('an orphaned grant serves 404 — the registry speaks existence to the grant (#74)', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
-    registry.create('other');
-    const foreign = await app.request('/stores/other/checkin', {
-      headers: { authorization: `Bearer ${SECRET_RW}` },
-    });
-    assert.equal(foreign.status, 403);
+    // Management deleted the store mid-run: the grant survives, its
+    // store is gone — the ritual answers 404 in the envelope.
+    registry.remove('atlas');
+    const res = await app.request('/checkin', { headers: ATLAS });
+    assert.equal(res.status, 404);
+    const body = (await res.json()) as { error: string };
+    assert.equal(body.error, 'no store "atlas" in the registry');
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
