@@ -1,0 +1,10 @@
+{
+  "guidance": [
+    {
+      "route": "checkin",
+      "when": "store-empty",
+      "line": "an empty store is an unborn individual — run setup",
+      "skill": "setup"
+    }
+  ]
+}

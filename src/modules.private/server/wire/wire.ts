@@ -16,6 +16,7 @@ import type {
   Relation,
   SearchResult,
 } from '../../store/store.ts';
+import type { Guidance, SkillEntry } from '../skills/skills.ts';
 import { STORE_NAME } from '../../config/config.ts';
 import { MAX_BODY_BYTES, MAX_DEPTH, MAX_LIMIT } from '../limits/limits.ts';
 
@@ -116,12 +117,50 @@ export const SearchHitSchema: z.ZodType<SearchResult> = z.lazy(() =>
   z.object({ ...nodeShape, rank: z.number() }),
 );
 
-export const CheckinReportSchema: z.ZodType<CheckinReport> = z.lazy(() =>
-  z.object({
-    hot: z.array(MemoryNodeSchema).readonly(),
-    stats: StatsSchema,
-  }),
-);
+export const CheckinReportSchema = z.object({
+  hot: z.array(MemoryNodeSchema).readonly(),
+  stats: StatsSchema,
+}) satisfies z.ZodType<CheckinReport>;
+
+/**
+ * The wire's voice beside the data (#82): one imperative line, one skill
+ * pointer — optional on the success responses that carry it, never on the
+ * errors (the refusals keep teaching through their message).
+ */
+export const GuidanceSchema: z.ZodType<Guidance> = z.object({
+  line: z.string(),
+  skill: z.string(),
+});
+
+/**
+ * The served checkin (#82): the report plus the waking voice — the
+ * guidance rides the success response beside the data, one section per
+ * response, store-empty overriding always on the same route.
+ */
+export interface ServedCheckinReport extends CheckinReport {
+  readonly guidance?: Guidance;
+}
+
+export const ServedCheckinReportSchema = CheckinReportSchema.extend({
+  guidance: GuidanceSchema.optional(),
+}) satisfies z.ZodType<ServedCheckinReport>;
+
+/** One skills-index row (#82): the name and the startup-visible hint. */
+export const SkillEntrySchema: z.ZodType<SkillEntry> = z.object({
+  name: z.string(),
+  description: z.string(),
+});
+
+/** The skills index (#82): the serving product's version, the start skill first. */
+export interface SkillsIndex {
+  readonly version: string;
+  readonly skills: readonly SkillEntry[];
+}
+
+export const SkillsIndexSchema: z.ZodType<SkillsIndex> = z.object({
+  version: z.string(),
+  skills: z.array(SkillEntrySchema).readonly(),
+});
 
 export const CheckoutReportSchema: z.ZodType<CheckoutReport> = z.lazy(() =>
   z.object({
