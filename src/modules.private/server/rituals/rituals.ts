@@ -16,6 +16,7 @@ import {
   CheckoutReportSchema,
   CHECKOUT_DEBTS_TEACHING,
   checkinLimitShape,
+  NoQuerySchema,
   refusal,
   unknownStoreRefusal,
 } from '../wire/wire.ts';
@@ -35,7 +36,9 @@ export function registerRitualRoutes(
       'writing it: read-only grants open here.',
     tags: ['rituals'],
     request: {
-      query: z.object({ limit: checkinLimitShape }),
+      // The strict grammar — an unknown param refuses 400 naming the key;
+      // the strip default would serve the request as if it were absent.
+      query: z.strictObject({ limit: checkinLimitShape }),
     },
     responses: {
       200: {
@@ -70,6 +73,7 @@ export function registerRitualRoutes(
       'is paid. ' +
       "Corruption is not the gate's business — the operator's doctor audits it.",
     tags: ['rituals'],
+    request: { query: NoQuerySchema },
     responses: {
       200: {
         description: 'the consolidation verdict — healthy or the payable findings',

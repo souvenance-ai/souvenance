@@ -12,7 +12,9 @@
  * the dev, 2026-10-28: the unbounded verbatim let the facade's own
  * default truncate silently — an explicit page every time keeps the peek
  * honest); the grant IS the address (#74) — the credential pins the
- * store, an orphaned grant serves 404.
+ * store, an orphaned grant serves 404. Every query grammar is strict
+ * (`z.strictObject`): an unknown param refuses 400 naming the key — the
+ * strip default would serve the request as if the param were absent.
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
@@ -108,7 +110,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
       '), ?limit, and the terminals flag.',
     tags: ['memories'],
     request: {
-      query: z.object({
+      query: z.strictObject({
         after: z
           .string()
           .optional()
@@ -186,7 +188,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
-      query: z.object({ depth: depthShape }),
+      query: z.strictObject({ depth: depthShape }),
     },
     responses: {
       200: {
@@ -221,7 +223,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
       ". The list's filters ride: ?limit, ?kind, ?metadata, ?include_terminals.",
     tags: ['memories'],
     request: {
-      query: z.object({
+      query: z.strictObject({
         q: z.string().describe('the search text — non-empty'),
         limit: limitShape,
         kind: kindShape,

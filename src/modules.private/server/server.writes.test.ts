@@ -80,6 +80,22 @@ test('create answers 201 with the id — the memory serves, relations rode the o
   }
 });
 
+test('an unknown query param refuses 400 naming the key — the writes take no query', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    registry.create('atlas');
+    // No write route declares a query: NoQuerySchema refuses any param —
+    // the strip default would let it ride silently past the grammar.
+    const res = await call(app, 'POST', '/memories?moo=1', { content: 'one', kind: 'note' });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error as string, /moo/);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('create accepts the birth curation — hot: true lands hot, absent stays active (#85)', async () => {
   const dir = tempDir();
   try {

@@ -17,7 +17,9 @@
  * Every body is strict (#60): an unknown key refuses 400 with the
  * envelope teaching, never strips — a silently-dropped authored field is
  * how an agent's model and the store's truth diverge. What the wire
- * serves, /doc declares (`additionalProperties: false`).
+ * serves, /doc declares (`additionalProperties: false`). The query rides
+ * the same strictness: the write routes take none, and NoQuerySchema
+ * refuses any param, naming it.
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
@@ -27,6 +29,7 @@ import type { Registry } from '../registry/registry.ts';
 import {
   invalidRefusal,
   MemoryIdParamsSchema,
+  NoQuerySchema,
   payloadRefusal,
   refusal,
   unknownMemoryRefusal,
@@ -145,6 +148,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       'serves the id — the created answer is the id.',
     tags: ['memories'],
     request: {
+      query: NoQuerySchema,
       body: { content: { 'application/json': { schema: StoreBodySchema } }, required: true },
     },
     responses: {
@@ -183,6 +187,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
+      query: NoQuerySchema,
       body: { content: { 'application/json': { schema: SupersedeBodySchema } }, required: true },
     },
     responses: {
@@ -221,7 +226,10 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       'The retirement gesture: the memory turns deprecated — a terminal — and every ' +
       'gesture refuses it afterward. Mute: 204, nothing to say.',
     tags: ['memories'],
-    request: { params: MemoryIdParamsSchema },
+    request: {
+      params: MemoryIdParamsSchema,
+      query: NoQuerySchema,
+    },
     responses: {
       204: { description: 'deprecated — nothing to say' },
       404: unknownMemoryRefusal(),
@@ -246,6 +254,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
+      query: NoQuerySchema,
       body: { content: { 'application/json': { schema: HotBodySchema } }, required: true },
     },
     responses: {
@@ -274,6 +283,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
+      query: NoQuerySchema,
       body: { content: { 'application/json': { schema: LinkBodySchema } }, required: true },
     },
     responses: {
@@ -304,6 +314,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
+      query: NoQuerySchema,
       body: { content: { 'application/json': { schema: UnlinkBodySchema } }, required: true },
     },
     responses: {
@@ -332,6 +343,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       "and demands a verdict when they disagree. 201 serves the fusion's id.",
     tags: ['memories'],
     request: {
+      query: NoQuerySchema,
       body: { content: { 'application/json': { schema: MergeBodySchema } }, required: true },
     },
     responses: {

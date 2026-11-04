@@ -11,7 +11,9 @@
  * store-name grammar; the defaultHook formats), wrong family → 403
  * (mounted on the exact management paths in the assembly), unknown store
  * → 404, collisions → 409. The bodies are strict (#60): an unknown key
- * refuses 400 with the envelope teaching, never strips. One route group
+ * refuses 400 with the envelope teaching, never strips — the query rides
+ * the same policy, NoQuerySchema refusing any param on the queryless
+ * routes. One route group
  * per file; the slices keep landing as siblings (reads, writes) on the
  * same assembly.
  */
@@ -21,6 +23,7 @@ import type { Registry } from '../registry/registry.ts';
 import type { ServerEnv } from '../auth/auth.ts';
 import {
   STORE_NAME_TEACHING,
+  NoQuerySchema,
   payloadRefusal,
   refusal,
   StatsSchema,
@@ -50,7 +53,10 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
       "Creates an empty store — one individual's memory — under the body's name. " +
       "201 serves the name back. The management surface's gesture: a store grant never manages.",
     tags: ['stores'],
-    request: { body: { content: { 'application/json': { schema: NameSchema } }, required: true } },
+    request: {
+      query: NoQuerySchema,
+      body: { content: { 'application/json': { schema: NameSchema } }, required: true },
+    },
     responses: {
       201: {
         description: 'the store exists',
@@ -76,6 +82,7 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
       "Every open store as a descriptor: its name and its stats. The server's registry is " +
       "the inventory — the store's path never crosses the wire.",
     tags: ['stores'],
+    request: { query: NoQuerySchema },
     responses: {
       200: {
         description: 'every open store, by name with its stats',
@@ -96,7 +103,10 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
       "One store's descriptor: the name and its stats — the five-key ledger: population " +
       'by status and by kind, edges, edges by kind.',
     tags: ['stores'],
-    request: { params: z.object({ name: StoreNameSchema }) },
+    request: {
+      params: z.object({ name: StoreNameSchema }),
+      query: NoQuerySchema,
+    },
     responses: {
       200: {
         description: 'the descriptor',
@@ -128,6 +138,7 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
     tags: ['stores'],
     request: {
       params: z.object({ name: StoreNameSchema }),
+      query: NoQuerySchema,
       body: { content: { 'application/json': { schema: ForkBodySchema } }, required: false },
     },
     responses: {
@@ -157,7 +168,10 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
       'The store, its memories and its edges are gone — irreversible. No confirmation ' +
       'parameter: reaching this route is the confirmation.',
     tags: ['stores'],
-    request: { params: z.object({ name: StoreNameSchema }) },
+    request: {
+      params: z.object({ name: StoreNameSchema }),
+      query: NoQuerySchema,
+    },
     responses: {
       204: { description: 'gone — the store, irreversibly' },
       400: GRAMMAR_REFUSAL(),

@@ -107,6 +107,28 @@ test('an explicit checkin limit past 1000 serves — the ceiling is list/search 
   }
 });
 
+test('an unknown query param refuses 400 naming the key — the grammar is strict', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    // The strip default would silently serve the ritual as if the param
+    // were absent — the refusal teaches the client its own typo instead.
+    // Checkout declares no query at all: NoQuerySchema keeps even the
+    // paramless routes teaching.
+    const checkin = await app.request('/checkin?limit=10&limitt=10', { headers: ATLAS });
+    assert.equal(checkin.status, 400);
+    const checkinBody = (await checkin.json()) as { error: string };
+    assert.match(checkinBody.error, /limitt/, 'the refusal names the unknown key');
+    const checkout = await app.request('/checkout?moo=1', { headers: ATLAS });
+    assert.equal(checkout.status, 400);
+    const checkoutBody = (await checkout.json()) as { error: string };
+    assert.match(checkoutBody.error, /moo/);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a ro grant reads the rituals — reading the register is not writing it', async () => {
   const dir = tempDir();
   try {

@@ -136,6 +136,28 @@ test('an explicit limit past the cap refuses 400 — the cap judges only the exp
   }
 });
 
+test('an unknown query param refuses 400 naming the key — the grammar is strict', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry, atlas } = boot(dir);
+    const id = seed(atlas, 'one', { kind: 'note' });
+    // The strip default would silently serve the request as if the param
+    // were absent — the refusal teaches the client its own typo instead.
+    const list = await get(app, `/memories?limitt=5`);
+    assert.equal(list.status, 400);
+    assert.match(list.body.error as string, /limitt/, 'the refusal names the unknown key');
+    const search = await get(app, `/search?q=one&rank=1`);
+    assert.equal(search.status, 400);
+    assert.match(search.body.error as string, /rank/);
+    const projection = await get(app, `/memories/${id}?depth=1&depths=2`);
+    assert.equal(projection.status, 400);
+    assert.match(projection.body.error as string, /depths/);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('repeated kind params narrow with IN semantics (Q17)', async () => {
   const dir = tempDir();
   try {

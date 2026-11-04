@@ -13,7 +13,7 @@ import type { OpenAPIHono } from '@hono/zod-openapi';
 import { HTTPException } from 'hono/http-exception';
 import type { ServerEnv } from '../auth/auth.ts';
 import type { Skills } from '../skills/skills.ts';
-import { SkillsIndexSchema, refusal } from '../wire/wire.ts';
+import { NoQuerySchema, SkillsIndexSchema, refusal } from '../wire/wire.ts';
 
 export function registerSkillRoutes(
   app: OpenAPIHono<ServerEnv>,
@@ -29,6 +29,7 @@ export function registerSkillRoutes(
       "surface, served publicly: a skill teaches the product's grammar to whoever asks; " +
       "it reaches no individual's data.",
     tags: ['skills'],
+    request: { query: NoQuerySchema },
     responses: {
       200: {
         description: 'the index — every skill’s name and description, the start skill first',
@@ -48,6 +49,7 @@ export function registerSkillRoutes(
     tags: ['skills'],
     request: {
       params: z.object({ name: z.string().describe("the skill's name — the index serves it") }),
+      query: NoQuerySchema,
     },
     responses: {
       200: {

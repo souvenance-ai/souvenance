@@ -43,6 +43,14 @@ export const MemoryIdParamsSchema = z.object({
   id: z.uuid().describe("the addressed memory's id"),
 });
 
+/**
+ * The empty query: every declared route rides either no query string or a
+ * strict one — an unknown param refuses 400 naming the key, never riding
+ * silently past the wire. The raw doors (/healthz, /doc, /) declare no
+ * schema and stay outside the grammar.
+ */
+export const NoQuerySchema = z.strictObject({});
+
 /** The explicit limit's shape: the cap judges only the explicit (Q18). */
 export const limitShape = z.coerce
   .number()

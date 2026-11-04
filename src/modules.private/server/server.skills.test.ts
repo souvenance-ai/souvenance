@@ -45,6 +45,20 @@ test('the skills index serves publicly — the start skill first, the version be
   }
 });
 
+test('an unknown query param refuses 400 naming the key — even a door takes no query', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    const res = await app.request('/skills?moo=1');
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: string };
+    assert.match(body.error, /moo/);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the item serves the shipped SKILL.md byte for byte — an installation is a copy (#82)', async () => {
   const dir = tempDir();
   try {

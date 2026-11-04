@@ -71,6 +71,25 @@ async function call(
   return { status: res.status, body: text ? JSON.parse(text) : null };
 }
 
+test('an unknown query param refuses 400 naming the key — the routes take no query', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    registry.create('atlas');
+    // The queryless routes declare NoQuerySchema: any param refuses 400
+    // naming itself, never rides silently past the grammar.
+    const list = await call(app, manage('/stores?moo=1'));
+    assert.equal(list.status, 400);
+    assert.match((list.body as { error: string }).error, /moo/);
+    const described = await call(app, manage('/stores/atlas?moo=1'));
+    assert.equal(described.status, 400);
+    assert.match((described.body as { error: string }).error, /moo/);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a management grant creates a store — 201 with the name, the file on disk', async () => {
   const dir = tempDir();
   try {
