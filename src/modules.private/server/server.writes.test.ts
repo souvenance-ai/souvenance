@@ -49,6 +49,31 @@ async function call(
   return { status: res.status, body: text ? JSON.parse(text) : null };
 }
 
+/** The served wire document, typed just past the fetch — one cast for the file. */
+interface WireOperation {
+  readonly responses: Readonly<Record<string, unknown>>;
+  readonly requestBody: {
+    readonly content: Readonly<{
+      'application/json': {
+        readonly schema: {
+          readonly properties?: Readonly<
+            Record<string, Readonly<{ maxLength?: number; description?: string }>>
+          >;
+          readonly additionalProperties?: unknown;
+        };
+      };
+    }>;
+  };
+}
+
+interface WireDocument {
+  readonly paths: Readonly<Record<string, Readonly<Record<string, WireOperation>>>>;
+}
+
+async function fetchDoc(app: ReturnType<typeof createApp>): Promise<WireDocument> {
+  return (await (await app.request('/doc')).json()) as WireDocument;
+}
+
 test('create answers 201 with the id — the memory serves, relations rode the one gesture', async () => {
   const dir = tempDir();
   try {
@@ -150,12 +175,7 @@ test('the oversized body serves 413 — the /doc declares what the wire serves (
     );
     assert.equal(oversize.status, 413);
     assert.match((oversize.body as { error: string }).error, /body exceeds 1048576 bytes/);
-    const doc = await app.request('/doc');
-    const declared = (
-      (await doc.json()) as {
-        paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
-      }
-    ).paths['/memories']['post'].responses;
+    const declared = (await fetchDoc(app)).paths['/memories']['post'].responses;
     assert.ok(
       '413' in declared,
       `/doc must declare 413 on the body routes, has ${Object.keys(declared).join(',')}`,
@@ -197,7 +217,7 @@ test('create refuses non-scalar metadata values — the one grammar, both surfac
   }
 });
 
-test('create refusals ride the facade teaching — kind, metadata.kind, summary ceiling', async () => {
+test('create refusals — kind, metadata.kind, summary ceiling — the schema speaks first, the facade keeps the rest', async () => {
   const dir = tempDir();
   try {
     const { app, registry } = boot(dir);
@@ -225,6 +245,54 @@ test('create refusals ride the facade teaching — kind, metadata.kind, summary 
       kind: 'note',
     });
     assert.equal(emptyContent.status, 400);
+    // The ceiling rides the schema now — a summary past it refuses before
+    // the facade, riding the defaultHook's envelope: the prefix names the
+    // layer (the facade's own teaching carries no such prefix), the path
+    // names the field, zod's message names the number.
+    const longSummary = await call(app, 'POST', '/memories', {
+      content: 'short',
+      kind: 'note',
+      summary: 's'.repeat(401),
+    });
+    assert.equal(longSummary.status, 400);
+    assert.match((longSummary.body as { error: string }).error, /^invalid request — summary:/);
+    assert.match((longSummary.body as { error: string }).error, /400/);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the served document declares the summary ceiling — maxLength and the teaching on every write body', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    // The ceiling rides the schema, and the schema is the document's one
+    // source: /doc carries maxLength, the teaching names the number. The
+    // literal 400 is the doctrine's number (ADR 0003) — the test fails if
+    // the constant drifts from it.
+    const doc = await fetchDoc(app);
+    const summaryBodies = [
+      ['/memories', 'post'],
+      ['/memories/{id}/supersede', 'post'],
+      ['/merge', 'post'],
+    ] as const;
+    for (const [path, method] of summaryBodies) {
+      const summary =
+        doc.paths[path][method].requestBody.content['application/json'].schema.properties?.[
+          'summary'
+        ];
+      assert.equal(
+        summary?.maxLength,
+        400,
+        `the document declares the ceiling on ${method.toUpperCase()} ${path}`,
+      );
+      assert.match(
+        summary?.description ?? '',
+        /400/,
+        `the document teaches the ceiling on ${method.toUpperCase()} ${path}`,
+      );
+    }
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -250,20 +318,9 @@ test('unknown body keys refuse 400 naming the key — the wire teaches, never st
     });
     assert.equal(nested.status, 400);
     assert.match((nested.body as { error: string }).error, /armor/);
-    const doc = await app.request('/doc');
-    const declared = (
-      (await doc.json()) as {
-        paths: Record<
-          string,
-          Record<
-            string,
-            {
-              requestBody: { content: { 'application/json': { schema: Record<string, unknown> } } };
-            }
-          >
-        >;
-      }
-    ).paths['/memories']['post'].requestBody.content['application/json'].schema;
+    const declared = (await fetchDoc(app)).paths['/memories']['post'].requestBody.content[
+      'application/json'
+    ].schema;
     assert.equal(
       declared['additionalProperties'],
       false,

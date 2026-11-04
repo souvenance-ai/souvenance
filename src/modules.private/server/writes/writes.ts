@@ -35,7 +35,7 @@ import {
   unknownMemoryRefusal,
   unknownStoreRefusal,
 } from '../wire/wire.ts';
-import type { MetadataValue } from '../../store/store.ts';
+import { MAX_SUMMARY_LENGTH, type MetadataValue } from '../../store/store.ts';
 
 /** The one-gesture relations: the facade's RelationSpec verbatim, strict — an edge carries exactly its `to` and its `kind` (#60). */
 const RelationsSchema = z
@@ -67,11 +67,17 @@ const MetadataShape = z
       '(string | number | boolean) or nested objects of them — arrays and null never author: ' +
       'the filter cannot ask for either',
   );
+// The ceiling rides the schema too (ADR 0005: one schema set validates AND
+// documents) — the store owns the constant; the wire imports it so the
+// document's maxLength and the facade's refusal can never drift apart.
 const SummaryShape = z
   .string()
+  .max(MAX_SUMMARY_LENGTH)
   .optional()
   .describe(
-    'the authored condensation — owed when the content runs past the ceiling; revised by supersede, never in place',
+    'the authored condensation — owed when the content runs past the ' +
+      `${MAX_SUMMARY_LENGTH}-character ceiling; the summary itself refuses past it; ` +
+      'revised by supersede, never in place',
   );
 
 const StoreBodySchema = z.strictObject({
