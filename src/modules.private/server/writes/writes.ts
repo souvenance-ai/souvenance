@@ -2,7 +2,9 @@
  * The write routes (slice 4, #19's data-write block): the facade's seven
  * write verbs made HTTP, the bodies mirroring the facade's options
  * verbatim (kind required at store, optional at supersede/merge — the
- * inheritance the kind column ruled, #31). The created answer is the id
+ * inheritance the kind column ruled, #31; the birth curation `hot` rides
+ * store's body alone, #85 — the transfer and union rules own supersede's
+ * and merge's heads). The created answer is the id
  * (Q21); the mute writes answer 204 (Q19); the created edge echoes
  * itself without inventing a created_at the facade never returned (Q20).
  * Every handler walks the gates in order: family (403 — management
@@ -60,6 +62,7 @@ const StoreBodySchema = z.strictObject({
   summary: SummaryShape,
   metadata: MetadataShape,
   relations: RelationsSchema,
+  hot: z.boolean().optional(),
 });
 const SupersedeBodySchema = z.strictObject({
   content: z.string(),
@@ -124,6 +127,7 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
       // verbatim (the converter cannot carry the declared recursion).
       metadata: body.metadata as Record<string, MetadataValue> | undefined,
       relations: body.relations,
+      hot: body.hot,
     });
     return c.json({ id }, 201);
   });

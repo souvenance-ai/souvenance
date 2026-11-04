@@ -82,7 +82,7 @@ function edgesOf(store: Store, id: string): RawEdge[] {
 
 // --- store -----------------------------------------------------------------
 
-test('store: inserts a memory with UUID id, kind, metadata, born active and cold', () => {
+test('store: inserts a memory with UUID id, kind, metadata, born active by default', () => {
   const { store, cleanup } = tempStore();
   try {
     const id = store.store('hello world', { kind: 'note', metadata: { tag: 'a' } });
@@ -93,8 +93,75 @@ test('store: inserts a memory with UUID id, kind, metadata, born active and cold
     assert.equal(memory.content, 'hello world');
     assert.equal(memory.kind, 'note', 'kind is a column — the required classification');
     assert.deepEqual(JSON.parse(memory.metadata!), { tag: 'a' });
-    assert.equal(memory.status, 'active', 'curation is a status, earned via setHot (#38)');
+    assert.equal(
+      memory.status,
+      'active',
+      'born active by default — the birth curation opts in with hot: true (#85)',
+    );
     assert.equal(memory.summary, null, 'a short content owes no summary');
+
+    const explicit = store.store('explicit cold', { kind: 'note', hot: false });
+    assert.equal(memoryRow(store, explicit).status, 'active', 'hot: false spells the default');
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: the birth curation — hot: true lands hot in the same gesture (#85)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const target = store.store('the target', { kind: 'note' });
+    const id = store.store('the register', {
+      kind: 'directive',
+      hot: true,
+      relations: [{ to: target, kind: 'references' }],
+    });
+    const memory = memoryRow(store, id);
+    assert.equal(memory.status, 'hot', 'born hot — curation authored at birth, no second gesture');
+    assert.equal(edgesOf(store, id).length, 1, 'the edges ride the same transaction');
+
+    const served = store.checkin().hot.find((entry) => entry.id === id);
+    assert.ok(served, 'the checkin serves a memory born hot');
+
+    store.setHot(id, false);
+    assert.equal(
+      memoryRow(store, id).status,
+      'active',
+      'setHot stays the reversible edge on a born-hot memory',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: a memory born hot transfers its curation — supersede crowns a hot head (#85)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const source = store.store('v1', { kind: 'directive', hot: true });
+    const head = store.supersede(source, 'v2');
+    assert.equal(
+      memoryRow(store, head).status,
+      'hot',
+      'the transfer rides the status — how the curation arrived is invisible to it',
+    );
+    assert.equal(memoryRow(store, source).status, 'superseded', 'the tail dies superseded');
+  } finally {
+    cleanup();
+  }
+});
+
+test('store: a memory born hot unions its curation — the fusion arrives hot (#85)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const hotSource = store.store('the hot source', { kind: 'note', hot: true });
+    const coldSource = store.store('the cold source', { kind: 'note' });
+    const fusion = store.merge([hotSource, coldSource], 'the fusion');
+    assert.equal(
+      memoryRow(store, fusion).status,
+      'hot',
+      'the union rides the status — a born-hot source carries the fusion',
+    );
+    assert.equal(memoryRow(store, hotSource).status, 'merged', 'the sources die merged');
   } finally {
     cleanup();
   }

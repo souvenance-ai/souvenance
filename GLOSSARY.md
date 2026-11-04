@@ -35,7 +35,7 @@ The free JSON an agent authors on a memory, beside the columns — searchable by
 _Avoid_: properties, custom fields, tags (a data convention, not a surface)
 
 **Hot**:
-The curation status: the sub-state of `active` a fresh session's checkin serves. Not a flag, not a parallel mark — one of the five states, the machine's only reversible edge (setHot: active ↔ hot); supersede transfers it to the head, merge unions it, every termination cools it for free.
+The curation status: the sub-state of `active` a fresh session's checkin serves. Not a flag, not a parallel mark — one of the five states, authored at birth (store's `hot`) or carried by the machine's only reversible edge (setHot: active ↔ hot); supersede transfers it to the head, merge unions it, every termination cools it for free.
 _Avoid_: pinned, starred, important, the hot flag (retired)
 
 **Living**:

@@ -80,6 +80,47 @@ test('create answers 201 with the id — the memory serves, relations rode the o
   }
 });
 
+test('create accepts the birth curation — hot: true lands hot, absent stays active (#85)', async () => {
+  const dir = tempDir();
+  try {
+    const { app, registry } = boot(dir);
+    registry.create('atlas');
+    const hot = await call(app, 'POST', '/memories', {
+      content: 'the register',
+      kind: 'directive',
+      hot: true,
+    });
+    assert.equal(hot.status, 201);
+    const hotId = (hot.body as { id: string }).id;
+    const servedHot = await call(app, 'GET', `/memories/${hotId}`);
+    assert.equal(servedHot.body.status, 'hot', 'born hot — the birth curation rode the wire');
+
+    const cold = await call(app, 'POST', '/memories', { content: 'the note', kind: 'note' });
+    assert.equal(cold.status, 201);
+    const servedCold = await call(app, 'GET', `/memories/${(cold.body as { id: string }).id}`);
+    assert.equal(servedCold.body.status, 'active', 'omitted hot = the active default');
+
+    // The siblings refuse the birth curation: strict bodies without hot —
+    // the head's curation rides the transfer and the union (#85).
+    const overwritten = await call(app, 'POST', `/memories/${hotId}/supersede`, {
+      content: 'the successor',
+      hot: true,
+    });
+    assert.equal(overwritten.status, 400);
+    assert.match((overwritten.body as { error: string }).error, /hot/);
+    const fused = await call(app, 'POST', '/merge', {
+      ids: [hotId, (cold.body as { id: string }).id],
+      content: 'the fusion',
+      hot: true,
+    });
+    assert.equal(fused.status, 400);
+    assert.match((fused.body as { error: string }).error, /hot/);
+    registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the oversized body serves 413 — the /doc declares what the wire serves (#51 B09)', async () => {
   const dir = tempDir();
   try {
