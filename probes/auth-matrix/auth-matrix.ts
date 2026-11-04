@@ -134,7 +134,7 @@ const cases: readonly ProbeCase[] = [
       });
       if (r.status !== 404) return fail(`old-shape URL → ${r.status} (${r.text.slice(0, 140)})`);
       const taught = String(record(r.json)?.error ?? '');
-      if (taught !== 'no such route — the API document serves at /doc')
+      if (taught !== 'no such route — the API document serves at /doc, orientation at /skills')
         return fail(
           `the 404 does not teach the envelope's sentence: ${r.text.slice(0, 140)}`,
           'doc-gap',

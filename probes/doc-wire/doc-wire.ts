@@ -18,12 +18,15 @@ import {
   record,
   records,
   requestAs,
+  req,
 } from '../battery/battery.ts';
 
 /** The ambient credentials (#63): the data probes ride the store grant. */
 const ALPH = 'souv-' + '1'.repeat(32);
 const PAGE_SECRET = 'souv-' + '2'.repeat(32);
 const MANAGEMENT_SECRET = 'souv-' + '3'.repeat(32);
+/** The unborn store's grant — born with the battery, touched only by A30. */
+const UNBORN_SECRET = 'souv-' + '9'.repeat(32);
 
 const call = requestAs(ALPH);
 /** The management surface's wrapper: the management grant, never the store grant. */
@@ -50,7 +53,7 @@ const cases: readonly ProbeCase[] = [
   },
   {
     id: 'A02',
-    name: '/doc is openapi 3 souvenance — 13 paths / 17 methods',
+    name: '/doc is openapi 3 souvenance — 15 paths / 19 methods',
     run: async (b) => {
       const document = b.document as {
         openapi?: string;
@@ -62,14 +65,20 @@ const cases: readonly ProbeCase[] = [
       if (document.info?.title !== 'souvenance') return fail(`title ${document.info?.title}`);
       const paths = Object.keys(document.paths ?? {});
       const rows = paths.reduce((acc, path) => acc + Object.keys(document.paths![path]!).length, 0);
-      if (paths.length !== 13)
-        return fail(`13 paths declared, got ${paths.length}: ${paths.join(',')}`);
-      if (rows !== 17) return fail(`17 method rows declared, got ${rows}`, 'doc-gap');
+      if (paths.length !== 15)
+        return fail(`15 paths declared, got ${paths.length}: ${paths.join(',')}`);
+      if (rows !== 19) return fail(`19 method rows declared, got ${rows}`, 'doc-gap');
       const schemas = document.components?.schemas ?? {};
-      for (const needed of ['CheckinReport', 'CheckoutReport', 'MemoryNode']) {
+      for (const needed of [
+        'CheckinReport',
+        'CheckoutReport',
+        'MemoryNode',
+        'OutEdge',
+        'SearchHit',
+      ]) {
         if (!(needed in schemas)) return fail(`component ${needed} missing from /doc`, 'doc-gap');
       }
-      return ok('17 routes + 3 components');
+      return ok('19 routes + 5 components');
     },
   },
   {
@@ -555,7 +564,7 @@ const cases: readonly ProbeCase[] = [
   },
   {
     id: 'A27',
-    name: 'the discovery door: / points, /openapi.json serves, the 404 teaches',
+    name: 'the discovery door: / points, /openapi.json serves, the 404 teaches both families',
     run: async (b) => {
       // Two agent lives knocked on mute doors before finding /doc (#62).
       const pointer = await call(b.server!.url, 'GET', '/');
@@ -565,7 +574,11 @@ const cases: readonly ProbeCase[] = [
         door?.name !== 'souvenance' ||
         door?.doc !== '/doc' ||
         door?.docs !== '/docs' ||
-        door?.healthz !== '/healthz'
+        door?.healthz !== '/healthz' ||
+        door?.skills !== '/skills' ||
+        door?.start !== '/skills/waking' ||
+        typeof door?.waking !== 'string' ||
+        door.waking.length === 0
       )
         return fail(`the pointer is mute: ${pointer.text.slice(0, 160)}`);
       const alias = await call(b.server!.url, 'GET', '/openapi.json');
@@ -582,9 +595,74 @@ const cases: readonly ProbeCase[] = [
       const miss = await call(b.server!.url, 'GET', '/nope');
       if (miss.status !== 404) return fail(`/nope → ${miss.status}`);
       const taught = String((miss.json as { error?: string } | null)?.error ?? '');
-      if (!taught.includes('/doc'))
-        return fail(`the 404 does not teach: ${miss.text.slice(0, 160)}`);
+      if (!taught.includes('/doc') || !taught.includes('/skills'))
+        return fail(`the 404 does not teach both families: ${miss.text.slice(0, 160)}`);
       return ok('pointer + alias + teaching 404');
+    },
+  },
+  {
+    id: 'A28',
+    name: 'GET /skills serves the index bare — the start skill first',
+    run: async (b) => {
+      // Public door: no credential, no bucket — orientation is the product's
+      // voice, it reaches no individual's data (#82).
+      const served = await req(b.server!.url, 'GET', '/skills');
+      if (served.status !== 200) return fail(`/skills bare → ${served.status} ${served.text}`);
+      const row = record(served.json);
+      if (typeof row?.version !== 'string' || row.version.length === 0)
+        return fail(`index version ${served.text.slice(0, 160)}`);
+      const names = records(row.skills).map((entry) => String(entry.name));
+      if (names.join(',') !== 'waking,setup')
+        return fail(`shipped set drifted: ${names.join(',')} — waking must head the index`);
+      if (
+        records(row.skills).some(
+          (entry) => typeof entry.description !== 'string' || entry.description === '',
+        )
+      )
+        return fail(`a row without its startup hint: ${served.text.slice(0, 200)}`, 'doc-gap');
+      return docAgrees(b, '/skills', 'GET', served.status, served.json);
+    },
+  },
+  {
+    id: 'A29',
+    name: 'GET /skills/{name} serves SKILL.md verbatim; the unknown name teaches the index',
+    run: async (b) => {
+      const served = await req(b.server!.url, 'GET', '/skills/waking');
+      if (served.status !== 200) return fail(`/skills/waking → ${served.status} ${served.text}`);
+      if (!/text\/markdown/i.test(served.headers.get('content-type') ?? ''))
+        return fail(`content-type ${served.headers.get('content-type')}`);
+      if (!served.text.startsWith('---\n') || !served.text.includes('name: waking'))
+        return fail('the body is not the SKILL.md verbatim', 'doc-gap');
+      const miss = await req(b.server!.url, 'GET', '/skills/nope');
+      if (miss.status !== 404) return fail(`unknown name → ${miss.status}`);
+      const taught = String(record(miss.json)?.error ?? '');
+      if (!taught.includes('/skills'))
+        return fail(`the 404 does not teach the index: ${miss.text.slice(0, 160)}`);
+      const overflow = await req(b.server!.url, 'GET', `/skills/${'z'.repeat(300)}`);
+      if (overflow.status !== 404) return fail(`overflow name → ${overflow.status}`);
+      return docAgrees(b, '/skills/{name}', 'GET', miss.status, miss.json);
+    },
+  },
+  {
+    id: 'A30',
+    name: 'checkin guidance rides the data — continuity on the living store, the unborn line on the empty one',
+    run: async (b) => {
+      const living = await call(b.server!.url, 'GET', '/checkin');
+      if (living.status !== 200) return fail(`checkin → ${living.status}`);
+      const guidance = record(record(living.json)?.guidance);
+      if (guidance?.skill !== 'waking' || typeof guidance.line !== 'string' || guidance.line === '')
+        return fail(`the continuity line is missing: ${living.text.slice(0, 200)}`, 'doc-gap');
+      // unborn is born at grandOpening and stays untouched all phase —
+      // its checkin carries the store-empty override, never the continuity.
+      const unborn = await req(b.server!.url, 'GET', '/checkin', {
+        headers: bearerHeaders(UNBORN_SECRET),
+      });
+      if (unborn.status !== 200) return fail(`empty store checkin → ${unborn.status}`);
+      const voice = record(record(unborn.json)?.guidance);
+      if (voice?.skill !== 'setup' || typeof voice.line !== 'string' || voice.line === '')
+        return fail(`the unborn line is missing: ${unborn.text.slice(0, 200)}`, 'doc-gap');
+      const folded = docAgrees(b, '/checkin', 'GET', unborn.status, unborn.json);
+      return folded.ok ? ok('continuity → waking · store-empty → setup, both folded') : folded;
     },
   },
 ];
@@ -595,10 +673,11 @@ export function battery(root: string): Battery {
     name: 'A-doc-vs-wire',
     port: 18501,
     cases,
-    stores: ['alpha', 'page-test'],
+    stores: ['alpha', 'page-test', 'unborn'],
     tokens: [
       { agent: 'alpha-rw', secret: ALPH, store: 'alpha', mode: 'rw' },
       { agent: 'page-rw', secret: PAGE_SECRET, store: 'page-test', mode: 'rw' },
+      { agent: 'unborn-rw', secret: UNBORN_SECRET, store: 'unborn', mode: 'rw' },
     ] satisfies readonly StoreGrant[],
     management: [{ agent: 'ops', secret: MANAGEMENT_SECRET }] satisfies readonly ManagementGrant[],
     root,
