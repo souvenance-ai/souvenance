@@ -5,6 +5,8 @@
 // store grant on the data surface, the management token on the
 // management surface; one store 'alpha' grows step by step.
 //
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   Battery,
   bearerHeaders,
@@ -12,6 +14,7 @@ import {
   type ProbeCase,
   type ProbeRecord,
   type StoreGrant,
+  REPO,
   docAgrees,
   fail,
   ok,
@@ -39,6 +42,11 @@ const memoriesOf = (row: ProbeRecord | null): readonly ProbeRecord[] => records(
 
 const memoryIds = (row: ProbeRecord | null): string[] =>
   memoriesOf(row).map((entry) => String(entry.id));
+
+const nonEmpty = (value: unknown): boolean => typeof value === 'string' && value.length > 0;
+
+const guidanceOf = (exchange: { json: unknown }): ProbeRecord | null =>
+  record(record(exchange.json)?.guidance);
 
 const cases: readonly ProbeCase[] = [
   {
@@ -577,8 +585,7 @@ const cases: readonly ProbeCase[] = [
         door?.healthz !== '/healthz' ||
         door?.skills !== '/skills' ||
         door?.start !== '/skills/waking' ||
-        typeof door?.waking !== 'string' ||
-        door.waking.length === 0
+        !nonEmpty(door?.waking)
       )
         return fail(`the pointer is mute: ${pointer.text.slice(0, 160)}`);
       const alias = await call(b.server!.url, 'GET', '/openapi.json');
@@ -604,21 +611,27 @@ const cases: readonly ProbeCase[] = [
     id: 'A28',
     name: 'GET /skills serves the index bare — the start skill first',
     run: async (b) => {
-      // Public door: no credential, no bucket — orientation is the product's
-      // voice, it reaches no individual's data (#82).
+      // Public door: no credential, no store scoping — orientation is the
+      // product's voice, it reaches no individual's data (#82).
       const served = await req(b.server!.url, 'GET', '/skills');
       if (served.status !== 200) return fail(`/skills bare → ${served.status} ${served.text}`);
       const row = record(served.json);
-      if (typeof row?.version !== 'string' || row.version.length === 0)
-        return fail(`index version ${served.text.slice(0, 160)}`);
+      if (!nonEmpty(row?.version)) return fail(`index version ${served.text.slice(0, 160)}`);
+      // "version is the serving product's" — the pointer serves it too:
+      // the two wire-served copies must agree.
+      const pointer = await req(b.server!.url, 'GET', '/');
+      const door = record(pointer.json);
+      if (pointer.status !== 200 || !nonEmpty(door?.version))
+        return fail(`pointer version ${pointer.text.slice(0, 160)}`);
+      if (row.version !== door.version)
+        return fail(
+          `index version ${String(row.version)} vs pointer ${String(door.version)}`,
+          'doc-gap',
+        );
       const names = records(row.skills).map((entry) => String(entry.name));
       if (names.join(',') !== 'waking,setup')
         return fail(`shipped set drifted: ${names.join(',')} — waking must head the index`);
-      if (
-        records(row.skills).some(
-          (entry) => typeof entry.description !== 'string' || entry.description === '',
-        )
-      )
+      if (records(row.skills).some((entry) => !nonEmpty(entry.description)))
         return fail(`a row without its startup hint: ${served.text.slice(0, 200)}`, 'doc-gap');
       return docAgrees(b, '/skills', 'GET', served.status, served.json);
     },
@@ -631,15 +644,33 @@ const cases: readonly ProbeCase[] = [
       if (served.status !== 200) return fail(`/skills/waking → ${served.status} ${served.text}`);
       if (!/text\/markdown/i.test(served.headers.get('content-type') ?? ''))
         return fail(`content-type ${served.headers.get('content-type')}`);
-      if (!served.text.startsWith('---\n') || !served.text.includes('name: waking'))
-        return fail('the body is not the SKILL.md verbatim', 'doc-gap');
+      // Byte for byte against the shipped file — "an installation is a
+      // copy, never a transform" (#82). The shipped SKILL.md is content,
+      // not implementation: the black-box stance holds.
+      const shipped = readFileSync(join(REPO, 'skills', 'waking', 'SKILL.md'), 'utf8');
+      if (served.text !== shipped)
+        return fail('the body drifts from the shipped SKILL.md', 'doc-gap');
+      // The startup hint rides two homes — the index row and the served
+      // file's own frontmatter. One sentence, one truth.
+      const index = record((await req(b.server!.url, 'GET', '/skills')).json);
+      const hint = records(index?.skills).find((entry) => entry.name === 'waking')?.description;
+      const front = served.text
+        .split('\n')
+        .find((line) => line.startsWith('description:'))
+        ?.slice('description:'.length)
+        .trim();
+      if (!nonEmpty(hint) || front !== hint)
+        return fail(`index hint vs frontmatter: ${String(front)} vs ${String(hint)}`, 'doc-gap');
+      const folded = docAgrees(b, '/skills/{name}', 'GET', served.status, served.json);
+      if (!folded.ok) return folded;
       const miss = await req(b.server!.url, 'GET', '/skills/nope');
       if (miss.status !== 404) return fail(`unknown name → ${miss.status}`);
       const taught = String(record(miss.json)?.error ?? '');
-      if (!taught.includes('/skills'))
-        return fail(`the 404 does not teach the index: ${miss.text.slice(0, 160)}`);
+      if (taught !== 'no such skill — the index serves at /skills')
+        return fail(`the 404 drifts from the spec's sentence: ${miss.text.slice(0, 160)}`);
       const overflow = await req(b.server!.url, 'GET', `/skills/${'z'.repeat(300)}`);
-      if (overflow.status !== 404) return fail(`overflow name → ${overflow.status}`);
+      if (overflow.status < 400 || overflow.status >= 500)
+        return fail(`overflow name → ${overflow.status}, expected a teachable 4xx`);
       return docAgrees(b, '/skills/{name}', 'GET', miss.status, miss.json);
     },
   },
@@ -649,19 +680,19 @@ const cases: readonly ProbeCase[] = [
     run: async (b) => {
       const living = await call(b.server!.url, 'GET', '/checkin');
       if (living.status !== 200) return fail(`checkin → ${living.status}`);
-      const guidance = record(record(living.json)?.guidance);
-      if (guidance?.skill !== 'waking' || typeof guidance.line !== 'string' || guidance.line === '')
+      const continuity = guidanceOf(living);
+      if (continuity?.skill !== 'waking' || !nonEmpty(continuity.line))
         return fail(`the continuity line is missing: ${living.text.slice(0, 200)}`, 'doc-gap');
       // unborn is born at grandOpening and stays untouched all phase —
       // its checkin carries the store-empty override, never the continuity.
-      const unborn = await req(b.server!.url, 'GET', '/checkin', {
+      const empty = await req(b.server!.url, 'GET', '/checkin', {
         headers: bearerHeaders(UNBORN_SECRET),
       });
-      if (unborn.status !== 200) return fail(`empty store checkin → ${unborn.status}`);
-      const voice = record(record(unborn.json)?.guidance);
-      if (voice?.skill !== 'setup' || typeof voice.line !== 'string' || voice.line === '')
-        return fail(`the unborn line is missing: ${unborn.text.slice(0, 200)}`, 'doc-gap');
-      const folded = docAgrees(b, '/checkin', 'GET', unborn.status, unborn.json);
+      if (empty.status !== 200) return fail(`empty store checkin → ${empty.status}`);
+      const override = guidanceOf(empty);
+      if (override?.skill !== 'setup' || !nonEmpty(override.line))
+        return fail(`the unborn line is missing: ${empty.text.slice(0, 200)}`, 'doc-gap');
+      const folded = docAgrees(b, '/checkin', 'GET', empty.status, empty.json);
       return folded.ok ? ok('continuity → waking · store-empty → setup, both folded') : folded;
     },
   },
