@@ -12,8 +12,9 @@ import type { ServerEnv } from '../auth/auth.ts';
 import type { Registry } from '../registry/registry.ts';
 import type { Skills } from '../skills/skills.ts';
 import {
-  CheckoutReportSchema,
   ServedCheckinReportSchema,
+  CheckoutReportSchema,
+  CHECKOUT_DEBTS_TEACHING,
   checkinLimitShape,
   refusal,
   unknownStoreRefusal,
@@ -27,6 +28,11 @@ export function registerRitualRoutes(
   const checkin = createRoute({
     method: 'get',
     path: '/checkin',
+    summary: 'open a session',
+    description:
+      "The session-start ritual: the hot memories with their relations, the store's " +
+      'stats, the waking guidance — one call, newest first. Reading the register is not ' +
+      'writing it: read-only grants open here.',
     tags: ['rituals'],
     request: {
       query: z.object({ limit: checkinLimitShape }),
@@ -34,7 +40,8 @@ export function registerRitualRoutes(
     responses: {
       200: {
         description:
-          'the hot block (newest first) and the store stats — the session opens here, the waking voice beside the data (#82)',
+          'the hot block (newest first) and the store stats — the session opens here, ' +
+          'the waking voice beside the data',
         content: { 'application/json': { schema: ServedCheckinReportSchema } },
       },
       400: refusal('the limit is not ours'),
@@ -55,6 +62,13 @@ export function registerRitualRoutes(
   const checkout = createRoute({
     method: 'get',
     path: '/checkout',
+    summary: 'close a session',
+    description:
+      'The session-end verdict: the store reports its consolidation debts — ' +
+      CHECKOUT_DEBTS_TEACHING +
+      ' — each payable with the write verbs; healthy lands true only when every debt ' +
+      'is paid. ' +
+      "Corruption is not the gate's business — the operator's doctor audits it.",
     tags: ['rituals'],
     responses: {
       200: {

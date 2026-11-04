@@ -90,6 +90,10 @@ _Avoid_: MCP server (ambiguous with the HTTP server)
 The wire's voice beside the data: the optional envelope section that marks a need-moment and points at the skill that answers it. It speaks only where the data alone cannot install the posture — the waking, the continuity of the hot, the empty store — and falls silent where the data already teaches: the checkout's verdict names the debts and their payment. Its mechanism is contract, its texts are content: the lines live with the skills they point at.
 _Avoid_: hint, tip, banner, notification
 
+**Teaching**:
+The served text beside the shapes: the operation summaries and descriptions, the parameter and schema descriptions the served document carries — the contract's canon, spoken in the glossary's voice, agnostic of the engine behind the server, agreeing with the refusal messages (one teaching, two surfaces). It rides the served shapes themselves, never a parallel text.
+_Avoid_: documentation, comments, annotation, help text
+
 ### Access
 
 **Ownership lock**:

@@ -26,6 +26,7 @@ import type { Registry } from '../registry/registry.ts';
 import type { MetadataFilters } from '../../store/utils/compile-read-filters/compile-read-filters.ts';
 import {
   ErrorSchema,
+  SEARCH_RANK_TEACHING,
   invalidRefusal,
   limitShape,
   MemoryIdParamsSchema,
@@ -57,13 +58,21 @@ const kindShape = z.preprocess(
  * typed equality (string | number | boolean), AND across paths. Array
  * values are not authored in the first place, so no index syntax exists.
  */
-const metadataShape = z
+/**
+ * The metadata filter's grammar, taught once — the shape and the list's
+ * route text speak the same string, the STORE_NAME_TEACHING pattern.
+ */
+const METADATA_TEACHING =
+  'one URL-encoded JSON object of dot-path → scalar (string | number | boolean), AND across paths';
+
+const metadataShape = z.string().optional().describe(METADATA_TEACHING);
+const includeTerminalsShape = z
   .string()
   .optional()
   .describe(
-    'URL-encoded JSON object of dot-path → scalar (string | number | boolean), AND across paths',
+    'a presence flag — set it to serve the terminal memories too (superseded, deprecated, ' +
+      'merged); absent serves the living only',
   );
-const includeTerminalsShape = z.string().optional();
 
 /** The metadata param's parse: one URL-encoded JSON object, path → scalar. */
 function metadataFilters(raw: string | undefined): MetadataFilters | undefined {
@@ -89,10 +98,21 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
   const listMemories = createRoute({
     method: 'get',
     path: '/memories',
+    summary: 'page the memories',
+    description:
+      "One page of the store's memories in serving order, newest first: " +
+      '{memories, next_after} — next_after is null when the page is exhausted; hand it ' +
+      'back as ?after for the next page. The filters ride: ?kind (repeat the param for ' +
+      'IN), ?metadata (' +
+      METADATA_TEACHING +
+      '), ?limit, and the terminals flag.',
     tags: ['memories'],
     request: {
       query: z.object({
-        after: z.string().optional(),
+        after: z
+          .string()
+          .optional()
+          .describe("the page cursor — hand back the previous page's next_after"),
         limit: limitShape,
         kind: kindShape,
         // The grammar's language rides on the shared const (list and
@@ -159,6 +179,10 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
   const getMemory = createRoute({
     method: 'get',
     path: '/memories/{id}',
+    summary: 'read a memory',
+    description:
+      'One memory as its projection: the node with its out-edges expanded to ?depth — ' +
+      "the in-edges stay raw rows. 404 for an id the store doesn't hold.",
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
@@ -190,10 +214,15 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
   const searchMemories = createRoute({
     method: 'get',
     path: '/search',
+    summary: 'search the memories',
+    description:
+      "The store's content, searched: the hits, " +
+      SEARCH_RANK_TEACHING +
+      ". The list's filters ride: ?limit, ?kind, ?metadata, ?include_terminals.",
     tags: ['memories'],
     request: {
       query: z.object({
-        q: z.string(),
+        q: z.string().describe('the search text — non-empty'),
         limit: limitShape,
         kind: kindShape,
         metadata: metadataShape,
@@ -202,7 +231,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
     },
     responses: {
       200: {
-        description: 'the hits, best bm25 match first — no cursor, the rank is unstable',
+        description: 'the hits, ' + SEARCH_RANK_TEACHING,
         content: { 'application/json': { schema: z.array(SearchHitSchema) } },
       },
       400: invalidRefusal('the query or a filter is not ours — q must be non-empty'),
