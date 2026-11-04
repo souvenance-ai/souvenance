@@ -613,20 +613,13 @@ export class Store {
     const summary = options.summary ?? null;
     const metadata = options.metadata ? JSON.stringify(options.metadata) : null;
     const created_at = new Date().toISOString();
+    const status: MemoryStatus = options.hot ? 'hot' : 'active';
     this.#transaction(() => {
       this.#db
         .prepare(
           'INSERT INTO memories (id, content, kind, summary, metadata, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(
-          id,
-          content,
-          options.kind,
-          summary,
-          metadata,
-          created_at,
-          options.hot ? 'hot' : 'active',
-        );
+        .run(id, content, options.kind, summary, metadata, created_at, status);
       if (options.relations?.length) {
         this.#insertRelations(id, options.relations, created_at);
       }
