@@ -150,6 +150,23 @@ test('store: a memory born hot transfers its curation — supersede crowns a hot
   }
 });
 
+test('store: a memory born hot unions its curation — the fusion arrives hot (#85)', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    const hotSource = store.store('the hot source', { kind: 'note', hot: true });
+    const coldSource = store.store('the cold source', { kind: 'note' });
+    const fusion = store.merge([hotSource, coldSource], 'the fusion');
+    assert.equal(
+      memoryRow(store, fusion).status,
+      'hot',
+      'the union rides the status — a born-hot source carries the fusion',
+    );
+    assert.equal(memoryRow(store, hotSource).status, 'merged', 'the sources die merged');
+  } finally {
+    cleanup();
+  }
+});
+
 test('store: kind is required — a kind-less memory does not exist', () => {
   const { store, cleanup } = tempStore();
   try {

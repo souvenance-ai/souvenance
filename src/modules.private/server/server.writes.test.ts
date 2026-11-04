@@ -99,6 +99,22 @@ test('create accepts the birth curation — hot: true lands hot, absent stays ac
     assert.equal(cold.status, 201);
     const servedCold = await call(app, 'GET', `/memories/${(cold.body as { id: string }).id}`);
     assert.equal(servedCold.body.status, 'active', 'omitted hot = the active default');
+
+    // The siblings refuse the birth curation: strict bodies without hot —
+    // the head's curation rides the transfer and the union (#85).
+    const overwritten = await call(app, 'POST', `/memories/${hotId}/supersede`, {
+      content: 'the successor',
+      hot: true,
+    });
+    assert.equal(overwritten.status, 400);
+    assert.match((overwritten.body as { error: string }).error, /hot/);
+    const fused = await call(app, 'POST', '/merge', {
+      ids: [hotId, (cold.body as { id: string }).id],
+      content: 'the fusion',
+      hot: true,
+    });
+    assert.equal(fused.status, 400);
+    assert.match((fused.body as { error: string }).error, /hot/);
     registry.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
