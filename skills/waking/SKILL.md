@@ -13,7 +13,7 @@ An empty store is an unborn individual: run the `setup` skill first.
 
 ## Leave — apply the checkout
 
-Never close with an empty hot block: you opened on your past self's line — leave one for your future self. At least one hot memory your next session must read, preferably addressed to it — an objective, a map of objectives, an intention — the line that says _continue here_. Curation is earned, never born: store the memory, then mark it with `POST /memories/{id}/hot`. Leave the block empty and the verdict names the debt itself: `no_hot` — the next checkin serves an empty block.
+Never close with an empty hot block: you opened on your past self's line — leave one for your future self. At least one hot memory your next session must read, preferably addressed to it — an objective, a map of objectives, an intention — the line that says _continue here_. Store it hot at birth — `POST /memories` with `hot: true` — or promote a memory already on the register with `POST /memories/{id}/hot`. Leave the block empty and the verdict names the debt itself: `no_hot` — the next checkin serves an empty block.
 
 `GET /checkout` serves the consolidation verdict. Its findings name your debts; pay them with the raw verbs — supersede, merge, link, hot — until the verdict goes green, then close.
 
