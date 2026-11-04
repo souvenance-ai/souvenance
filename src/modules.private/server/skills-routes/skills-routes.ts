@@ -23,6 +23,11 @@ export function registerSkillRoutes(
   const index = createRoute({
     method: 'get',
     path: '/skills',
+    summary: 'the skills index',
+    description:
+      "Every skill's name and description, the start skill first — the orientation " +
+      "surface, served publicly: a skill teaches the product's grammar to whoever asks; " +
+      "it reaches no individual's data.",
     tags: ['skills'],
     responses: {
       200: {
@@ -36,9 +41,13 @@ export function registerSkillRoutes(
   const item = createRoute({
     method: 'get',
     path: '/skills/{name}',
+    summary: 'read a skill',
+    description:
+      "One skill's body — served verbatim: an installation is a copy, never a transform. " +
+      '404 teaches the way back: the index serves at /skills.',
     tags: ['skills'],
     request: {
-      params: z.object({ name: z.string() }),
+      params: z.object({ name: z.string().describe("the skill's name — the index serves it") }),
     },
     responses: {
       200: {

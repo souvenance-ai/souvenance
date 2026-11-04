@@ -25,15 +25,32 @@ import { MAX_BODY_BYTES, MAX_DEPTH, MAX_LIMIT } from '../limits/limits.ts';
 // live here once — three route files declared them apart before the
 // review caught the drift waiting to happen.
 
-export const ErrorSchema = z.object({ error: z.string() });
+export const ErrorSchema = z
+  .object({ error: z.string().describe('what refused and why — the message teaches') })
+  .describe('the one refusal envelope — every refusal is one JSON doc: {error: message}');
 
-export const StoreNameSchema = z.string().regex(STORE_NAME);
+/**
+ * The store-name grammar, taught once: bodies, path params and responses
+ * all ride the same string — one teaching, many surfaces.
+ */
+export const STORE_NAME_TEACHING =
+  'lowercase, starts with a letter, up to 32 characters (a-z, 0-9, dashes)';
+
+export const StoreNameSchema = z.string().regex(STORE_NAME).describe(STORE_NAME_TEACHING);
 
 /** The addressed-memory params: the id — the store rides the grant (#74). */
-export const MemoryIdParamsSchema = z.object({ id: z.uuid() });
+export const MemoryIdParamsSchema = z.object({
+  id: z.uuid().describe("the addressed memory's id"),
+});
 
 /** The explicit limit's shape: the cap judges only the explicit (Q18). */
-export const limitShape = z.coerce.number().int().min(1).max(MAX_LIMIT).optional();
+export const limitShape = z.coerce
+  .number()
+  .int()
+  .min(1)
+  .max(MAX_LIMIT)
+  .optional()
+  .describe("an explicit page size — past the cap refuses; absent takes the server's default");
 
 /**
  * Checkin's explicit limit keeps the facade's verbatim judgment — an
@@ -41,19 +58,36 @@ export const limitShape = z.coerce.number().int().min(1).max(MAX_LIMIT).optional
  * explicit session block follows "order guides attention, nothing
  * drops" (#50; the absent limit stays absent, no server default).
  */
-export const checkinLimitShape = z.coerce.number().int().min(1).optional();
+export const checkinLimitShape = z.coerce
+  .number()
+  .int()
+  .min(1)
+  .optional()
+  .describe('an explicit session block: integer ≥ 1, no ceiling — the absent limit stays absent');
 
 /** Get's projection depth: the wire caps the walk the facade leaves to its caller (#50). */
-export const depthShape = z.coerce.number().int().min(1).max(MAX_DEPTH).optional();
+export const depthShape = z.coerce
+  .number()
+  .int()
+  .min(1)
+  .max(MAX_DEPTH)
+  .optional()
+  .describe(
+    'how deep the projection expands out-edges — absent serves depth 1 (raw edges); past the cap refuses',
+  );
 
 /** The stats' five-key ledger — the descriptor's and the checkin's shared shape. */
-export const StatsSchema = z.object({
-  memories: z.number(),
-  memories_by_status: z.record(z.string(), z.number()).readonly(),
-  memories_by_kind: z.record(z.string(), z.number()).readonly(),
-  edges: z.number(),
-  edges_by_kind: z.record(z.string(), z.number()).readonly(),
-});
+export const StatsSchema = z
+  .object({
+    memories: z.number(),
+    memories_by_status: z.record(z.string(), z.number()).readonly(),
+    memories_by_kind: z.record(z.string(), z.number()).readonly(),
+    edges: z.number(),
+    edges_by_kind: z.record(z.string(), z.number()).readonly(),
+  })
+  .describe(
+    "the store's five-key ledger — memories, memories by status and kind, edges, edges by kind",
+  );
 
 /** One documented refusal — the response keys stay literal at the call sites. */
 export function refusal(description: string) {
@@ -90,7 +124,12 @@ const relationShape = {
 export const RelationSchema: z.ZodType<Relation> = z.lazy(() => z.object(relationShape));
 
 export const OutEdgeSchema: z.ZodType<OutEdge> = z.lazy(() =>
-  z.object({ ...relationShape, target: z.union([MemoryNodeSchema, z.null()]) }),
+  z
+    .object({ ...relationShape, target: z.union([MemoryNodeSchema, z.null()]) })
+    .describe(
+      'one directed edge from this memory — from_id, to_id, the edge kind, its authored ' +
+        'metadata — and the target memory expanded, null when the projection stops at the depth',
+    ),
 );
 
 const memoryShape = {
@@ -111,26 +150,46 @@ const nodeShape = {
   }),
 };
 
-export const MemoryNodeSchema: z.ZodType<MemoryWithRelations> = z.lazy(() => z.object(nodeShape));
-
-export const SearchHitSchema: z.ZodType<SearchResult> = z.lazy(() =>
-  z.object({ ...nodeShape, rank: z.number() }),
+export const MemoryNodeSchema: z.ZodType<MemoryWithRelations> = z.lazy(() =>
+  z
+    .object(nodeShape)
+    .describe(
+      'one memory with its relation graph — content, kind, the authored summary, metadata, ' +
+        'created_at, the status (active | hot | superseded | deprecated | merged); ' +
+        'the out-edges expand to the asked depth, the in-edges stay raw rows',
+    ),
 );
 
-export const CheckinReportSchema = z.object({
-  hot: z.array(MemoryNodeSchema).readonly(),
-  stats: StatsSchema,
-}) satisfies z.ZodType<CheckinReport>;
+/** The search's rank teaching — the hit, the route and the response speak it once. */
+export const SEARCH_RANK_TEACHING =
+  'best match first — no cursor, the rank is unstable across writes';
+
+export const SearchHitSchema: z.ZodType<SearchResult> = z.lazy(() =>
+  z
+    .object({ ...nodeShape, rank: z.number() })
+    .describe('a hit — the served node plus its rank: ' + SEARCH_RANK_TEACHING),
+);
+
+export const CheckinReportSchema = z
+  .object({
+    hot: z.array(MemoryNodeSchema).readonly(),
+    stats: StatsSchema,
+  })
+  .describe(
+    "the session's opening state — the hot memories with their relations, and the store's stats",
+  ) satisfies z.ZodType<CheckinReport>;
 
 /**
  * The wire's voice beside the data (#82): one imperative line, one skill
  * pointer — optional on the success responses that carry it, never on the
  * errors (the refusals keep teaching through their message).
  */
-export const GuidanceSchema: z.ZodType<Guidance> = z.object({
-  line: z.string(),
-  skill: z.string(),
-});
+export const GuidanceSchema: z.ZodType<Guidance> = z
+  .object({
+    line: z.string().describe('one imperative line — the posture the moment needs'),
+    skill: z.string().describe("the skill's name that answers the line — the index serves it"),
+  })
+  .describe('the waking voice beside the data — a line, and the skill that answers it');
 
 /**
  * The served checkin (#82): the report plus the waking voice — the
@@ -143,12 +202,15 @@ export interface ServedCheckinReport extends CheckinReport {
 
 export const ServedCheckinReportSchema = CheckinReportSchema.extend({
   guidance: GuidanceSchema.optional(),
-}) satisfies z.ZodType<ServedCheckinReport>;
+}).describe(
+  "the session's opening state — the hot memories with their relations, the store's stats, " +
+    'and the guidance: the waking voice beside the data',
+) satisfies z.ZodType<ServedCheckinReport>;
 
 /** One skills-index row (#82): the name and the startup-visible hint. */
 export const SkillEntrySchema: z.ZodType<SkillEntry> = z.object({
-  name: z.string(),
-  description: z.string(),
+  name: z.string().describe("the skill's name"),
+  description: z.string().describe('the one-line teaching the index serves'),
 });
 
 /** The skills index (#82): the serving product's version, the start skill first. */
@@ -157,32 +219,47 @@ export interface SkillsIndex {
   readonly skills: readonly SkillEntry[];
 }
 
-export const SkillsIndexSchema: z.ZodType<SkillsIndex> = z.object({
-  version: z.string(),
-  skills: z.array(SkillEntrySchema).readonly(),
-});
+export const SkillsIndexSchema: z.ZodType<SkillsIndex> = z
+  .object({
+    version: z.string(),
+    skills: z.array(SkillEntrySchema).readonly(),
+  })
+  .describe(
+    "the orientation surface's index — the serving product's version and every skill, the start skill first",
+  );
+
+/** The checkout's debts, taught once — the enum and the route text speak the same list. */
+export const CHECKOUT_DEBTS_TEACHING =
+  'the hot block missing, living memories without edges (islands), duplicate titles';
 
 export const CheckoutReportSchema: z.ZodType<CheckoutReport> = z.lazy(() =>
-  z.object({
-    healthy: z.boolean(),
-    findings: z
-      .array(
-        z
-          .object({
-            check: z.enum(['no_hot', 'isolated_living', 'duplicate_titles']),
-            id: z.string().optional(),
-            detail: z.string(),
-            hint: z.string(),
-          })
-          .readonly(),
-      )
-      .readonly(),
-    summary: z.object({
-      checks: z.number(),
-      issues: z.number(),
-      memories: z.number(),
-      hot_memories: z.number(),
-      edges: z.number(),
-    }),
-  }),
+  z
+    .object({
+      healthy: z.boolean(),
+      findings: z
+        .array(
+          z
+            .object({
+              check: z
+                .enum(['no_hot', 'isolated_living', 'duplicate_titles'])
+                .describe('which debt — ' + CHECKOUT_DEBTS_TEACHING),
+              id: z.string().optional().describe("the owing memory's id, when the debt names one"),
+              detail: z.string().describe('what was found'),
+              hint: z.string().describe('the payment — the verb that pays this debt'),
+            })
+            .readonly(),
+        )
+        .readonly()
+        .describe('the consolidation debts — each payable with the write verbs'),
+      summary: z
+        .object({
+          checks: z.number(),
+          issues: z.number(),
+          memories: z.number(),
+          hot_memories: z.number(),
+          edges: z.number(),
+        })
+        .describe('the counts — checks run, issues owed, memories, hot memories, edges'),
+    })
+    .describe('the session-end verdict — healthy, the payable findings, and the summary counts'),
 );

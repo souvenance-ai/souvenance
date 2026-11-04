@@ -20,6 +20,7 @@ import type { OpenAPIHono } from '@hono/zod-openapi';
 import type { Registry } from '../registry/registry.ts';
 import type { ServerEnv } from '../auth/auth.ts';
 import {
+  STORE_NAME_TEACHING,
   payloadRefusal,
   refusal,
   StatsSchema,
@@ -28,7 +29,11 @@ import {
 } from '../wire/wire.ts';
 
 const NameSchema = z.strictObject({ name: StoreNameSchema });
-const ForkBodySchema = z.strictObject({ name: StoreNameSchema.optional() });
+const ForkBodySchema = z.strictObject({
+  name: StoreNameSchema.optional().describe(
+    "the fork's name — composed from the source's name when absent; " + STORE_NAME_TEACHING,
+  ),
+});
 const DescriptorSchema = z.object({ name: z.string(), stats: StatsSchema });
 
 const CAP_REFUSAL = () => refusal('the grant carries no manage cap');
@@ -40,6 +45,10 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
   const createStore = createRoute({
     method: 'post',
     path: '/stores',
+    summary: 'birth a store',
+    description:
+      "Creates an empty store — one individual's memory — under the body's name. " +
+      "201 serves the name back. The management surface's gesture: a store grant never manages.",
     tags: ['stores'],
     request: { body: { content: { 'application/json': { schema: NameSchema } }, required: true } },
     responses: {
@@ -62,6 +71,10 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
   const listStores = createRoute({
     method: 'get',
     path: '/stores',
+    summary: 'list the stores',
+    description:
+      "Every open store as a descriptor: its name and its stats. The server's registry is " +
+      "the inventory — the store's path never crosses the wire.",
     tags: ['stores'],
     responses: {
       200: {
@@ -78,6 +91,10 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
   const describeStore = createRoute({
     method: 'get',
     path: '/stores/{name}',
+    summary: 'describe a store',
+    description:
+      "One store's descriptor: the name and its stats — the five-key ledger: population " +
+      'by status and by kind, edges, edges by kind.',
     tags: ['stores'],
     request: { params: z.object({ name: StoreNameSchema }) },
     responses: {
@@ -102,6 +119,12 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
   const forkStore = createRoute({
     method: 'post',
     path: '/stores/{name}/fork',
+    summary: 'fork a store',
+    description:
+      'An exact copy of the store as a new store — a backup, or a state set aside to ' +
+      'examine. Born unreached: no credential reaches the copy until one is minted for it. ' +
+      "The body's name is optional — composed from the source's name when silent; 201 " +
+      "serves the fork's name. The manager's gesture: forking never makes one individual two.",
     tags: ['stores'],
     request: {
       params: z.object({ name: StoreNameSchema }),
@@ -129,10 +152,14 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
   const deleteStore = createRoute({
     method: 'delete',
     path: '/stores/{name}',
+    summary: 'delete a store',
+    description:
+      'The store, its memories and its edges are gone — irreversible. No confirmation ' +
+      'parameter: reaching this route is the confirmation.',
     tags: ['stores'],
     request: { params: z.object({ name: StoreNameSchema }) },
     responses: {
-      204: { description: 'gone — db, WAL sidecars and lock' },
+      204: { description: 'gone — the store, irreversibly' },
       400: GRAMMAR_REFUSAL(),
       403: CAP_REFUSAL(),
       404: UNKNOWN_REFUSAL(),

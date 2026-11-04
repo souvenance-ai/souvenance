@@ -35,7 +35,17 @@ import {
 import type { MetadataValue } from '../../store/store.ts';
 
 /** The one-gesture relations: the facade's RelationSpec verbatim, strict — an edge carries exactly its `to` and its `kind` (#60). */
-const RelationsSchema = z.array(z.strictObject({ to: z.uuid(), kind: z.string() })).optional();
+const RelationsSchema = z
+  .array(
+    z.strictObject({
+      to: z.uuid().describe("the related memory's id"),
+      kind: z.string().describe("the edge's kind"),
+    }),
+  )
+  .optional()
+  .describe(
+    'relations born with the memory — one gesture, each edge carrying its target and its kind',
+  );
 
 /**
  * The authored metadata on the write surface. The OpenAPI converter
@@ -52,36 +62,58 @@ const MetadataShape = z
   .describe(
     'keys are one path segment each (letters, digits, "-", "_"); values are scalars ' +
       '(string | number | boolean) or nested objects of them — arrays and null never author: ' +
-      'the filter cannot ask for either (#40, #51)',
+      'the filter cannot ask for either',
   );
-const SummaryShape = z.string().optional();
+const SummaryShape = z
+  .string()
+  .optional()
+  .describe(
+    'the authored condensation — owed when the content runs past the ceiling; revised by supersede, never in place',
+  );
 
 const StoreBodySchema = z.strictObject({
   content: z.string(),
-  kind: z.string(),
+  kind: z.string().describe("the memory's kind — demanded at birth, a free vocabulary"),
   summary: SummaryShape,
   metadata: MetadataShape,
   relations: RelationsSchema,
-  hot: z.boolean().optional(),
+  hot: z
+    .boolean()
+    .optional()
+    .describe(
+      "the birth curation — the memory lands hot: the sub-state a fresh session's checkin serves",
+    ),
 });
 const SupersedeBodySchema = z.strictObject({
   content: z.string(),
-  kind: z.string().optional(),
+  kind: z
+    .string()
+    .optional()
+    .describe("the successor's kind — rides along when absent, reclassifies when present"),
   summary: SummaryShape,
   metadata: MetadataShape,
   relations: RelationsSchema,
 });
 const MergeBodySchema = z.strictObject({
-  ids: z.array(z.uuid()),
+  ids: z.array(z.uuid()).describe('the sources — at least two; they become one'),
   content: z.string(),
-  kind: z.string().optional(),
+  kind: z
+    .string()
+    .optional()
+    .describe("the fusion's kind — when absent, the sources must agree on it"),
   summary: SummaryShape,
   metadata: MetadataShape,
 });
-const HotBodySchema = z.strictObject({ hot: z.boolean() });
+const HotBodySchema = z.strictObject({
+  hot: z
+    .boolean()
+    .describe(
+      'the verdict — true lands the memory in the hot block, false cools it back to active',
+    ),
+});
 const LinkBodySchema = z.strictObject({
-  to: z.uuid(),
-  kind: z.string(),
+  to: z.uuid().describe("the target memory's id — self-edges refuse"),
+  kind: z.string().describe("the edge's kind — non-empty"),
   /**
    * The EDGE metadata: free-form JSON on purpose — the typed filter
    * addresses memories' metadata, never edges' — so no addressability
@@ -92,7 +124,10 @@ const LinkBodySchema = z.strictObject({
     .optional()
     .describe('free-form JSON — edges sit outside the filter reach'),
 });
-const UnlinkBodySchema = z.strictObject({ to: z.uuid(), kind: z.string().optional() });
+const UnlinkBodySchema = z.strictObject({
+  to: z.uuid().describe("the edge's target"),
+  kind: z.string().optional().describe("the edge's kind — needed when the edges are ambiguous"),
+});
 
 const CreatedSchema = z.object({ id: z.string() });
 const EdgeEchoSchema = z.object({ from_id: z.string(), to_id: z.string(), kind: z.string() });
@@ -103,6 +138,11 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   const createMemory = createRoute({
     method: 'post',
     path: '/memories',
+    summary: 'author a memory',
+    description:
+      'Births a memory: the content and its kind — demanded at birth — plus the authored ' +
+      'summary, metadata, relations born with it, and the birth curation (hot). 201 ' +
+      'serves the id — the created answer is the id.',
     tags: ['memories'],
     request: {
       body: { content: { 'application/json': { schema: StoreBodySchema } }, required: true },
@@ -135,6 +175,11 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   const supersedeMemory = createRoute({
     method: 'post',
     path: '/memories/{id}/supersede',
+    summary: 'revise a memory',
+    description:
+      'The revision gesture: the content moves to a successor — the old turns superseded ' +
+      '(a terminal: it refuses every gesture), the head carries the relations, and the ' +
+      "kind rides along unless the body reclassifies. 201 serves the successor's id.",
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
@@ -171,6 +216,10 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   const deprecateMemory = createRoute({
     method: 'post',
     path: '/memories/{id}/deprecate',
+    summary: 'retire a memory',
+    description:
+      'The retirement gesture: the memory turns deprecated — a terminal — and every ' +
+      'gesture refuses it afterward. Mute: 204, nothing to say.',
     tags: ['memories'],
     request: { params: MemoryIdParamsSchema },
     responses: {
@@ -190,6 +239,10 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   const setHot = createRoute({
     method: 'post',
     path: '/memories/{id}/hot',
+    summary: 'curate a memory',
+    description:
+      "The machine's only reversible edge: active ↔ hot. Hot is the curation status a " +
+      "fresh session's checkin serves. 204 when the status lands.",
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
@@ -214,6 +267,10 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   const linkMemories = createRoute({
     method: 'post',
     path: '/memories/{id}/link',
+    summary: 'relate two memories',
+    description:
+      "One directed edge, born with its kind: from the addressed memory to the body's " +
+      'target. 201 serves the edge, echoing itself.',
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
@@ -240,6 +297,10 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   const unlinkMemories = createRoute({
     method: 'delete',
     path: '/memories/{id}/link',
+    summary: 'unrelate two memories',
+    description:
+      'The edge is gone. Ambiguous edges — several to the same target — need the kind ' +
+      'in the body to pick. 204 when the edge is gone.',
     tags: ['memories'],
     request: {
       params: MemoryIdParamsSchema,
@@ -264,6 +325,11 @@ export function registerWriteRoutes(app: OpenAPIHono<ServerEnv>, registry: Regis
   const mergeMemories = createRoute({
     method: 'post',
     path: '/merge',
+    summary: 'merge memories',
+    description:
+      "The fusion gesture: the body's sources become one — the content rewritten, the " +
+      'sources bridging to the head as merged. The kind inherits when the sources agree ' +
+      "and demands a verdict when they disagree. 201 serves the fusion's id.",
     tags: ['memories'],
     request: {
       body: { content: { 'application/json': { schema: MergeBodySchema } }, required: true },

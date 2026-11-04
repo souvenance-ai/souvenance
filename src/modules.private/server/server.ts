@@ -77,9 +77,26 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   // answers the reflex, and /doc stays the canonical document.
   app.get('/healthz', (c) => c.json({ ok: true }));
   const version = deps.version ?? '0.2.0';
+  // The document's info carries the Teaching (the glossary's voice,
+  // engine-agnostic): what souvenance is and how the surfaces split.
   const docOptions = {
     openapi: '3.0.0',
-    info: { title: 'souvenance', version },
+    info: {
+      title: 'souvenance',
+      version,
+      description:
+        'Persistent, searchable memory for AI agents: typed graphs of memories in ' +
+        'stores, served over HTTP.\n\n' +
+        "One store is one individual's memory. The grant is the address: a store " +
+        'grant (Bearer) pins one store, read or read-write, and the data routes — ' +
+        '/memories, /search, /checkin, /checkout — carry no store name. The ' +
+        'management surface under /stores names stores; only a management grant ' +
+        'reaches it, a store grant never touches it.\n\n' +
+        'Every refusal is one JSON doc, {error: message}, and the message teaches: ' +
+        'the wire carries its grammar in the refusals. The waking posture is ' +
+        'served, not stored — GET /skills and its start skill teach how to wake, ' +
+        'session, and consolidate; this document teaches the wire itself.',
+    },
   };
   app.doc('/doc', docOptions);
   app.doc('/openapi.json', docOptions);
