@@ -77,10 +77,10 @@ const FTS_REBUILD_HINT =
  * classification — a column since v6, #31), its authored summary (the
  * condensation that lets checkin and search serve more memories per call —
  * owed when the content runs past the ceiling), metadata, and a status —
- * the five-state machine (#38). Curation is earned after the fact (setHot
- * moves `active` to `hot`), never at birth, and survives only on the
- * living: supersede transfers it to the head, merge unions it, every
- * termination cools it.
+ * the five-state machine (#38). Curation is authored at birth (`store`'s
+ * `hot`, #85) or earned after the fact (setHot moves `active` to `hot`),
+ * and survives only on the living: supersede transfers it to the head,
+ * merge unions it, every termination cools it.
  */
 export interface Memory {
   readonly id: UUID;
@@ -154,13 +154,23 @@ export interface StoreOptions {
    * happens). Per-edge validation identical to link.
    */
   readonly relations?: readonly RelationSpec[];
+  /**
+   * The birth curation (#85): `true` lands the memory directly in the
+   * `hot` status the checkin serves; omitted or `false` = born `active`.
+   * The other curation door — the machine's only reversible edge, setHot
+   * — stays for memories already living. Never authored by supersede or
+   * merge: their heads inherit curation through the transfer and the
+   * union, not through an authored choice.
+   */
+  readonly hot?: boolean;
 }
 
 /** supersede's own options — the split the kind column rules (#31):
  *  `kind` is OPTIONAL here, omitted = inherited from the source's
- *  column; a revision may reclassify. Everything else matches
- *  store's options. */
-export interface SupersedeOptions extends Omit<StoreOptions, 'kind'> {
+ *  column; a revision may reclassify. `hot` is omitted too: the head's
+ *  curation is the transfer's (a hot source crowns a hot head, #85),
+ *  never an authored choice. Everything else matches store's options. */
+export interface SupersedeOptions extends Omit<StoreOptions, 'kind' | 'hot'> {
   readonly kind?: string;
 }
 
@@ -586,10 +596,11 @@ export class Store {
 
   /**
    * Store a memory: UUID id, its required kind (the free-vocabulary
-   * classification, #31), metadata JSON, born active and cold — curation
-   * (the `hot` status) is earned after the fact (setHot), never at birth.
-   * The one-gesture relations land in the same transaction: the memory and
-   * its edges arrive together or not at all.
+   * classification, #31), metadata JSON, born `active` by default — or
+   * `hot` directly, the birth curation (`hot: true`, #85; the
+   * after-the-fact door stays setHot). The one-gesture relations land in
+   * the same transaction: the memory and its edges arrive together or not
+   * at all.
    */
   store(content: string, options: StoreOptions): string {
     this.#assertWritable();
@@ -605,9 +616,17 @@ export class Store {
     this.#transaction(() => {
       this.#db
         .prepare(
-          'INSERT INTO memories (id, content, kind, summary, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO memories (id, content, kind, summary, metadata, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(id, content, options.kind, summary, metadata, created_at);
+        .run(
+          id,
+          content,
+          options.kind,
+          summary,
+          metadata,
+          created_at,
+          options.hot ? 'hot' : 'active',
+        );
       if (options.relations?.length) {
         this.#insertRelations(id, options.relations, created_at);
       }
@@ -766,13 +785,13 @@ export class Store {
   }
 
   /**
-   * The one non-graph mutation: curation. The state machine's only
-   * reversible edge — `active` ↔ `hot` (#38): a hot memory is an active
-   * one the checkin ritual serves (#12), and a
-   * superseded/deprecated/merged memory must not resurface through it, so
-   * the edge exists only among the living. The check and the write share
-   * the transaction: a racing supersede and the curation resolve to
-   * exactly one winner.
+   * The after-the-fact curation door — birth curation rides store's
+   * `hot` (#85). The state machine's only reversible edge, `active` ↔
+   * `hot` (#38): a hot memory is an active one the checkin ritual serves
+   * (#12), and a superseded/deprecated/merged memory must not resurface
+   * through it, so the edge exists only among the living. The check and
+   * the write share the transaction: a racing supersede and the curation
+   * resolve to exactly one winner.
    */
   setHot(id: string, hot: boolean): void {
     this.#assertWritable();

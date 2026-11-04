@@ -72,7 +72,11 @@ test('get: depth 2 expands the out tree — the target node carries its own bloc
     assert.equal(bNode.id, b);
     assert.equal(bNode.content, 'memory b');
     assert.equal(bNode.summary, 'b condensed');
-    assert.equal(bNode.status, 'active', 'born active — curation is never at birth');
+    assert.equal(
+      bNode.status,
+      'active',
+      'born active by default — the birth curation is opt-in (#85)',
+    );
 
     // *out expands, in informs*: b's own out edge is a raw row at the
     // remaining depth, its in block carries the edge back to the root.

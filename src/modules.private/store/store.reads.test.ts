@@ -87,7 +87,7 @@ test('get: returns a memory by id — content, kind, parsed metadata, status', (
     assert.equal(
       memory!.status,
       'active',
-      'born active — hot is a status, earned via setHot (#38)',
+      'born active by default — hot authored at birth (#85) or earned via setHot (#38)',
     );
   } finally {
     cleanup();
