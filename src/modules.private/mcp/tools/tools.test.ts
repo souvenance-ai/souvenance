@@ -308,6 +308,14 @@ describe('the tool table over the live server', () => {
     const ghostSkill = await h.call('skills', { name: 'nope' });
     assert.equal(ghostSkill.isError, true);
     assert.equal(ghostSkill.text, 'no such skill — the index serves at /skills');
+
+    // The legacy delete idiom's tombstone: an authored key the tool table
+    // does not know still RIDES, and the wire's strict grammar refuses it
+    // by name — a silently-dropped field would be a lie (#60, held at the
+    // bridge).
+    const legacyForce = await h.call('deprecate', { id: ghost, force: true });
+    assert.equal(legacyForce.isError, true);
+    assert.match(legacyForce.text ?? '', /force/);
   });
 
   it('a read-only grant reads but never writes; a foreign bearer refuses at the door', async () => {
