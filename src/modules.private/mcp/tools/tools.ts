@@ -22,6 +22,7 @@
  * serves as the route's shape.
  */
 import type { McpTool } from '../mcp/mcp.ts';
+import type { RouteCall } from '../bridge/bridge.ts';
 import { MAX_DEPTH, MAX_LIMIT } from '../../server/limits/limits.ts';
 import { MAX_SUMMARY_LENGTH } from '../../store/store.ts';
 import { TEACHING } from '../../teaching/teaching.ts';
@@ -103,6 +104,30 @@ function readQuery(
     if (text !== undefined) query.append(key, text);
   }
   return query;
+}
+
+/**
+ * The addressed write: the id leaves the args for the path, the authored
+ * rest rides the body whole.
+ */
+function addressedBody(
+  args: Readonly<Record<string, unknown>>,
+  method: RouteCall['method'],
+  suffix: string,
+): RouteCall {
+  const { id: addressed, ...authored } = args;
+  return { method, path: memoryPath(addressed, suffix), body: buildBody(authored) };
+}
+
+/** The addressed read: the id addresses the path, the authored rest rides the query. */
+function addressedQuery(
+  args: Readonly<Record<string, unknown>>,
+  method: RouteCall['method'],
+  suffix: string,
+  shaped: Readonly<Record<string, string | readonly string[] | undefined>> = {},
+): RouteCall {
+  const { id: addressed, ...authored } = args;
+  return { method, path: memoryPath(addressed, suffix), query: readQuery(authored, shaped) };
 }
 
 /**
@@ -235,14 +260,7 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['id', 'content'],
     },
-    run: async (bridge, args) => {
-      const { id: addressed, ...authored } = args;
-      return bridge.call({
-        method: 'POST',
-        path: memoryPath(addressed, '/supersede'),
-        body: buildBody(authored),
-      });
-    },
+    run: async (bridge, args) => bridge.call(addressedBody(args, 'POST', '/supersede')),
   },
   {
     name: 'merge',
@@ -286,14 +304,7 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['id', 'to', 'kind'],
     },
-    run: async (bridge, args) => {
-      const { id: addressed, ...authored } = args;
-      return bridge.call({
-        method: 'POST',
-        path: memoryPath(addressed, '/link'),
-        body: buildBody(authored),
-      });
-    },
+    run: async (bridge, args) => bridge.call(addressedBody(args, 'POST', '/link')),
   },
   {
     name: 'unlink',
@@ -309,14 +320,7 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['id', 'to'],
     },
-    run: async (bridge, args) => {
-      const { id: addressed, ...authored } = args;
-      return bridge.call({
-        method: 'DELETE',
-        path: memoryPath(addressed, '/link'),
-        body: buildBody(authored),
-      });
-    },
+    run: async (bridge, args) => bridge.call(addressedBody(args, 'DELETE', '/link')),
   },
   {
     name: 'deprecate',
@@ -324,14 +328,7 @@ export const TOOLS: readonly McpTool[] = [
       'Retire a memory: it turns deprecated — a terminal — and every gesture refuses it afterward. The living ' +
       'set stops serving it unless include_terminals rides.',
     inputSchema: { type: 'object', properties: { id: ID_PROPERTY }, required: ['id'] },
-    run: async (bridge, args) => {
-      const { id: addressed, ...authored } = args;
-      return bridge.call({
-        method: 'POST',
-        path: memoryPath(addressed, '/deprecate'),
-        query: readQuery(authored, {}),
-      });
-    },
+    run: async (bridge, args) => bridge.call(addressedQuery(args, 'POST', '/deprecate')),
   },
   {
     name: 'setHot',
@@ -346,14 +343,7 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['id', 'hot'],
     },
-    run: async (bridge, args) => {
-      const { id: addressed, ...authored } = args;
-      return bridge.call({
-        method: 'POST',
-        path: memoryPath(addressed, '/hot'),
-        body: buildBody(authored),
-      });
-    },
+    run: async (bridge, args) => bridge.call(addressedBody(args, 'POST', '/hot')),
   },
   {
     name: 'get',
@@ -373,14 +363,8 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['id'],
     },
-    run: async (bridge, args) => {
-      const { id: addressed, ...authored } = args;
-      return bridge.call({
-        method: 'GET',
-        path: memoryPath(addressed, ''),
-        query: readQuery(authored, { depth: asQueryText(authored['depth']) }),
-      });
-    },
+    run: async (bridge, args) =>
+      bridge.call(addressedQuery(args, 'GET', '', { depth: asQueryText(args['depth']) })),
   },
   {
     name: 'list',
@@ -405,7 +389,7 @@ export const TOOLS: readonly McpTool[] = [
   {
     name: 'search',
     description:
-      "Search the store's content: FTS5 keyword search over the living set, BM25-ranked. Matches whole " +
+      "Search the store's content: keyword search over the living set, best matches ranked first. Matches whole " +
       'tokens, not substrings — a single word is the broadest query; OR widens the net; quoted phrases match ' +
       'consecutive words; quote hyphenated identifiers. The hits carry their rank; the order is deterministic ' +
       'per read, the rank is not stable across corpus changes.',

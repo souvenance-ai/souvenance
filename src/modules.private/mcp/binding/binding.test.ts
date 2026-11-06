@@ -5,7 +5,7 @@
  * detail.
  */
 import assert from 'node:assert/strict';
-import { describe, expect, it } from 'vitest';
+import { describe, it } from 'vitest';
 import { ConfigError, DEFAULT_HOST, DEFAULT_PORT } from '../../config/config.ts';
 import { resolveBinding } from './binding.ts';
 
@@ -83,6 +83,5 @@ describe('resolveBinding', () => {
         return true;
       },
     );
-    expect(() => resolveBinding({})).toThrow(ConfigError);
   });
 });
