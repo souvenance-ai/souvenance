@@ -33,6 +33,7 @@
  * throws its reachability teaching and the tools answer `isError`.
  */
 import { BridgeError } from '../bridge/bridge.ts';
+import type { RouteCall } from '../bridge/bridge.ts';
 
 /** The revision this server answers with when the client requests an unknown one. */
 const PROTOCOL_VERSION = '2025-06-18';
@@ -72,12 +73,7 @@ export interface McpTool {
 
 /** The one gesture the protocol asks of a bridge: call a route. */
 export interface BridgeLike {
-  call(route: {
-    readonly method: 'GET' | 'POST' | 'DELETE';
-    readonly path: string;
-    readonly query?: URLSearchParams;
-    readonly body?: unknown;
-  }): Promise<unknown>;
+  call(route: RouteCall): Promise<unknown>;
 }
 
 /** The stdio streams, injectable — tests speak the protocol in memory. */
