@@ -83,8 +83,8 @@ The `souv` CLI — a thin consumer of the server API for agents and scripts; nev
 _Avoid_: proxy CLI
 
 **MCP bridge**:
-The stdio MCP server as a pure client of the server — never a second owner of stores.
-_Avoid_: MCP server (ambiguous with the HTTP server)
+The stdio MCP server as a pure client of the server — never a second owner of stores. One bridge carries one store grant, pinned at launch and bound by environment (`SOUVENANCE_URL`, `SOUVENANCE_TOKEN`); its tools are the data routes mirrored verbatim, the grant rides every call, and the token never crosses the agent's session. Probed for liveness before speaking; refusing with the teaching when the server is absent (ADR 0008).
+_Avoid_: MCP server (ambiguous with the HTTP server), trusted stdio (retired), loopback operator (retired)
 
 **Guidance**:
 The wire's voice beside the data: the optional envelope section that marks a need-moment and points at the skill that answers it. It speaks only where the data alone cannot install the posture — the waking, the continuity of the hot, the empty store — and falls silent where the data already teaches: the checkout's verdict names the debts and their payment. Its mechanism is contract, its texts are content: the lines live with the skills they point at.
