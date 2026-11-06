@@ -21,7 +21,6 @@
  * (the skills' markdown body) passes through as a string. A JSON answer
  * serves as the route's shape.
  */
-import { Bridge } from '../bridge/bridge.ts';
 import type { McpTool } from '../mcp/mcp.ts';
 
 /** The query-string builder: absent omitted, one value once, several repeated. */
@@ -38,42 +37,69 @@ function buildQuery(
   return query;
 }
 
+/**
+ * The authored value as its query-string text: a string rides verbatim,
+ * anything else serializes as its JSON text — never "[object Object]".
+ */
+function asQueryText(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
 /** The addressed-memory path segment — encoded, judged by the wire. */
-function memoryPath(args: Readonly<Record<string, unknown>>, suffix: string): string {
-  return `/memories/${encodeURIComponent(String(args['id']))}${suffix}`;
+function memoryPath(id: unknown, suffix: string): string {
+  return `/memories/${encodeURIComponent(String(id))}${suffix}`;
 }
 
 /**
  * The body builder: EVERYTHING the agent authored rides — absent keys
- * drop (undefined never serializes), path params drop (they are
- * addressing, not content), and any other key rides verbatim so the
- * wire's strictObject refuses it BY NAME. A silently-dropped authored
- * field diverges the agent's model from the store's truth — the #60
- * verdict holds at the bridge too: the tool forwards, the wire judges.
+ * drop (undefined never serializes), and every other key rides verbatim
+ * so the wire's strictObject refuses it BY NAME. The addressed tools
+ * hand the id to the path first (it is addressing, not content); a
+ * silently-dropped authored field diverges the agent's model from the
+ * store's truth — the #60 verdict holds at the bridge too: the tool
+ * forwards, the wire judges.
  */
-function buildBody(args: Readonly<Record<string, unknown>>, drop: readonly string[] = []): unknown {
+function buildBody(args: Readonly<Record<string, unknown>>): unknown {
   const body: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args)) {
-    if (value !== undefined && !drop.includes(key)) body[key] = value;
+    if (value !== undefined) body[key] = value;
   }
   return body;
 }
 
+/** The four filters both read tools speak, in the wire's own shapes. */
+const FILTER_KEYS: readonly string[] = ['limit', 'kind', 'metadata', 'include_terminals'];
+
 /**
- * The same posture for query tools: the known keys ride their shaped
- * grammar, every other authored key rides raw — the wire's strict query
- * refuses it by name, and the teaching arrives inside the tool-level
- * error. A legacy idiom (`where`) dies loudly, never silently.
+ * The read tools' one query ride: the tool's own shaped keys (a cursor,
+ * a search text, a depth), the four shared filters, and every OTHER
+ * authored key riding raw — the wire's strict query refuses it by name,
+ * and the teaching arrives inside the tool-level error. A legacy idiom
+ * (`where`) dies loudly, never silently.
  */
-function rideUnknown(
+function readQuery(
   args: Readonly<Record<string, unknown>>,
-  query: URLSearchParams,
-  known: ReadonlySet<string>,
-): void {
+  shaped: Readonly<Record<string, string | readonly string[] | undefined>>,
+): URLSearchParams {
+  const query = buildQuery({
+    ...shaped,
+    limit: asQueryText(args['limit']),
+    kind: args['kind'] as string | readonly string[] | undefined,
+    metadata: args['metadata'] === undefined ? undefined : JSON.stringify(args['metadata']),
+    include_terminals:
+      args['include_terminals'] === undefined || args['include_terminals'] === false
+        ? undefined
+        : 'true',
+  });
   for (const [key, value] of Object.entries(args)) {
-    if (value === undefined || known.has(key)) continue;
-    query.append(key, typeof value === 'string' ? value : JSON.stringify(value));
+    if (value === undefined) continue;
+    const spoken = key in shaped || FILTER_KEYS.includes(key);
+    if (spoken) continue;
+    const text = asQueryText(value);
+    if (text !== undefined) query.append(key, text);
   }
+  return query;
 }
 
 const ID_PROPERTY = { type: 'string', description: "the addressed memory's id" } as const;
@@ -114,7 +140,7 @@ const SUMMARY_PROPERTY = {
 const TERMINALS_PROPERTY = {
   type: 'boolean',
   description:
-    'include the terminals (superseded, deprecated, merged) — the living set serves by default',
+    'true serves the terminals too (superseded, deprecated, merged); false or absent serves the living set only',
 } as const;
 const FILTER_PROPERTIES = {
   limit: LIMIT_PROPERTY,
@@ -145,13 +171,8 @@ export const TOOLS: readonly McpTool[] = [
         },
       },
     },
-    run: async (bridge: Bridge, args) => {
-      const query = buildQuery({
-        limit: args['limit'] === undefined ? undefined : String(args['limit']),
-      });
-      rideUnknown(args, query, new Set(['limit']));
-      return bridge.call({ method: 'GET', path: '/checkin', query });
-    },
+    run: async (bridge, args) =>
+      bridge.call({ method: 'GET', path: '/checkin', query: readQuery(args, {}) }),
   },
   {
     name: 'checkout',
@@ -160,11 +181,8 @@ export const TOOLS: readonly McpTool[] = [
       'duplicate_titles — each payable with the write verbs; healthy lands true only when every debt is paid. ' +
       'Never close with an empty hot block: leave the line your future self reads.',
     inputSchema: { type: 'object', properties: {} },
-    run: async (bridge: Bridge, args) => {
-      const query = buildQuery({});
-      rideUnknown(args, query, new Set());
-      return bridge.call({ method: 'GET', path: '/checkout', query });
-    },
+    run: async (bridge, args) =>
+      bridge.call({ method: 'GET', path: '/checkout', query: readQuery(args, {}) }),
   },
   {
     name: 'store',
@@ -190,12 +208,8 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['content', 'kind'],
     },
-    run: async (bridge: Bridge, args) =>
-      bridge.call({
-        method: 'POST',
-        path: '/memories',
-        body: buildBody(args),
-      }),
+    run: async (bridge, args) =>
+      bridge.call({ method: 'POST', path: '/memories', body: buildBody(args) }),
   },
   {
     name: 'supersede',
@@ -218,12 +232,14 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['id', 'content'],
     },
-    run: async (bridge: Bridge, args) =>
-      bridge.call({
+    run: async (bridge, args) => {
+      const { id: addressed, ...authored } = args;
+      return bridge.call({
         method: 'POST',
-        path: memoryPath(args, '/supersede'),
-        body: buildBody(args, ['id']),
-      }),
+        path: memoryPath(addressed, '/supersede'),
+        body: buildBody(authored),
+      });
+    },
   },
   {
     name: 'merge',
@@ -249,7 +265,7 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['ids', 'content'],
     },
-    run: async (bridge: Bridge, args) =>
+    run: async (bridge, args) =>
       bridge.call({ method: 'POST', path: '/merge', body: buildBody(args) }),
   },
   {
@@ -270,12 +286,14 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['id', 'to', 'kind'],
     },
-    run: async (bridge: Bridge, args) =>
-      bridge.call({
+    run: async (bridge, args) => {
+      const { id: addressed, ...authored } = args;
+      return bridge.call({
         method: 'POST',
-        path: memoryPath(args, '/link'),
-        body: buildBody(args, ['id']),
-      }),
+        path: memoryPath(addressed, '/link'),
+        body: buildBody(authored),
+      });
+    },
   },
   {
     name: 'unlink',
@@ -294,12 +312,14 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['id', 'to'],
     },
-    run: async (bridge: Bridge, args) =>
-      bridge.call({
+    run: async (bridge, args) => {
+      const { id: addressed, ...authored } = args;
+      return bridge.call({
         method: 'DELETE',
-        path: memoryPath(args, '/link'),
-        body: buildBody(args, ['id']),
-      }),
+        path: memoryPath(addressed, '/link'),
+        body: buildBody(authored),
+      });
+    },
   },
   {
     name: 'deprecate',
@@ -307,10 +327,13 @@ export const TOOLS: readonly McpTool[] = [
       'Retire a memory: it turns deprecated — a terminal — and every gesture refuses it afterward. The living ' +
       'set stops serving it unless include_terminals rides.',
     inputSchema: { type: 'object', properties: { id: ID_PROPERTY }, required: ['id'] },
-    run: async (bridge: Bridge, args) => {
-      const query = buildQuery({});
-      rideUnknown(args, query, new Set(['id']));
-      return bridge.call({ method: 'POST', path: memoryPath(args, '/deprecate'), query });
+    run: async (bridge, args) => {
+      const { id: addressed, ...authored } = args;
+      return bridge.call({
+        method: 'POST',
+        path: memoryPath(addressed, '/deprecate'),
+        query: readQuery(authored, {}),
+      });
     },
   },
   {
@@ -329,12 +352,14 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['id', 'hot'],
     },
-    run: async (bridge: Bridge, args) =>
-      bridge.call({
+    run: async (bridge, args) => {
+      const { id: addressed, ...authored } = args;
+      return bridge.call({
         method: 'POST',
-        path: memoryPath(args, '/hot'),
-        body: buildBody(args, ['id']),
-      }),
+        path: memoryPath(addressed, '/hot'),
+        body: buildBody(authored),
+      });
+    },
   },
   {
     name: 'get',
@@ -354,12 +379,13 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['id'],
     },
-    run: async (bridge: Bridge, args) => {
-      const query = buildQuery({
-        depth: args['depth'] === undefined ? undefined : String(args['depth']),
+    run: async (bridge, args) => {
+      const { id: addressed, ...authored } = args;
+      return bridge.call({
+        method: 'GET',
+        path: memoryPath(addressed, ''),
+        query: readQuery(authored, { depth: asQueryText(authored['depth']) }),
       });
-      rideUnknown(args, query, new Set(['id', 'depth']));
-      return bridge.call({ method: 'GET', path: memoryPath(args, ''), query });
     },
   },
   {
@@ -378,21 +404,12 @@ export const TOOLS: readonly McpTool[] = [
         ...FILTER_PROPERTIES,
       },
     },
-    run: async (bridge: Bridge, args) => {
-      const query = buildQuery({
-        after: args['after'] === undefined ? undefined : String(args['after']),
-        limit: args['limit'] === undefined ? undefined : String(args['limit']),
-        kind: args['kind'] as string | readonly string[] | undefined,
-        metadata: args['metadata'] === undefined ? undefined : JSON.stringify(args['metadata']),
-        include_terminals: args['include_terminals'] === true ? 'true' : undefined,
-      });
-      rideUnknown(
-        args,
-        query,
-        new Set(['after', 'limit', 'kind', 'metadata', 'include_terminals']),
-      );
-      return bridge.call({ method: 'GET', path: '/memories', query });
-    },
+    run: async (bridge, args) =>
+      bridge.call({
+        method: 'GET',
+        path: '/memories',
+        query: readQuery(args, { after: asQueryText(args['after']) }),
+      }),
   },
   {
     name: 'search',
@@ -409,17 +426,12 @@ export const TOOLS: readonly McpTool[] = [
       },
       required: ['q'],
     },
-    run: async (bridge: Bridge, args) => {
-      const query = buildQuery({
-        q: args['q'] === undefined ? undefined : String(args['q']),
-        limit: args['limit'] === undefined ? undefined : String(args['limit']),
-        kind: args['kind'] as string | readonly string[] | undefined,
-        metadata: args['metadata'] === undefined ? undefined : JSON.stringify(args['metadata']),
-        include_terminals: args['include_terminals'] === true ? 'true' : undefined,
-      });
-      rideUnknown(args, query, new Set(['q', 'limit', 'kind', 'metadata', 'include_terminals']));
-      return bridge.call({ method: 'GET', path: '/search', query });
-    },
+    run: async (bridge, args) =>
+      bridge.call({
+        method: 'GET',
+        path: '/search',
+        query: readQuery(args, { q: asQueryText(args['q']) }),
+      }),
   },
   {
     name: 'skills',
@@ -432,16 +444,12 @@ export const TOOLS: readonly McpTool[] = [
         name: { type: 'string', description: "the skill's name — the index serves it" },
       },
     },
-    run: async (bridge: Bridge, args) => {
-      const query = buildQuery({});
-      rideUnknown(args, query, new Set(['name']));
+    run: async (bridge, args) => {
+      const { name, ...authored } = args;
       return bridge.call({
         method: 'GET',
-        path:
-          args['name'] === undefined
-            ? '/skills'
-            : `/skills/${encodeURIComponent(String(args['name']))}`,
-        query,
+        path: name === undefined ? '/skills' : `/skills/${encodeURIComponent(String(name))}`,
+        query: readQuery(authored, {}),
       });
     },
   },
