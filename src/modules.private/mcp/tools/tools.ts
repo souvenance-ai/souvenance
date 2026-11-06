@@ -22,6 +22,9 @@
  * serves as the route's shape.
  */
 import type { McpTool } from '../mcp/mcp.ts';
+import { MAX_DEPTH, MAX_LIMIT } from '../../server/limits/limits.ts';
+import { MAX_SUMMARY_LENGTH } from '../../store/store.ts';
+import { TEACHING } from '../../teaching/teaching.ts';
 
 /** The query-string builder: absent omitted, one value once, several repeated. */
 function buildQuery(
@@ -102,12 +105,21 @@ function readQuery(
   return query;
 }
 
-const ID_PROPERTY = { type: 'string', description: "the addressed memory's id" } as const;
+/**
+ * The field clauses ride the shared TEACHING home — the wire's /doc and
+ * this table teach the same string, and the declared bounds interpolate
+ * the caps so a ceiling change cannot leave the bridge teaching a dead
+ * number. The transport-specific renderings stay local below: the kind
+ * filter (repeated query params here speak JSON arrays), the terminals
+ * flag (a presence flag on the wire, a boolean in JSON), the gesture
+ * prose, and the MCP-only content enrichment.
+ */
+const ID_PROPERTY = { type: 'string', description: TEACHING.memoryId } as const;
 const LIMIT_PROPERTY = {
   type: 'integer',
   minimum: 1,
-  maximum: 1000,
-  description: "an explicit page size — past the cap refuses; absent takes the server's default",
+  maximum: MAX_LIMIT,
+  description: TEACHING.limitExplicit,
 } as const;
 const KIND_PROPERTY = {
   anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
@@ -118,9 +130,7 @@ const METADATA_PROPERTY = {
   additionalProperties: {
     anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'object' }],
   },
-  description:
-    'keys are one path segment each (letters, digits, "-", "_"); values are scalars or nested objects of them ' +
-    '— arrays and null never author: the filter cannot ask for either',
+  description: TEACHING.metadataAuthored,
 } as const;
 const RELATIONS_PROPERTY = {
   type: 'array',
@@ -133,9 +143,8 @@ const RELATIONS_PROPERTY = {
 } as const;
 const SUMMARY_PROPERTY = {
   type: 'string',
-  maxLength: 400,
-  description:
-    'the authored condensation — owed when the content runs past the 400-character ceiling',
+  maxLength: MAX_SUMMARY_LENGTH,
+  description: TEACHING.summary,
 } as const;
 const TERMINALS_PROPERTY = {
   type: 'boolean',
@@ -187,8 +196,8 @@ export const TOOLS: readonly McpTool[] = [
   {
     name: 'store',
     description:
-      'Author a memory: the content and its kind — demanded at birth, a free vocabulary — plus the authored ' +
-      'summary (owed past the 400-character ceiling), metadata, relations born with it, and the birth curation ' +
+      `Author a memory: the content and its kind — demanded at birth, a free vocabulary — plus the authored ` +
+      `summary (owed past the ${MAX_SUMMARY_LENGTH}-character ceiling), metadata, relations born with it, and the birth curation ` +
       "(hot: the memory lands in the fresh session's block). One concept per memory; returns {id}.",
     inputSchema: {
       type: 'object',
@@ -197,14 +206,11 @@ export const TOOLS: readonly McpTool[] = [
           type: 'string',
           description: 'markdown, self-contained, search keywords in the text',
         },
-        kind: {
-          type: 'string',
-          description: "the memory's kind — demanded at birth, a free vocabulary",
-        },
+        kind: { type: 'string', description: TEACHING.kindBirth },
         summary: SUMMARY_PROPERTY,
         metadata: METADATA_PROPERTY,
         relations: RELATIONS_PROPERTY,
-        hot: { type: 'boolean', description: 'the birth curation — true lands the memory hot' },
+        hot: { type: 'boolean', description: TEACHING.hotBirth },
       },
       required: ['content', 'kind'],
     },
@@ -222,10 +228,7 @@ export const TOOLS: readonly McpTool[] = [
       properties: {
         id: ID_PROPERTY,
         content: { type: 'string', description: "the successor's content" },
-        kind: {
-          type: 'string',
-          description: "the successor's kind — rides along when absent, reclassifies when present",
-        },
+        kind: { type: 'string', description: TEACHING.kindSuccessor },
         summary: SUMMARY_PROPERTY,
         metadata: METADATA_PROPERTY,
         relations: RELATIONS_PROPERTY,
@@ -253,13 +256,10 @@ export const TOOLS: readonly McpTool[] = [
           type: 'array',
           items: { type: 'string' },
           minItems: 2,
-          description: 'the sources — at least two',
+          description: TEACHING.idsSources,
         },
         content: { type: 'string', description: "the fusion's content" },
-        kind: {
-          type: 'string',
-          description: "the fusion's kind — when absent, the sources must agree on it",
-        },
+        kind: { type: 'string', description: TEACHING.kindFusion },
         summary: SUMMARY_PROPERTY,
         metadata: METADATA_PROPERTY,
       },
@@ -277,11 +277,11 @@ export const TOOLS: readonly McpTool[] = [
       type: 'object',
       properties: {
         id: ID_PROPERTY,
-        to: { type: 'string', description: "the edge's target — self-edges refuse" },
-        kind: { type: 'string', description: "the edge's kind — non-empty" },
+        to: { type: 'string', description: TEACHING.edgeTo },
+        kind: { type: 'string', description: TEACHING.edgeKind },
         metadata: {
           type: 'object',
-          description: 'free-form JSON — edges sit outside the filter reach',
+          description: TEACHING.edgeMetadata,
         },
       },
       required: ['id', 'to', 'kind'],
@@ -304,11 +304,8 @@ export const TOOLS: readonly McpTool[] = [
       type: 'object',
       properties: {
         id: ID_PROPERTY,
-        to: { type: 'string', description: "the edge's target" },
-        kind: {
-          type: 'string',
-          description: "the edge's kind — needed when the edges are ambiguous",
-        },
+        to: { type: 'string', description: TEACHING.unlinkTo },
+        kind: { type: 'string', description: TEACHING.unlinkKind },
       },
       required: ['id', 'to'],
     },
@@ -345,10 +342,7 @@ export const TOOLS: readonly McpTool[] = [
       type: 'object',
       properties: {
         id: ID_PROPERTY,
-        hot: {
-          type: 'boolean',
-          description: 'the verdict — true lands the memory in the hot block, false cools it back',
-        },
+        hot: { type: 'boolean', description: TEACHING.hotVerdict },
       },
       required: ['id', 'hot'],
     },
@@ -373,8 +367,8 @@ export const TOOLS: readonly McpTool[] = [
         depth: {
           type: 'integer',
           minimum: 1,
-          maximum: 4,
-          description: 'how deep the out-edges expand — absent serves depth 1',
+          maximum: MAX_DEPTH,
+          description: TEACHING.depthProjection,
         },
       },
       required: ['id'],
@@ -397,10 +391,7 @@ export const TOOLS: readonly McpTool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        after: {
-          type: 'string',
-          description: "the page cursor — hand back the previous page's next_after",
-        },
+        after: { type: 'string', description: TEACHING.pageCursor },
         ...FILTER_PROPERTIES,
       },
     },
@@ -421,7 +412,7 @@ export const TOOLS: readonly McpTool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        q: { type: 'string', description: 'the search text — non-empty' },
+        q: { type: 'string', description: TEACHING.searchText },
         ...FILTER_PROPERTIES,
       },
       required: ['q'],

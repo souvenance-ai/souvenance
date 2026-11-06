@@ -20,6 +20,8 @@ import { Bridge } from '../bridge/bridge.ts';
 import { runMcpServer } from '../mcp/mcp.ts';
 import { startServer } from '../../server/serve/serve.ts';
 import { TOOLS } from './tools.ts';
+import { MAX_DEPTH, MAX_LIMIT } from '../../server/limits/limits.ts';
+import { MAX_SUMMARY_LENGTH } from '../../store/store.ts';
 
 const GRANT_RW: StoreGrant = {
   agent: 'mneme',
@@ -343,5 +345,22 @@ describe('the tool table over the live server', () => {
     assert.equal(body.isError, undefined);
     assert.match(body.text ?? '', /^---/);
     assert.match(body.text ?? '', /checkin/);
+  });
+});
+
+describe('the declared bounds ride the caps', () => {
+  it("the bridge teaches the caps' current values — a ceiling change cannot leave a dead number", () => {
+    const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
+    const bound = (tool: string, property: string): number | undefined => {
+      const shape = byName.get(tool)?.inputSchema.properties[property] as
+        { readonly maximum?: number; readonly maxLength?: number } | undefined;
+      return shape?.maximum ?? shape?.maxLength;
+    };
+    assert.equal(bound('list', 'limit'), MAX_LIMIT);
+    assert.equal(bound('search', 'limit'), MAX_LIMIT);
+    assert.equal(bound('get', 'depth'), MAX_DEPTH);
+    assert.equal(bound('store', 'summary'), MAX_SUMMARY_LENGTH);
+    assert.equal(bound('supersede', 'summary'), MAX_SUMMARY_LENGTH);
+    assert.equal(bound('merge', 'summary'), MAX_SUMMARY_LENGTH);
   });
 });

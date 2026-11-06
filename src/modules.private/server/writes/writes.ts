@@ -36,6 +36,7 @@ import {
   unknownStoreRefusal,
 } from '../wire/wire.ts';
 import { MAX_SUMMARY_LENGTH, type MetadataValue } from '../../store/store.ts';
+import { TEACHING } from '../../teaching/teaching.ts';
 
 /** The one-gesture relations: the facade's RelationSpec verbatim, strict — an edge carries exactly its `to` and its `kind` (#60). */
 const RelationsSchema = z
@@ -62,80 +63,50 @@ const RelationsSchema = z
 const MetadataShape = z
   .record(z.string(), z.unknown())
   .optional()
-  .describe(
-    'keys are one path segment each (letters, digits, "-", "_"); values are scalars ' +
-      '(string | number | boolean) or nested objects of them — arrays and null never author: ' +
-      'the filter cannot ask for either',
-  );
+  .describe(TEACHING.metadataAuthored);
 // The ceiling rides the schema too (ADR 0005: one schema set validates AND
 // documents) — the store owns the constant; the wire imports it so the
 // document's maxLength and the facade's refusal can never drift apart.
-const SummaryShape = z
-  .string()
-  .max(MAX_SUMMARY_LENGTH)
-  .optional()
-  .describe(
-    'the authored condensation — owed when the content runs past the ' +
-      `${MAX_SUMMARY_LENGTH}-character ceiling; the summary itself refuses past it; ` +
-      'revised by supersede, never in place',
-  );
+const SummaryShape = z.string().max(MAX_SUMMARY_LENGTH).optional().describe(TEACHING.summary);
 
 const StoreBodySchema = z.strictObject({
   content: z.string(),
-  kind: z.string().describe("the memory's kind — demanded at birth, a free vocabulary"),
+  kind: z.string().describe(TEACHING.kindBirth),
   summary: SummaryShape,
   metadata: MetadataShape,
   relations: RelationsSchema,
-  hot: z
-    .boolean()
-    .optional()
-    .describe(
-      "the birth curation — the memory lands hot: the sub-state a fresh session's checkin serves",
-    ),
+  hot: z.boolean().optional().describe(TEACHING.hotBirth),
 });
 const SupersedeBodySchema = z.strictObject({
   content: z.string(),
-  kind: z
-    .string()
-    .optional()
-    .describe("the successor's kind — rides along when absent, reclassifies when present"),
+  kind: z.string().optional().describe(TEACHING.kindSuccessor),
   summary: SummaryShape,
   metadata: MetadataShape,
   relations: RelationsSchema,
 });
 const MergeBodySchema = z.strictObject({
-  ids: z.array(z.uuid()).describe('the sources — at least two; they become one'),
+  ids: z.array(z.uuid()).describe(TEACHING.idsSources),
   content: z.string(),
-  kind: z
-    .string()
-    .optional()
-    .describe("the fusion's kind — when absent, the sources must agree on it"),
+  kind: z.string().optional().describe(TEACHING.kindFusion),
   summary: SummaryShape,
   metadata: MetadataShape,
 });
 const HotBodySchema = z.strictObject({
-  hot: z
-    .boolean()
-    .describe(
-      'the verdict — true lands the memory in the hot block, false cools it back to active',
-    ),
+  hot: z.boolean().describe(TEACHING.hotVerdict),
 });
 const LinkBodySchema = z.strictObject({
-  to: z.uuid().describe("the target memory's id — self-edges refuse"),
-  kind: z.string().describe("the edge's kind — non-empty"),
+  to: z.uuid().describe(TEACHING.edgeTo),
+  kind: z.string().describe(TEACHING.edgeKind),
   /**
    * The EDGE metadata: free-form JSON on purpose — the typed filter
    * addresses memories' metadata, never edges' — so no addressability
    * obligation gates it (#51's ruling).
    */
-  metadata: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .describe('free-form JSON — edges sit outside the filter reach'),
+  metadata: z.record(z.string(), z.unknown()).optional().describe(TEACHING.edgeMetadata),
 });
 const UnlinkBodySchema = z.strictObject({
-  to: z.uuid().describe("the edge's target"),
-  kind: z.string().optional().describe("the edge's kind — needed when the edges are ambiguous"),
+  to: z.uuid().describe(TEACHING.unlinkTo),
+  kind: z.string().optional().describe(TEACHING.unlinkKind),
 });
 
 const CreatedSchema = z.object({ id: z.string() });
