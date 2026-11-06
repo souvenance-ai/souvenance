@@ -19,6 +19,7 @@ import type {
 import type { Guidance, SkillEntry } from '../skills/skills.ts';
 import { STORE_NAME } from '../../config/config.ts';
 import { MAX_BODY_BYTES, MAX_DEPTH, MAX_LIMIT } from '../limits/limits.ts';
+import { TEACHING } from '../../teaching/teaching.ts';
 
 // ——— The routes' shared vocabulary: the shapes every route file speaks
 // (the error envelope, the addressed-memory id param, the capped limit)
@@ -40,7 +41,7 @@ export const StoreNameSchema = z.string().regex(STORE_NAME).describe(STORE_NAME_
 
 /** The addressed-memory params: the id — the store rides the grant (#74). */
 export const MemoryIdParamsSchema = z.object({
-  id: z.uuid().describe("the addressed memory's id"),
+  id: z.uuid().describe(TEACHING.memoryId),
 });
 
 /**
@@ -58,7 +59,7 @@ export const limitShape = z.coerce
   .min(1)
   .max(MAX_LIMIT)
   .optional()
-  .describe("an explicit page size — past the cap refuses; absent takes the server's default");
+  .describe(TEACHING.limitExplicit);
 
 /**
  * Checkin's explicit limit keeps the facade's verbatim judgment — an
@@ -71,7 +72,7 @@ export const checkinLimitShape = z.coerce
   .int()
   .min(1)
   .optional()
-  .describe('an explicit session block: integer ≥ 1, no ceiling — the absent limit stays absent');
+  .describe(TEACHING.limitCheckin);
 
 /** Get's projection depth: the wire caps the walk the facade leaves to its caller (#50). */
 export const depthShape = z.coerce
@@ -80,9 +81,7 @@ export const depthShape = z.coerce
   .min(1)
   .max(MAX_DEPTH)
   .optional()
-  .describe(
-    'how deep the projection expands out-edges — absent serves depth 1 (raw edges); past the cap refuses',
-  );
+  .describe(TEACHING.depthProjection);
 
 /** The stats' five-key ledger — the descriptor's and the checkin's shared shape. */
 export const StatsSchema = z
