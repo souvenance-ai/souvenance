@@ -72,7 +72,7 @@ function rideUnknown(
 ): void {
   for (const [key, value] of Object.entries(args)) {
     if (value === undefined || known.has(key)) continue;
-    query.append(key, String(value));
+    query.append(key, typeof value === 'string' ? value : JSON.stringify(value));
   }
 }
 
@@ -307,8 +307,11 @@ export const TOOLS: readonly McpTool[] = [
       'Retire a memory: it turns deprecated — a terminal — and every gesture refuses it afterward. The living ' +
       'set stops serving it unless include_terminals rides.',
     inputSchema: { type: 'object', properties: { id: ID_PROPERTY }, required: ['id'] },
-    run: async (bridge: Bridge, args) =>
-      bridge.call({ method: 'POST', path: memoryPath(args, '/deprecate') }),
+    run: async (bridge: Bridge, args) => {
+      const query = buildQuery({});
+      rideUnknown(args, query, new Set(['id']));
+      return bridge.call({ method: 'POST', path: memoryPath(args, '/deprecate'), query });
+    },
   },
   {
     name: 'setHot',

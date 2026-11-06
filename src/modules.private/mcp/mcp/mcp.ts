@@ -107,9 +107,9 @@ export async function runMcpServer(streams: McpStreams, options: McpServerOption
   if (options.probe !== undefined) {
     try {
       await options.probe();
-    } catch (err) {
+    } catch (error) {
       process.stderr.write(
-        `souvenance mcp refuses to speak: ${err instanceof Error ? err.message : String(err)}\n`,
+        `souvenance mcp refuses to speak: ${error instanceof Error ? error.message : String(error)}\n`,
       );
       return;
     }
@@ -124,10 +124,10 @@ export async function runMcpServer(streams: McpStreams, options: McpServerOption
   let buffer = '';
   for await (const chunk of streams.input) {
     buffer += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
-    let nl: number;
-    while ((nl = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, nl).trim();
-      buffer = buffer.slice(nl + 1);
+    let newline: number;
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
       if (line.length === 0) continue;
       handleMessage(options, line, respond);
     }
@@ -158,36 +158,36 @@ type Responder = (
 /** Dispatches one protocol line. Notifications (`notifications/*`) are never
  *  responded to; every request gets exactly one response line. */
 function handleMessage(options: McpServerOptions, line: string, respond: Responder): void {
-  let msg: unknown;
+  let parsed: unknown;
   try {
-    msg = JSON.parse(line);
+    parsed = JSON.parse(line);
   } catch {
     respond(null, { error: { code: -32700, message: 'Parse error' } });
     return;
   }
-  if (typeof msg !== 'object' || msg === null) {
+  if (typeof parsed !== 'object' || parsed === null) {
     respond(null, { error: { code: -32600, message: 'Invalid Request' } });
     return;
   }
-  const m = msg as { method?: unknown; id?: unknown; params?: unknown };
-  if (typeof m.method !== 'string') {
-    if (m.id !== undefined) respond(m.id, { error: { code: -32600, message: 'Invalid Request' } });
+  const message = parsed as { method?: unknown; id?: unknown; params?: unknown };
+  if (typeof message.method !== 'string') {
+    if (message.id !== undefined)
+      respond(message.id, { error: { code: -32600, message: 'Invalid Request' } });
     return;
   }
-  if (m.method.startsWith('notifications/')) return;
-  switch (m.method) {
+  if (message.method.startsWith('notifications/')) return;
+  switch (message.method) {
     case 'initialize': {
-      const params = (typeof m.params === 'object' && m.params !== null ? m.params : {}) as Record<
-        string,
-        unknown
-      >;
+      const params = (
+        typeof message.params === 'object' && message.params !== null ? message.params : {}
+      ) as Record<string, unknown>;
       const requested =
         typeof params['protocolVersion'] === 'string' ? params['protocolVersion'] : undefined;
       const protocolVersion =
         requested !== undefined && KNOWN_PROTOCOL_VERSIONS.has(requested)
           ? requested
           : PROTOCOL_VERSION;
-      respond(m.id, {
+      respond(message.id, {
         result: {
           protocolVersion,
           capabilities: { tools: { listChanged: false } },
@@ -198,10 +198,10 @@ function handleMessage(options: McpServerOptions, line: string, respond: Respond
       return;
     }
     case 'ping':
-      respond(m.id, { result: {} });
+      respond(message.id, { result: {} });
       return;
     case 'tools/list':
-      respond(m.id, {
+      respond(message.id, {
         result: {
           tools: options.tools.map(({ name, description, inputSchema }) => ({
             name,
@@ -212,17 +212,16 @@ function handleMessage(options: McpServerOptions, line: string, respond: Respond
       });
       return;
     case 'tools/call': {
-      const params = (typeof m.params === 'object' && m.params !== null ? m.params : {}) as Record<
-        string,
-        unknown
-      >;
+      const params = (
+        typeof message.params === 'object' && message.params !== null ? message.params : {}
+      ) as Record<string, unknown>;
       const name = params['name'];
       const tool =
         typeof name === 'string'
           ? options.tools.find((candidate) => candidate.name === name)
           : undefined;
       if (!tool) {
-        respond(m.id, {
+        respond(message.id, {
           result: {
             content: [{ type: 'text', text: `unknown tool '${String(name)}'` }],
             isError: true,
@@ -237,28 +236,30 @@ function handleMessage(options: McpServerOptions, line: string, respond: Respond
           : {};
       void tool
         .run(options.bridge, args)
-        .then((result) => respond(m.id, { result: toolResult(result) }))
-        .catch((err: unknown) => {
+        .then((result) => respond(message.id, { result: toolResult(result) }))
+        .catch((error: unknown) => {
           // Every tool failure — the wire's teaching included — is a
           // tool-level result, never a protocol error. The BridgeError's
           // message IS the teaching (the envelope's, verbatim); anything
           // else keeps its internals on stderr and serves the opaque one.
-          if (err instanceof BridgeError) {
-            respond(m.id, {
-              result: { content: [{ type: 'text', text: err.message }], isError: true },
+          if (error instanceof BridgeError) {
+            respond(message.id, {
+              result: { content: [{ type: 'text', text: error.message }], isError: true },
             });
             return;
           }
-          const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+          const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
           process.stderr.write(`internal error: ${detail}\n`);
-          respond(m.id, {
+          respond(message.id, {
             result: { content: [{ type: 'text', text: 'internal error' }], isError: true },
           });
         });
       return;
     }
     default:
-      respond(m.id, { error: { code: -32601, message: `Method not found: ${m.method}` } });
+      respond(message.id, {
+        error: { code: -32601, message: `Method not found: ${message.method}` },
+      });
   }
 }
 
