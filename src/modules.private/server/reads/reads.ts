@@ -26,6 +26,7 @@ import { StoreError } from '../../store/store-error/store-error.ts';
 import type { ServerEnv } from '../auth/auth.ts';
 import type { Registry } from '../registry/registry.ts';
 import type { MetadataFilters } from '../../store/utils/compile-read-filters/compile-read-filters.ts';
+import { TEACHING } from '../../teaching/teaching.ts';
 import {
   ErrorSchema,
   SEARCH_RANK_TEACHING,
@@ -111,10 +112,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
     tags: ['memories'],
     request: {
       query: z.strictObject({
-        after: z
-          .string()
-          .optional()
-          .describe("the page cursor — hand back the previous page's next_after"),
+        after: z.string().optional().describe(TEACHING.pageCursor),
         limit: limitShape,
         kind: kindShape,
         // The grammar's language rides on the shared const (list and
@@ -224,7 +222,7 @@ export function registerReadRoutes(app: OpenAPIHono<ServerEnv>, registry: Regist
     tags: ['memories'],
     request: {
       query: z.strictObject({
-        q: z.string().describe('the search text — non-empty'),
+        q: z.string().describe(TEACHING.searchText),
         limit: limitShape,
         kind: kindShape,
         metadata: metadataShape,
