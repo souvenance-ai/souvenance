@@ -125,10 +125,14 @@ export async function runMcpServer(streams: McpStreams, options: McpServerOption
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
       if (line.length === 0) continue;
+      if (Buffer.byteLength(line) > MAX_LINE_BYTES) {
+        refuseLineCap(respond);
+        return;
+      }
       handleMessage(options, line, respond);
     }
-    if (buffer.length > MAX_LINE_BYTES) {
-      respond(null, { error: { code: -32700, message: 'input line exceeds the 10 MiB cap' } });
+    if (Buffer.byteLength(buffer) > MAX_LINE_BYTES) {
+      refuseLineCap(respond);
       return;
     }
   }
@@ -136,13 +140,14 @@ export async function runMcpServer(streams: McpStreams, options: McpServerOption
 
 /**
  * Input cap — the largest single JSON-RPC line (10 MiB dwarfs any real
- * tool call, matching the HTTP body cap's generosity). A client
- * streaming bytes without a newline must not grow the heap without
- * bound: breach → one parse-error response and the session ends (a
- * stream that oversized its line is garbage by then). Checked on the
- * UNTERMINATED tail only — complete lines are processed first, so one
- * giant chunk carrying valid lines plus a huge tail still serves those
- * lines.
+ * tool call, matching the HTTP body cap's generosity), measured in
+ * UTF-8 bytes and judged on EVERY line: complete or unterminated tail.
+ * A client streaming bytes without a newline must not grow the heap
+ * without bound, and one giant terminated line must not ride either:
+ * breach → one parse-error response and the session ends (a stream
+ * that oversized its line is garbage by then). Complete lines are
+ * processed in order before the tail check, so one giant chunk
+ * carrying valid lines plus a huge tail still serves those lines.
  */
 const MAX_LINE_BYTES = 10 * 1024 * 1024;
 
@@ -150,6 +155,11 @@ type Responder = (
   id: unknown,
   payload: { result?: unknown; error?: { code: number; message: string } },
 ) => void;
+
+/** The one breach answer: a parse-error-shaped refusal, then the loop returns. */
+function refuseLineCap(respond: Responder): void {
+  respond(null, { error: { code: -32700, message: 'input line exceeds the 10 MiB cap' } });
+}
 
 /** Dispatches one protocol line. Notifications (`notifications/*`) are never
  *  responded to; every request gets exactly one response line. */

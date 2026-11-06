@@ -109,7 +109,7 @@ test('the Teaching is engine-agnostic — no storage term, no issue ref, in any 
     for (const text of strings) {
       assert.doesNotMatch(
         text,
-        /\bbm25\b|\bsqlite\b|\bwal\b|\bdb\b|\.db\b|#\d+|\bQ\d+\b/i,
+        /\bbm25\b|\bsqlite\b|\bwal\b|\bdb\b|\.db\b|#\d+|\bQ\d+\b|\bfts5\b/i,
         `leakage: "${text}"`,
       );
     }

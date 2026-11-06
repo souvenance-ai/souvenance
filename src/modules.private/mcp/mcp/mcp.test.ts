@@ -63,12 +63,12 @@ const READY = JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialize
 
 /** One tools/call against a stub table; returns the parsed payload or the error text. */
 async function call(
-  r: ReturnType<typeof rig>,
+  session: ReturnType<typeof rig>,
   name: string,
   args: Record<string, unknown> = {},
   id = 1,
 ): Promise<{ isError?: boolean; result?: any; text: string }> {
-  const responses = await r.rpc(
+  const responses = await session.rpc(
     [
       INIT,
       READY,
@@ -103,14 +103,14 @@ describe('runMcpServer', () => {
     vi.restoreAllMocks();
   });
 
-  function take(r: ReturnType<typeof rig>): ReturnType<typeof rig> {
-    rigToClose = r;
-    return r;
+  function take(session: ReturnType<typeof rig>): ReturnType<typeof rig> {
+    rigToClose = session;
+    return session;
   }
 
   it('initialize echoes a known protocolVersion and carries serverInfo + instructions', async () => {
-    const r = take(rig());
-    const [response] = await r.rpc([INIT], 1);
+    const session = take(rig());
+    const [response] = await session.rpc([INIT], 1);
     assert.equal(response.id, 0);
     assert.equal(response.result.protocolVersion, '2025-06-18');
     assert.deepEqual(response.result.capabilities, { tools: { listChanged: false } });
@@ -120,8 +120,8 @@ describe('runMcpServer', () => {
   });
 
   it('initialize echoes an older requested revision, falls back on unknown ones', async () => {
-    const r = take(rig());
-    const [older] = await r.rpc(
+    const session = take(rig());
+    const [older] = await session.rpc(
       [
         JSON.stringify({
           jsonrpc: '2.0',
@@ -133,7 +133,7 @@ describe('runMcpServer', () => {
       1,
     );
     assert.equal(older.result.protocolVersion, '2025-03-26');
-    const [fallback] = await r.rpc(
+    const [fallback] = await session.rpc(
       [
         JSON.stringify({
           jsonrpc: '2.0',
@@ -148,8 +148,8 @@ describe('runMcpServer', () => {
   });
 
   it("the version is the caller's — absent answers 0.0.0, present flows to serverInfo", async () => {
-    const r = take(rig({ version: '0.2.0-test' }));
-    const [response] = await r.rpc([INIT], 1);
+    const session = take(rig({ version: '0.2.0-test' }));
+    const [response] = await session.rpc([INIT], 1);
     assert.equal(response.result.serverInfo.version, '0.2.0-test');
     const bare = take(rig());
     const [plain] = await bare.rpc([INIT], 1);
@@ -167,8 +167,8 @@ describe('runMcpServer', () => {
       },
       run: async () => undefined,
     };
-    const r = take(rig({ tools: [stubTool] }));
-    const [response] = await r.rpc(
+    const session = take(rig({ tools: [stubTool] }));
+    const [response] = await session.rpc(
       [JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })],
       1,
     );
@@ -178,7 +178,7 @@ describe('runMcpServer', () => {
       inputSchema: { type: string };
     }[];
     assert.deepEqual(
-      tools.map((t) => t.name),
+      tools.map((tool) => tool.name),
       ['store'],
     );
     assert.equal(tools[0]?.inputSchema.type, 'object');
@@ -195,14 +195,14 @@ describe('runMcpServer', () => {
         return { id: 'id-1' };
       },
     };
-    const r = take(rig({ tools: [stubTool] }));
-    const json = await call(r, 'shapes', { shape: 'json' });
+    const session = take(rig({ tools: [stubTool] }));
+    const json = await call(session, 'shapes', { shape: 'json' });
     assert.deepEqual(json.result, { id: 'id-1' });
     assert.match(json.text, /^\{\n  "id": "id-1"\n\}$/);
-    const raw = await call(r, 'shapes', { shape: 'string' }, 2);
+    const raw = await call(session, 'shapes', { shape: 'string' }, 2);
     assert.equal(raw.text, 'the body verbatim');
     assert.equal(raw.isError, undefined);
-    const empty = await r.rpc(
+    const empty = await session.rpc(
       [
         INIT,
         READY,
@@ -230,12 +230,12 @@ describe('runMcpServer', () => {
         throw teaching;
       },
     };
-    const r = take(rig({ tools: [stubTool] }));
-    const taught = await call(r, 'moody', {}, 1);
+    const session = take(rig({ tools: [stubTool] }));
+    const taught = await call(session, 'moody', {}, 1);
     assert.equal(taught.isError, true);
     assert.equal(taught.text, 'memory not found: id-1');
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    const opaque = await call(r, 'moody', { kind: 'opaque' }, 2);
+    const opaque = await call(session, 'moody', { kind: 'opaque' }, 2);
     assert.equal(opaque.isError, true);
     assert.equal(opaque.text, 'internal error');
     assert.ok(
@@ -244,8 +244,8 @@ describe('runMcpServer', () => {
   });
 
   it('an unknown tool answers isError naming it — never a protocol error', async () => {
-    const r = take(rig());
-    const responses = await r.rpc(
+    const session = take(rig());
+    const responses = await session.rpc(
       [
         INIT,
         READY,
@@ -259,8 +259,8 @@ describe('runMcpServer', () => {
   });
 
   it('the protocol family: ping, parse error, invalid request, unknown method, silent notifications', async () => {
-    const r = take(rig());
-    const responses = await r.rpc(
+    const session = take(rig());
+    const responses = await session.rpc(
       [
         'not json at all',
         JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
@@ -285,6 +285,18 @@ describe('runMcpServer', () => {
   it('an unterminated line past the 10 MiB cap refuses once and ends the session', async () => {
     // The cap: one giant unterminated chunk → exactly one refusal, then the loop ends.
     const responses = await writeRawAndCollect('a'.repeat(10 * 1024 * 1024 + 1));
+    assert.equal(responses.length, 1);
+    const parsed = JSON.parse(responses[0] ?? '') as {
+      id: null;
+      error: { code: number; message: string };
+    };
+    assert.equal(parsed.id, null);
+    assert.equal(parsed.error.code, -32700);
+    assert.match(parsed.error.message, /10 MiB cap/);
+  });
+
+  it('a terminated line past the 10 MiB cap refuses too — the cap judges every line', async () => {
+    const responses = await writeRawAndCollect('b'.repeat(10 * 1024 * 1024 + 1) + '\n');
     assert.equal(responses.length, 1);
     const parsed = JSON.parse(responses[0] ?? '') as {
       id: null;
@@ -332,14 +344,14 @@ describe('runMcpServer', () => {
 
   it("a passing probe serves — the eager posture is the composition's, the refusal the loop's", async () => {
     let probed = false;
-    const r = take(
+    const session = take(
       rig({
         probe: async () => {
           probed = true;
         },
       }),
     );
-    await r.rpc([INIT], 1);
+    await session.rpc([INIT], 1);
     assert.ok(probed);
   });
 });
