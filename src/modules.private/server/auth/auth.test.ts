@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { Hono } from 'hono';
 import { test } from 'vitest';
 import type { CredentialFamilies, ManagementGrant, StoreGrant } from '../../config/config.ts';
+import { LiveCredentials } from '../live-credentials/live-credentials.ts';
 import { auth, bearerOf, requireManagement, type ServerEnv } from './auth.ts';
 
 const SECRET = `souv-${'b'.repeat(32)}`;
@@ -14,7 +15,7 @@ const MANAGEMENT: readonly ManagementGrant[] = [{ agent: 'valentin', secret: MAN
 /** A one-route harness: the handler answers with the resolved grant. */
 function harness(credentials: CredentialFamilies): Hono<ServerEnv> {
   const app = new Hono<ServerEnv>();
-  app.use('*', auth(credentials));
+  app.use('*', auth(LiveCredentials.from(credentials)));
   app.get('/probe', (c) => c.json(c.get('grant')));
   return app;
 }
@@ -97,7 +98,7 @@ test('a presented non-Bearer credential refuses 401', async () => {
 
 test('the management gate: a management grant passes, a store grant refuses 403', async () => {
   const app = new Hono<ServerEnv>();
-  app.use('*', auth({ tokens: TOKENS, management: MANAGEMENT }));
+  app.use('*', auth(LiveCredentials.from({ tokens: TOKENS, management: MANAGEMENT })));
   app.use('*', requireManagement());
   app.get('/probe', (c) => c.json(c.get('grant')));
   const ok = await app.request('/probe', {

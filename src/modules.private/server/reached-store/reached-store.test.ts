@@ -14,7 +14,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
 import { Registry } from '../registry/registry.ts';
-import type { ResolvedGrant, ServerEnv } from '../auth/auth.ts';
+import type { ResolvedGrant } from '../live-credentials/live-credentials.ts';
+import type { ServerEnv } from '../auth/auth.ts';
 import { reachedStore, writableStore } from './reached-store.ts';
 
 function tempDir(): string {

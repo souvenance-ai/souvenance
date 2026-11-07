@@ -73,9 +73,11 @@ test('the sufficiency bar — the served document teaches every gesture, respons
         }
       }
     }
-    // The served surface is 19 operations — the probes' doc-wire phase
-    // pins the same count: a bare or silently dropped route fails here.
-    assert.equal(operations, 19);
+    // The served surface is 22 operations (the data + management surface,
+    // and the grant trio that mints, lists and revokes on it, #98) — the
+    // probes' doc-wire phase pins the same count: a bare or silently
+    // dropped route fails here.
+    assert.equal(operations, 22);
     const schemas = doc.components?.schemas ?? {};
     for (const [name, schema] of Object.entries(schemas)) {
       assert.ok(schema.description, `the component ${name} carries a description`);

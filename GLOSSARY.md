@@ -109,8 +109,16 @@ A manager operation that opens the store directly; refuses while the server owns
 _Avoid_: direct verb, local verb
 
 **Grant**:
-A bearer credential's authority, authored in the config — nothing else exists to present. Two families: a **store grant** (one agent, one store, one mode `ro`/`rw` — a row of `tokens[]`) and a **management grant** (one agent over the host's management surface — create, fork, list, describe, delete stores — reaching no store's data, a row of `management[]`). The store grant is the store's address on the wire (ADR 0007): one Bearer pins one store, the data routes carry no name.
+A bearer credential's authority, authored in the config — nothing else exists to present. Two families: a **store grant** (one agent, one store, one mode `ro`/`rw` — a row of `tokens[]`) and a **management grant** (one agent over the host's management surface — create, fork, list, describe, delete stores, and mint and revoke the grants of the store family — reaching no store's data, a row of `management[]`). The store grant is the store's address on the wire (ADR 0007): one Bearer pins one store, the data routes carry no name. While the server runs, the live credential state is the server's (ADR 0009): the wire mints and revokes the store family; the file's credential rows are its echo.
 _Avoid_: token file (retired), API key, manage cap (retired)
+
+**Mint**:
+The authoring of a grant: a fresh secret is generated (`souv-` grammar), the row lands in the one config, the in-memory credential state seats it — and the secret is served exactly once. The wire's mint serves the store family on the management surface (ADR 0009); the manager's `grant … add` is the same gesture offline, its reveal TTY-only. Rotating a secret or changing a mode is revoke, then mint — the pair is one row per (agent, store).
+_Avoid_: create token, generate key, re-grant
+
+**Revoke**:
+The retiring of a grant: the row leaves both sources of truth at once — the live credential state and the config file — effective immediately; nothing ever un-serves the call that followed. The wire's revoke is the remote door (ADR 0009); the manager's `grant … remove` is the same gesture offline. A deleted store's rows leave with it.
+_Avoid_: remove token, expire, disable
 
 **Registry**:
 The stores dir as the store inventory: every `<name>.db` in it is a store, none is declared, and boot opens them all or refuses to serve. The dir is the truth — no list beside it to drift.

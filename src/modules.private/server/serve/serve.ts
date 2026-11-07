@@ -38,6 +38,12 @@ export interface ServeOptions extends CredentialFamilies {
   readonly version: string;
   /** The opt-in request log's JSONL path (#69); absent = the log is off. */
   readonly logRequests?: string;
+  /**
+   * The one config file the credential doors author (#98); absent — a
+   * programmatic boot with inline credentials — the mint and revoke
+   * refuse with the teaching, the list serves the live state alone.
+   */
+  readonly configPath?: string;
 }
 
 export interface RunningServer {
@@ -99,6 +105,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     management: options.management,
     version: options.version,
     logRequests: options.logRequests,
+    configPath: options.configPath,
   });
   // The listening is awaited: the boot resolves only once the bound port
   // is known (the smoke test asks for 0 and reads the real one).

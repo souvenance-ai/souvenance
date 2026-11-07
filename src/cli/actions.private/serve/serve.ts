@@ -5,7 +5,7 @@
  * the truth. A refused config is the CLI's exit 78 (#17) — the refusal
  * message teaches, the code says "configuration".
  */
-import { loadConfig } from '../../../modules.private/config/config.ts';
+import { defaultConfigPath, loadConfig } from '../../../modules.private/config/config.ts';
 import { startServer } from '../../../modules.private/server/serve/serve.ts';
 import pkg from '../../../../package.json' with { type: 'json' };
 
@@ -30,6 +30,8 @@ export async function serve(options: ServeOptions): Promise<void> {
     logRequests: options.logRequests ?? config.logRequests,
     tokens: config.tokens,
     management: config.management,
+    // The credential doors (#98) author the one config the boot read.
+    configPath: defaultConfigPath(),
     version: pkg.version,
   });
   const shutdown = (): void => {

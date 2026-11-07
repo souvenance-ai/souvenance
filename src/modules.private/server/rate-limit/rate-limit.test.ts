@@ -4,9 +4,9 @@ import { test } from 'vitest';
 import type {
   ManagementGrantResolved,
   ResolvedGrant,
-  ServerEnv,
   StoreGrantResolved,
-} from '../auth/auth.ts';
+} from '../live-credentials/live-credentials.ts';
+import type { ServerEnv } from '../auth/auth.ts';
 import { rateLimit } from './rate-limit.ts';
 
 function grant(overrides: Partial<StoreGrantResolved> = {}): ResolvedGrant {

@@ -17,7 +17,8 @@ import type {
   SearchResult,
 } from '../../store/store.ts';
 import type { Guidance, SkillEntry } from '../skills/skills.ts';
-import { STORE_NAME } from '../../config/config.ts';
+import { STORE_NAME, ConfigError } from '../../config/config.ts';
+import { CredentialDriftError } from '../../config/author-credentials/author-credentials.ts';
 import { MAX_BODY_BYTES, MAX_DEPTH, MAX_LIMIT } from '../limits/limits.ts';
 import { TEACHING } from '../../teaching/teaching.ts';
 
@@ -119,6 +120,34 @@ export const invalidRefusal = (description: string) => refusal(description);
  * wire served what the declared responses forgot).
  */
 export const payloadRefusal = () => refusal(`the body exceeds ${MAX_BODY_BYTES} bytes`);
+
+// ——— The credential-file refusals (#98): the gestures that author the
+// one config (mint, revoke, delete-with-revoke) share one mapping — the
+// drift is a conflict the operator resolves (restart or revert), every
+// other file refusal is an environment the running state survives, the
+// detail on the operator's stderr, never on the wire (a config can
+// carry secrets; the message may name paths).
+
+export interface CredentialRefusalOutcome {
+  readonly status: 409 | 500;
+  readonly error: string;
+}
+
+export function credentialRefusalOutcome(err: unknown, gesture: string): CredentialRefusalOutcome {
+  if (err instanceof CredentialDriftError) {
+    return { status: 409, error: err.message };
+  }
+  if (err instanceof ConfigError) {
+    process.stderr.write(`credential ${gesture} refused: ${err.message}\n`);
+    return {
+      status: 500,
+      error:
+        `${gesture} refused — the config file is unreadable, broken, or unwritable; ` +
+        `the running state is unaffected; the server's stderr names the detail`,
+    };
+  }
+  throw err; // not a credential refusal: onError keeps the internal opaque
+}
 
 const relationShape = {
   from_id: z.string(),
