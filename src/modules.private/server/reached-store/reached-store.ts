@@ -15,7 +15,8 @@ import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { Store } from '../../store/store.ts';
 import { StoreError } from '../../store/store-error/store-error.ts';
-import { isStoreGrant, type ServerEnv } from '../auth/auth.ts';
+import type { ServerEnv } from '../auth/auth.ts';
+import { isStoreGrant } from '../live-credentials/live-credentials.ts';
 import type { Registry } from '../registry/registry.ts';
 
 export function reachedStore(c: Context<ServerEnv>, registry: Registry): Store {

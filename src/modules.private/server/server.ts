@@ -18,8 +18,10 @@ import type { Context } from 'hono';
 import type { CredentialFamilies } from '../config/config.ts';
 import { StoreError } from '../store/store-error/store-error.ts';
 import { auth, requireManagement, type ServerEnv } from './auth/auth.ts';
+import { LiveCredentials, type CredentialDoors } from './live-credentials/live-credentials.ts';
 import { rateLimit } from './rate-limit/rate-limit.ts';
 import { registerManagementRoutes } from './management/management.ts';
+import { registerGrantRoutes } from './grants/grants.ts';
 import { registerReadRoutes } from './reads/reads.ts';
 import { registerRitualRoutes } from './rituals/rituals.ts';
 import { registerWriteRoutes } from './writes/writes.ts';
@@ -46,6 +48,12 @@ export interface ServerDeps extends CredentialFamilies {
   readonly logRequests?: string;
   /** The skills directory override (#82); absent = the package's shipped skills. */
   readonly skillsDir?: string;
+  /**
+   * The one config file the credential doors author (#98, ADR 0009);
+   * absent — a programmatic boot with inline credentials — the mint and
+   * revoke refuse with the teaching, list serves the live state alone.
+   */
+  readonly configPath?: string;
 }
 
 export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
@@ -176,7 +184,8 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   // the namespace's root) — and every declared route's guard coverage is
   // pinned by the bare-401 sweep in server.test.ts.
   const guardedPaths = ['/stores/*', '/memories/*', '/search', '/merge', '/checkin', '/checkout'];
-  const bearer = auth(deps);
+  const doors: CredentialDoors = { live: LiveCredentials.from(deps), configPath: deps.configPath };
+  const bearer = auth(doors.live);
   const limiter = rateLimit();
   const capped = bodyLimit({
     maxSize: MAX_BODY_BYTES,
@@ -194,6 +203,8 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   app.use('/stores', requireManagement());
   app.use('/stores/:name', requireManagement());
   app.use('/stores/:name/fork', requireManagement());
+  app.use('/stores/:name/grants', requireManagement());
+  app.use('/stores/:name/grants/:agent', requireManagement());
 
   // The skills surface (#82): the directory is the truth, like the
   // registry — boot validates every skill or the boot fails, and half an
@@ -202,7 +213,8 @@ export function createApp(deps: ServerDeps): OpenAPIHono<ServerEnv> {
   // individual's data.
   const skills = Skills.open(deps.skillsDir);
 
-  registerManagementRoutes(app, deps.registry);
+  registerManagementRoutes(app, deps.registry, doors);
+  registerGrantRoutes(app, deps.registry, doors);
   registerReadRoutes(app, deps.registry);
   registerRitualRoutes(app, deps.registry, skills);
   registerWriteRoutes(app, deps.registry);

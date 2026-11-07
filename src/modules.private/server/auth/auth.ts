@@ -11,42 +11,18 @@
  * - a management grant (`management[]`): the host's management surface —
  *   create, list, describe, fork, delete stores — and no store's data.
  *
- * The secret comparison is timing-safe the honest way: both sides are
- * hashed to fixed-length digests before timingSafeEqual — no length
- * leak, no early exit. The resolution walks both families; a secret
- * naming two rows is refused at both doors — the config file at load
- * and the programmatic boot (#74's rider).
+ * The resolution walks the LIVE credential state (#98, ADR 0009) — the
+ * state the routes seat on every minted or revoked row, so a wire grant
+ * is effective the moment its secret is served.
  */
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { createMiddleware } from 'hono/factory';
-import type { CredentialFamilies } from '../../config/config.ts';
+import type { ResolvedGrant } from '../live-credentials/live-credentials.ts';
+import { isStoreGrant, type LiveCredentials } from '../live-credentials/live-credentials.ts';
 
 export interface ServerEnv {
   Variables: {
     grant: ResolvedGrant;
   };
-}
-
-export interface StoreGrantResolved {
-  readonly family: 'store';
-  readonly agent: string;
-  readonly store: string;
-  readonly mode: 'ro' | 'rw';
-  /** The bucket identity for the rate limit — the secret's digest, never the secret. */
-  readonly key: string;
-}
-
-export interface ManagementGrantResolved {
-  readonly family: 'management';
-  readonly agent: string;
-  readonly key: string;
-}
-
-export type ResolvedGrant = StoreGrantResolved | ManagementGrantResolved;
-
-/** The doors' shared narrowing: is this resolved grant the store family? */
-export function isStoreGrant(grant: ResolvedGrant): grant is StoreGrantResolved {
-  return grant.family === 'store';
 }
 
 export function bearerOf(header: string | undefined): string | undefined {
@@ -58,38 +34,7 @@ export function bearerOf(header: string | undefined): string | undefined {
   return secret;
 }
 
-function digest(value: string): Buffer {
-  return createHash('sha256').update(value).digest();
-}
-
-function resolveBearer(credentials: CredentialFamilies, secret: string): ResolvedGrant | undefined {
-  const presented = digest(secret);
-  const store = credentials.tokens.find((grant) =>
-    timingSafeEqual(digest(grant.secret), presented),
-  );
-  if (store !== undefined) {
-    return {
-      family: 'store',
-      agent: store.agent,
-      store: store.store,
-      mode: store.mode,
-      key: digest(store.secret).toString('hex').slice(0, 16),
-    };
-  }
-  const row = credentials.management.find((grant) =>
-    timingSafeEqual(digest(grant.secret), presented),
-  );
-  if (row !== undefined) {
-    return {
-      family: 'management',
-      agent: row.agent,
-      key: digest(row.secret).toString('hex').slice(0, 16),
-    };
-  }
-  return undefined;
-}
-
-export function auth(credentials: CredentialFamilies) {
+export function auth(credentials: LiveCredentials) {
   return createMiddleware<ServerEnv>(async (c, next) => {
     const header = c.req.header('authorization');
     const secret = bearerOf(header);
@@ -108,7 +53,7 @@ export function auth(credentials: CredentialFamilies) {
         401,
       );
     }
-    const grant = resolveBearer(credentials, secret);
+    const grant = credentials.resolve(secret);
     if (grant === undefined) {
       return c.json({ error: 'unknown grant — the secret matches no token row' }, 401);
     }

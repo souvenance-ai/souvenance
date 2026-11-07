@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
@@ -203,6 +203,91 @@ test('delete answers 204 and removes the trio; the second delete is a 404', asyn
     const again = await call(app, manage('/stores/main', 'DELETE'));
     assert.equal(again.status, 404);
     registry.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('delete sweeps the store\u2019s grant rows off the file and the live state with it', async () => {
+  const dir = tempDir();
+  try {
+    const other = `souv-${'f'.repeat(32)}`;
+    const configPath = join(dir, 'config.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          tokens: [
+            { agent: 'atlas', secret: SECRET, store: 'atlas', mode: 'rw' },
+            { agent: 'scribe', secret: other, store: 'atlas-fork', mode: 'ro' },
+          ],
+          management: MANAGEMENT,
+        },
+        null,
+        2,
+      ),
+    );
+    const registry = Registry.open(dir);
+    const app = createApp({
+      registry,
+      tokens: [
+        { agent: 'atlas', secret: SECRET, store: 'atlas', mode: 'rw' },
+        { agent: 'scribe', secret: other, store: 'atlas-fork', mode: 'ro' },
+      ],
+      management: MANAGEMENT,
+      configPath,
+      version: 'test',
+    });
+    try {
+      registry.create('atlas');
+      registry.create('atlas-fork');
+      const gone = await call(app, manage('/stores/atlas', 'DELETE'));
+      assert.equal(gone.status, 204);
+      // The file keeps only the fork's row, tightened to 0600.
+      const doc = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      assert.deepEqual(doc['tokens'], [
+        { agent: 'scribe', secret: other, store: 'atlas-fork', mode: 'ro' },
+      ]);
+      assert.equal(statSync(configPath).mode & 0o777, 0o600);
+      // The revoked secret is already unknown to the running server.
+      const revoked = await call(app, plain('/memories'));
+      assert.equal(revoked.status, 401);
+      // The surviving row still speaks — the fork's grant is untouched.
+      const survivor = await call(app, bearerRequest(other, '/memories', 'GET'));
+      assert.equal(survivor.status, 200);
+      // The deleted store is gone from the registry.
+      const described = await call(app, manage('/stores/atlas', 'GET'));
+      assert.equal(described.status, 404);
+    } finally {
+      registry.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a store with no grant rows deletes untouched — the file never re-authors', async () => {
+  const dir = tempDir();
+  try {
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, JSON.stringify({ tokens: [], management: MANAGEMENT }, null, 2));
+    const registry = Registry.open(dir);
+    const app = createApp({
+      registry,
+      tokens: [],
+      management: MANAGEMENT,
+      configPath,
+      version: 'test',
+    });
+    try {
+      registry.create('lonely');
+      const before = readFileSync(configPath, 'utf8');
+      const gone = await call(app, manage('/stores/lonely', 'DELETE'));
+      assert.equal(gone.status, 204);
+      assert.equal(readFileSync(configPath, 'utf8'), before);
+    } finally {
+      registry.close();
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

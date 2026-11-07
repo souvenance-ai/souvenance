@@ -1,6 +1,6 @@
 /**
- * The battery's dispatcher: `node probes/run/run.ts [A|B|C|D]`.
- * No flag = all four phases, one fresh work root, sequential (each phase
+ * The battery's dispatcher: `node probes/run/run.ts [A|B|C|D|E]`.
+ * No flag = all five phases, one fresh work root, sequential (each phase
  * boots its own throwaway servers on its own port). Exit 0 only when
  * every probe case passed — the regression gate an agent or the dev runs
  * after any server change.
@@ -13,8 +13,8 @@
 import { execSync } from 'node:child_process';
 import type { Battery } from '../battery/battery.ts';
 
-const valid = ['A', 'B', 'C', 'D'];
-const ports = [18501, 18502, 18531, 18532, 18541, 18542, 18543];
+const valid = ['A', 'B', 'C', 'D', 'E'];
+const ports = [18501, 18502, 18531, 18532, 18541, 18542, 18543, 18551, 18552];
 
 const selected = process.argv[2]?.toUpperCase();
 if (selected !== undefined && !valid.includes(selected)) {
@@ -40,6 +40,7 @@ const modules = [
   '../adversarial/adversarial.ts',
   '../auth-matrix/auth-matrix.ts',
   '../concurrency/concurrency.ts',
+  '../grants/grants.ts',
 ].map((relative) =>
   import(relative).then((module) => module as { battery: (root: string) => Battery }),
 );

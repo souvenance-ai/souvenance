@@ -21,9 +21,11 @@ import { createRoute, z } from '@hono/zod-openapi';
 import type { OpenAPIHono } from '@hono/zod-openapi';
 import type { Registry } from '../registry/registry.ts';
 import type { ServerEnv } from '../auth/auth.ts';
+import type { CredentialDoors } from '../live-credentials/live-credentials.ts';
 import {
   STORE_NAME_TEACHING,
   NoQuerySchema,
+  credentialRefusalOutcome,
   payloadRefusal,
   refusal,
   StatsSchema,
@@ -44,7 +46,11 @@ const UNKNOWN_REFUSAL = unknownStoreRefusal;
 const COLLISION_REFUSAL = () => refusal('the store name is taken');
 const GRAMMAR_REFUSAL = () => refusal('a name breaks the grammar');
 
-export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: Registry): void {
+export function registerManagementRoutes(
+  app: OpenAPIHono<ServerEnv>,
+  registry: Registry,
+  doors: CredentialDoors,
+): void {
   const createStore = createRoute({
     method: 'post',
     path: '/stores',
@@ -166,22 +172,53 @@ export function registerManagementRoutes(app: OpenAPIHono<ServerEnv>, registry: 
     summary: 'delete a store',
     description:
       'The store, its memories and its edges are gone — irreversible. No confirmation ' +
-      'parameter: reaching this route is the confirmation.',
+      'parameter: reaching this route is the confirmation. Its grant rows leave with it: ' +
+      'they author the same config file (and leave the live state in the same gesture), so ' +
+      'no credential survives to name a store the next boot refuses to open.',
     tags: ['stores'],
     request: {
       params: z.object({ name: StoreNameSchema }),
       query: NoQuerySchema,
     },
     responses: {
-      204: { description: 'gone — the store, irreversibly' },
+      204: { description: 'gone — the store, its grants with it' },
       400: GRAMMAR_REFUSAL(),
       403: CAP_REFUSAL(),
       404: UNKNOWN_REFUSAL(),
+      409: refusal('a drifted credential file needs the restart first'),
+      500: refusal('the credential write refused — the config file is unreadable or unwritable'),
       413: payloadRefusal(),
     },
   });
   app.openapi(deleteStore, (c) => {
     const { name } = c.req.valid('param');
+    const { live, configPath } = doors;
+    // The rows that name the store are revoked first (#98): the file
+    // write and the live-seat happen before the removal, so a wire
+    // delete can never leave a credential authored on a store the next
+    // boot refuses to open — the one state a full-remote operator could
+    // no longer repair. The order also keeps every failure on this
+    // route recoverable through the wire: if the removal fails after
+    // the revocations landed, a mint can re-grant; the other order
+    // (rows surviving the deletion) is the unrecoverable one.
+    if (live.tokens.some((row) => row.store === name)) {
+      const purged = {
+        tokens: live.tokens.filter((row) => row.store !== name),
+        management: live.management,
+      };
+      if (configPath === undefined) {
+        // A programmatic boot owns its credentials in memory; no file
+        // echo to author. The rows leave the live state with the store.
+        live.assume(purged);
+      } else {
+        try {
+          live.authorAndSeat(configPath, purged);
+        } catch (err) {
+          const outcome = credentialRefusalOutcome(err, 'the deletion');
+          return c.json(outcome, outcome.status);
+        }
+      }
+    }
     registry.remove(name);
     return c.body(null, 204);
   });

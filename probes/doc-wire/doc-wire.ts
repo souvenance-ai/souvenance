@@ -61,7 +61,7 @@ const cases: readonly ProbeCase[] = [
   },
   {
     id: 'A02',
-    name: '/doc is openapi 3 souvenance — 15 paths / 19 methods',
+    name: '/doc is openapi 3 souvenance — 17 paths / 22 methods',
     run: async (b) => {
       const document = b.document as {
         openapi?: string;
@@ -73,9 +73,9 @@ const cases: readonly ProbeCase[] = [
       if (document.info?.title !== 'souvenance') return fail(`title ${document.info?.title}`);
       const paths = Object.keys(document.paths ?? {});
       const rows = paths.reduce((acc, path) => acc + Object.keys(document.paths![path]!).length, 0);
-      if (paths.length !== 15)
-        return fail(`15 paths declared, got ${paths.length}: ${paths.join(',')}`);
-      if (rows !== 19) return fail(`19 method rows declared, got ${rows}`, 'doc-gap');
+      if (paths.length !== 17)
+        return fail(`17 paths declared, got ${paths.length}: ${paths.join(',')}`);
+      if (rows !== 22) return fail(`22 method rows declared, got ${rows}`, 'doc-gap');
       const schemas = document.components?.schemas ?? {};
       for (const needed of [
         'CheckinReport',
@@ -86,7 +86,7 @@ const cases: readonly ProbeCase[] = [
       ]) {
         if (!(needed in schemas)) return fail(`component ${needed} missing from /doc`, 'doc-gap');
       }
-      return ok('19 routes + 5 components');
+      return ok('22 routes + 5 components');
     },
   },
   {
