@@ -75,9 +75,9 @@ export function configAction(
     return command === 'get'
       ? { document: redactConfig(config), exitCode: 0 }
       : { document: { valid: true }, exitCode: 0 };
-  } catch (err) {
+  } catch (error) {
     return {
-      document: { error: err instanceof ConfigError ? err.message : String(err) },
+      document: { error: error instanceof ConfigError ? error.message : String(error) },
       exitCode: 78,
     };
   }

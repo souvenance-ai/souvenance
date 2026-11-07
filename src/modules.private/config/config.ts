@@ -220,8 +220,15 @@ export function loadConfig(configPath: string = defaultConfigPath()): Config {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch (err) {
-    throw new ConfigError(`config at ${configPath} is not valid JSON: ${(err as Error).message}`);
+  } catch {
+    // The parse error’s message quotes the file’s raw text — and a config
+    // can carry a secret. A refusal that echoes it would put the secret on
+    // stdout (the CLI’s get/validate envelopes) or in the boot log: the
+    // raw text never crosses a refusal. A JSON tool names the position;
+    // the refusal names the file and the verdict.
+    throw new ConfigError(
+      `config at ${configPath} is not valid JSON — the refusal does not quote the file (it may carry a secret); a JSON validator will show the syntax error’s position`,
+    );
   }
   return parseConfig(parsed);
 }
