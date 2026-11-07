@@ -41,10 +41,29 @@ import {
 } from '../wire/wire.ts';
 
 const AGENT_TEACHING =
-  "the agent's label — the request log's caller axis; per-terminal labels make a compromised terminal attributable";
+  "the agent's label — the request log's caller axis; per-terminal labels make a compromised terminal " +
+  'attributable; never "." or ".." — an HTTP client normalizes those path segments away, ' +
+  'the revoke URL (/stores/{name}/grants/{agent}) could never address them';
+
+const DOT_SEGMENT_REFUSAL =
+  '"." and ".." refuse — an HTTP client normalizes the dot segment away, ' +
+  'the revoke URL (/stores/{name}/grants/{agent}) could never address the grant: take a label it can carry';
+
+/**
+ * The mint's agent grammar (the revoke URL's own): every label is free
+ * but the two path segments an HTTP client normalizes away — `.` and
+ * `..` never reach the revoke route, the minted row would be a zombie
+ * its URL could not address. The mint door refuses them; the config
+ * grammar stays untouched for hand-authored rows.
+ */
+const MintAgentSchema = z
+  .string()
+  .min(1)
+  .refine((agent) => agent !== '.' && agent !== '..', { error: DOT_SEGMENT_REFUSAL })
+  .describe(AGENT_TEACHING);
 
 const GrantBodySchema = z.strictObject({
-  agent: z.string().min(1).describe(AGENT_TEACHING),
+  agent: MintAgentSchema,
   mode: z
     .enum(['ro', 'rw'])
     .describe("the grant's mode — ro reads, rw writes; changing it is revoke, then mint"),
@@ -145,7 +164,7 @@ export function registerGrantRoutes(
       throw err;
     }
     try {
-      live.authorAndSeat(configPath, minted.next);
+      live.authorAndSeat(configPath, minted.next, 'the mint');
     } catch (err) {
       const outcome = credentialRefusalOutcome(err, 'the mint');
       return c.json(outcome, outcome.status);
@@ -230,7 +249,7 @@ export function registerGrantRoutes(
       return c.json({ error: `no grant for "${agent}" on this store` }, 404);
     }
     try {
-      live.authorAndSeat(configPath, removed.next);
+      live.authorAndSeat(configPath, removed.next, 'the revocation');
     } catch (err) {
       const outcome = credentialRefusalOutcome(err, 'the revocation');
       return c.json(outcome, outcome.status);

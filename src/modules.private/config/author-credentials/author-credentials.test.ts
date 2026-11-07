@@ -118,6 +118,51 @@ test('hand-edited rows while running refuse as drift - the file survives byte fo
   assert.equal(readFileSync(path, 'utf8'), before);
 });
 
+test('a credential key held as null while the rows are empty refuses as drift, the file untouched', () => {
+  // The rows would coerce to an empty family and a mint would silently
+  // overwrite the hand's shape: the key PRESENT but not an array is the
+  // hand edit itself, refused as drift, the file kept byte for byte.
+  const path = tempWorkspace({ tokens: null, management: [] });
+  const before = readFileSync(path, 'utf8');
+  assert.throws(
+    () => authorCredentials(path, { tokens: [], management: [] }, EXPECTED),
+    (err: unknown) =>
+      err instanceof CredentialDriftError &&
+      /"tokens"/.test((err as Error).message) &&
+      /restart to apply them/.test((err as Error).message),
+  );
+  assert.equal(readFileSync(path, 'utf8'), before);
+});
+
+test('a credential key held as an object while the rows are empty refuses as drift', () => {
+  const path = tempWorkspace({ tokens: [], management: {} });
+  const before = readFileSync(path, 'utf8');
+  assert.throws(
+    () => authorCredentials(path, { tokens: [], management: [] }, EXPECTED),
+    (err: unknown) =>
+      err instanceof CredentialDriftError &&
+      /"management"/.test((err as Error).message) &&
+      /restart to apply them/.test((err as Error).message),
+  );
+  assert.equal(readFileSync(path, 'utf8'), before);
+});
+
+test('a document that is not a config object refuses the surgery - a sick file, never drift', () => {
+  for (const raw of ['[]', 'null', '5']) {
+    const path = tempWorkspace(undefined);
+    writeFileSync(path, raw);
+    const before = readFileSync(path, 'utf8');
+    assert.throws(
+      () => authorCredentials(path, { tokens: [], management: [] }, EXPECTED),
+      (err: unknown) =>
+        err instanceof ConfigError &&
+        err instanceof CredentialDriftError === false &&
+        /config object/.test(err.message),
+    );
+    assert.equal(readFileSync(path, 'utf8'), before);
+  }
+});
+
 test('the drift comparison tolerates row order and row-key order - no false drift', () => {
   const path = tempWorkspace({
     management: [{ secret: OTHER, agent: 'ops' }],
