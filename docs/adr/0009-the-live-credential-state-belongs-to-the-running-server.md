@@ -38,8 +38,11 @@ offline surgery).
 - **The write is the one-claim shape.** The spliced document faces the full
   config grammar before it lands (a persisted refusal would brick the next
   boot), is written whole to a scratch name created 0600, fsynced, then
-  renamed over the config — a pre-existing looser file is tightened by a
-  mint's first pass, and a reader never sees half a credential file.
+  renamed over the config — the parent directory syncs behind the rename,
+  and a post-rename failure notes the crash window on stderr rather than
+  refusing (the file has already changed). A pre-existing looser file is
+  tightened by a mint's first pass, and a reader never sees half a
+  credential file.
 - **The boot invariants hold at every swap.** One secret per row, both
   families pooled (the mint redraws on a collision); one row per
   (agent, store) — a duplicate mint is 409, its remedy taught: revoke, then

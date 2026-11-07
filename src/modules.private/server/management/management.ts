@@ -212,7 +212,7 @@ export function registerManagementRoutes(
         live.assume(purged);
       } else {
         try {
-          live.authorAndSeat(configPath, purged);
+          live.authorAndSeat(configPath, purged, 'the deletion');
         } catch (err) {
           const outcome = credentialRefusalOutcome(err, 'the deletion');
           return c.json(outcome, outcome.status);

@@ -333,6 +333,53 @@ test('the wire judges the grammar: the mode, the agent, an unknown body key, the
   }
 });
 
+test('the mint refuses the two dot segments - a grant there could never be revoked from the URL, a dotted label mints', async () => {
+  const space = workspace({ tokens: [], management: MANAGEMENT });
+  const { app, registry } = boot(space, { tokens: [], management: MANAGEMENT });
+  try {
+    registry.create('euria');
+    for (const [agent, wanted] of [
+      ['.', 400],
+      ['..', 400],
+      ['a.profile', 201],
+    ] as const) {
+      const res = await app.request('/stores/euria/grants', {
+        method: 'POST',
+        body: JSON.stringify({ agent, mode: 'ro' }),
+        headers: { 'content-type': 'application/json', ...MANAGEMENT_BEARER },
+      });
+      assert.equal(res.status, wanted, `the agent "${agent}"`);
+      if (wanted === 400) {
+        assert.match(
+          ((await res.json()) as { error: string }).error,
+          /"\." and "\.\." refuse/,
+          'the refusal names the two rejected labels and why: the revoke URL could not address them',
+        );
+      }
+    }
+    registry.close();
+  } finally {
+    rmSync(space.storesDir, { recursive: true, force: true });
+  }
+});
+
+test('a dot segment cannot revoke - the URL normalizes away before the route, the miss is 404', async () => {
+  const space = workspace({ tokens: [], management: MANAGEMENT });
+  const { app, registry } = boot(space, { tokens: [], management: MANAGEMENT });
+  try {
+    registry.create('euria');
+    const revoke = await app.request('/stores/euria/grants/.', {
+      method: 'DELETE',
+      headers: MANAGEMENT_BEARER,
+    });
+    assert.equal(revoke.status, 404, 'the dot segment never reaches the revoke route');
+    assert.match(((await revoke.json()) as { error: string }).error, /no such route/);
+    registry.close();
+  } finally {
+    rmSync(space.storesDir, { recursive: true, force: true });
+  }
+});
+
 test('hand-edited rows while running refuse the mint as drift, and revert re-opens it', async () => {
   const space = workspace({ tokens: [], management: MANAGEMENT });
   const { app, registry } = boot(space, { tokens: [], management: MANAGEMENT });

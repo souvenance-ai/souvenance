@@ -116,10 +116,12 @@ export class LiveCredentials implements CredentialFamilies {
    * speaks of), and on success the drafted `next` is seated — file and
    * state move in one synchronous block, no request resolving against
    * half an intent. Every authoring route rides this, mint and revoke
-   * and the deletion's sweep alike.
+   * and the deletion's sweep alike. `gesture` names the route on the
+   * surgery's stderr notes (the weak-directory-sync note rides the
+   * rename's success: refuse never).
    */
-  authorAndSeat(configPath: string, next: CredentialFamilies): void {
-    authorCredentials(configPath, this, next);
+  authorAndSeat(configPath: string, next: CredentialFamilies, gesture: string): void {
+    authorCredentials(configPath, this, next, gesture);
     this.assume(next);
   }
 }

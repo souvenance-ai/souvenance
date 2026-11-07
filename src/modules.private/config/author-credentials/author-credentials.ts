@@ -8,18 +8,25 @@
  * untouched — hand edits there remain restart-to-apply), the result
  * faces the full grammar (a write that would brick the next boot
  * refuses instead), and the write itself is the ownership lock's claim
- * shape: fully written to a scratch name created 0600 (an existing
+ * shape: written whole to a scratch name created 0600 (an existing
  * looser file is tightened on sight — the guarded-rig map's flight),
- * fsynced, then renamed over the config.
+ * fsynced, then renamed over the config — the parent directory syncs
+ * behind the rename (a post-rename failure notes the crash window on
+ * stderr rather than refusing: the file has already changed, and the
+ * swap into the live state follows).
  *
  * The drift rule (the dev's, 2026-11-07): while the server runs, the
  * live credential state is the server's; the file's credential rows are
  * its echo. `expected` is the live state the callers stage from — a file
  * whose rows disagree with it is a hand edit made while running, and the
  * surgery refuses rather than silently re-authoring: external hand edits
- * remain restart-to-apply, never erased by a mint in flight. The
- * missing file with empty expected families is the one honest creation:
- * a cold host's first grant, written at 0600 from nothing.
+ * remain restart-to-apply, never erased by a mint in flight. The shapes
+ * are distinguished, not coerced: the document must be a config object
+ * (else the sick-file family, not drift), and a credential key present
+ * but not an array is the same hand edit — the same refusal, never a
+ * silent overwrite of a mangled key. The missing file with empty
+ * expected families is the one honest creation: a cold host's first
+ * grant, written at 0600 from nothing.
  *
  * Refusals throw ConfigError and touch nothing — the running state and
  * the file both survive every refusal. The message may name the path
@@ -34,25 +41,58 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  writeSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
 import { ConfigError, parseConfig, type CredentialFamilies } from '../config.ts';
+import { writeAllBytes } from '../write-all-bytes/write-all-bytes.ts';
 
 /** The drift refusal: the file's rows are not the live state's echo. */
 export class CredentialDriftError extends ConfigError {}
 
+/** The drift teaching the row-compare and the row-shape hand edits share. */
+const DRIFT_TEACHING =
+  'external hand edits stay restart-to-apply: restart to apply them (or revert the file), then retry';
+
 /**
- * Reads the file's credential rows, canonically. Absent keys are the
- * empty family (the boot resolves the same); a hand-mangled shape is
- * merely not equal to the live rows — the drift rule speaks, no guess.
+ * Reads the file's credential rows, canonically, the shapes distinguished
+ * rather than coerced: the document itself must be a config object — a
+ * `null`, an array or a scalar is a sick file (the ConfigError family,
+ * not drift); a PRESENT credential key holding anything but an array is
+ * a hand edit of the rows (drift — the same teaching as a disagreeing
+ * row, or the next mint would silently overwrite the mangled key); an
+ * ABSENT key stays the empty family (the boot resolves the same).
  */
-function fileRows(raw: unknown): { tokens: readonly unknown[]; management: readonly unknown[] } {
-  const doc = raw as Record<string, unknown> | null;
+function fileRows(
+  configPath: string,
+  raw: unknown,
+): { tokens: readonly unknown[]; management: readonly unknown[] } {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ConfigError(
+      `the credential surgery at ${configPath} refused — the file's document must be a config object; ` +
+        `a JSON validator names the root's shape (the refusal quotes nothing: it may carry a secret)`,
+    );
+  }
+  const doc = raw as Record<string, unknown>;
   return {
-    tokens: Array.isArray(doc?.['tokens']) ? doc['tokens'] : [],
-    management: Array.isArray(doc?.['management']) ? doc['management'] : [],
+    tokens: familyRows(doc, 'tokens'),
+    management: familyRows(doc, 'management'),
   };
+}
+
+/** One family's rows: absent is the empty family; present, it must be an array. */
+function familyRows(
+  doc: Record<string, unknown>,
+  key: 'tokens' | 'management',
+): readonly unknown[] {
+  if (!Object.hasOwn(doc, key)) return [];
+  const rows = doc[key];
+  if (!Array.isArray(rows)) {
+    throw new CredentialDriftError(
+      `the config file's "${key}" rows are not an array — a hand edited the credential rows ` +
+        `while running; ${DRIFT_TEACHING}`,
+    );
+  }
+  return rows;
 }
 
 /** Rows compare as sets of canonically-serialized rows. */
@@ -74,14 +114,16 @@ function rowsEqual(left: readonly unknown[], right: readonly unknown[]): boolean
 /**
  * The surgery: `expected` is the state the caller built its splice from
  * (the live credential state on the wire, the file's own rows through
- * loadConfig on the manager), `next` is the post-splice state. Success
- * is silent; every refusal leaves the file and the caller's state as
- * they were.
+ * loadConfig on the manager), `next` is the post-splice state, and
+ * `gesture` names the route's gesture on the stderr notes. Success is
+ * silent; every refusal leaves the file and the caller's state as they
+ * were.
  */
 export function authorCredentials(
   configPath: string,
   expected: CredentialFamilies,
   next: CredentialFamilies,
+  gesture = 'the authoring',
 ): void {
   let raw: string;
   let created = false;
@@ -114,14 +156,13 @@ export function authorCredentials(
         `a JSON validator shows the position (the refusal quotes nothing: it may carry a secret)`,
     );
   }
-  const current = fileRows(rawDoc);
+  const current = fileRows(configPath, rawDoc);
   if (
     !rowsEqual(current.tokens, expected.tokens) ||
     !rowsEqual(current.management, expected.management)
   ) {
     throw new CredentialDriftError(
-      `the config file's credential rows have drifted from the running state — ` +
-        `external hand edits stay restart-to-apply: restart to apply them (or revert the file), then retry`,
+      `the config file's credential rows have drifted from the running state — ${DRIFT_TEACHING}`,
     );
   }
   const spliced = {
@@ -147,12 +188,15 @@ export function authorCredentials(
   // The claim shape: written whole to a scratch name born 0600, fsynced,
   // renamed over the config — a reader (or a crash) never sees half a
   // credential file, and the file's mode comes from the scratch, so a
-  // pre-existing looser file is tightened by the rename itself.
+  // pre-existing looser file is tightened by the rename itself. Whole is
+  // enforced: the write loop replays until every byte of the document is
+  // on the scratch descriptor, a short `writeSync` answer never passing
+  // for the whole.
   const scratch = `${configPath}.author-${process.pid}-${Math.random().toString(36).slice(2)}`;
   let fd: number | undefined;
   try {
     fd = openSync(scratch, 'wx', 0o600);
-    writeSync(fd, serialized);
+    writeAllBytes(fd, serialized);
     fsyncSync(fd);
     closeSync(fd);
     fd = undefined;
@@ -164,5 +208,23 @@ export function authorCredentials(
       `the credential write at ${configPath} failed (${(err as { code?: string }).code ?? (err as Error).name}): ` +
         `the running state is unaffected; the file is untouched`,
     );
+  }
+  // The parent directory syncs behind the rename: a host crash in the
+  // window before it can revert the swap — an acknowledged revocation
+  // resurrects, a deleted store's grant bricks the next boot. The file
+  // has already changed here, so this failure must NOT refuse the
+  // route — the note goes to the operator's stderr and the caller seats
+  // its state as usual. A failure before the rename still refuses above,
+  // the file untouched.
+  try {
+    const dirFd = openSync(dirname(configPath), 'r');
+    try {
+      fsyncSync(dirFd);
+    } finally {
+      closeSync(dirFd);
+    }
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? (err as Error).name;
+    process.stderr.write(`credential ${gesture} survived a weak directory sync: ${code}\n`);
   }
 }
