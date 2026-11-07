@@ -149,6 +149,19 @@ test('loadConfig on malformed JSON refuses — same refusal as a bad shape', () 
   }
 });
 
+test('the malformed-JSON refusal never quotes the file — the raw text never crosses a refusal', () => {
+  const path = tempConfigPath(`{"marker": "RAW-CONFIG-TEXT"`);
+  try {
+    assert.throws(
+      () => loadConfig(path),
+      (err: unknown): boolean =>
+        err instanceof ConfigError && !err.message.includes('RAW-CONFIG-TEXT'),
+    );
+  } finally {
+    rmSync(path, { recursive: true, force: true });
+  }
+});
+
 test('loadConfig on a valid file resolves it', () => {
   const path = tempConfigPath(JSON.stringify({ port: 9999 }));
   try {

@@ -10,8 +10,8 @@ const SECRET = `souv-${'a'.repeat(32)}`;
 const MANAGEMENT_SECRET = `souv-${'b'.repeat(32)}`;
 
 function tempConfigPath(content: string): string {
-  const dir = mkdtempSync(join(tmpdir(), 'souvenance-config-cli-test-'));
-  const path = join(dir, 'config.json');
+  const directory = mkdtempSync(join(tmpdir(), 'souvenance-config-cli-test-'));
+  const path = join(directory, 'config.json');
   writeFileSync(path, content);
   return path;
 }
@@ -96,6 +96,24 @@ test('get refuses a malformed file — never a silent fall back to defaults', ()
     assert.ok('error' in answer.document);
     assert.match(answer.document.error, /not valid JSON/);
     assert.equal(answer.exitCode, 78);
+  } finally {
+    rmSync(path, { recursive: true, force: true });
+  }
+});
+
+test('the malformed-file envelope never quotes the raw text — a secret planted in broken JSON stays put', () => {
+  const path = tempConfigPath(`{"tokens": [{"agent": "atlas", "secret": ${SECRET}, "mode": }]`);
+  try {
+    for (const command of ['get', 'validate'] as const) {
+      const answer = configAction(command, path);
+      assert.ok('error' in answer.document);
+      assert.match(answer.document.error, /not valid JSON/);
+      assert.equal(answer.exitCode, 78);
+      // The pin: neither the secret nor any raw fragment of the file crosses.
+      const served = JSON.stringify(answer.document);
+      assert.ok(!served.includes(SECRET));
+      assert.ok(!served.includes('atlas'));
+    }
   } finally {
     rmSync(path, { recursive: true, force: true });
   }
