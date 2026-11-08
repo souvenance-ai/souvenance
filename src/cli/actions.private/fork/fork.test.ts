@@ -190,6 +190,11 @@ test('an explicit target\u2019s collision refuses — the pass-force clause neve
     assert.match(answer.document.error, /fork target already exists: /);
     assert.equal(answer.document.error.includes('pass force'), false);
     assert.equal(answer.exitCode, 1);
+    // The pre-existing target is the operator's — the failed-claim law
+    // keeps its fate out of the action's hands: the file stands with
+    // the bytes it had.
+    assert.equal(existsSync(storeDbPath(home.storesDir, 'child')), true);
+    assert.equal(readFileSync(storeDbPath(home.storesDir, 'child'), 'utf8'), '');
   } finally {
     rmSync(home.root, { recursive: true, force: true });
   }
@@ -494,6 +499,77 @@ test('a native copy failure is served as JSON — the open\u2019s net at the cop
     assert.equal(answer.exitCode, 1);
   } finally {
     rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
+test('a failed copy leaves no artifact of its own — the retry lands', async () => {
+  const home = tempHome();
+  try {
+    seedStore(home.storesDir, 'euria', 1, 0);
+    // The copy's own failure again — and the failed-claim law: the
+    // attempt's target path goes with the failure (the dangling link
+    // was all the target ever held), the name stays free.
+    symlinkSync(join(home.root, 'nowhere-at-all', 'dest'), storeDbPath(home.storesDir, 'child'));
+    const failed = await forkAction(
+      { source: 'euria', target: 'child' },
+      { configPath: home.configPath, liveness: DOWN },
+    );
+    assert.ok('error' in failed.document);
+    assert.equal(failed.exitCode, 1);
+    // The cleanup keeps to the artifacts the failed copy may claim: the
+    // attempt's path is gone from the registry's enumeration, nothing
+    // half-born can cold-open at the next boot, and the retry does not
+    // collide.
+    assert.deepEqual(
+      readdirSync(home.storesDir).filter((entry) => entry.endsWith('.db')),
+      ['euria.db'],
+    );
+    const retried = await forkAction(
+      { source: 'euria', target: 'child' },
+      { configPath: home.configPath, liveness: DOWN },
+    );
+    assert.ok('name' in retried.document);
+    assert.equal(retried.document.name, 'child');
+    assert.equal(retried.exitCode, 0);
+  } finally {
+    rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
+test('a bare fork asks for its source in JSON — the parser forwards the absence', async () => {
+  const home = tempHome();
+  try {
+    const answer = await forkAction({}, { configPath: home.configPath, liveness: DOWN });
+    assert.ok('error' in answer.document);
+    assert.match(
+      answer.document.error,
+      /the source is required — souvenance fork <source> \[target\]/,
+    );
+    assert.equal(answer.exitCode, 1);
+  } finally {
+    rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
+test('a malformed config stays 78 before the missing-source ask — the pinned order', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'souvenance-fork-cli-test-'));
+  const configPath = join(root, 'config.json');
+  const probes: string[] = [];
+  const liveness = async (): Promise<boolean> => (probes.push('probe'), true);
+  try {
+    writeFileSync(configPath, '{ not json');
+    const answer = await forkAction({}, { configPath, liveness });
+    assert.ok('error' in answer.document);
+    assert.match(answer.document.error, /not valid JSON/);
+    assert.equal(answer.exitCode, 78);
+    assert.equal(probes.length, 0, 'the 78 comes before any probe');
+    assert.equal(
+      answer.document.error.includes('the source is required'),
+      false,
+      'the config verdict won before the shape gates asked',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
