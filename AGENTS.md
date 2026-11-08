@@ -23,6 +23,11 @@ User preferences for TypeScript naming and typing — apply them to new code and
 - Every TypeScript generic follows the pattern `G` + PascalCase name (`GResult`), never single letters.
 - Use `readonly` as much as possible in types and interfaces.
 
+## Waiting
+
+- Prefer watching over sleeping: wait on the event you actually care about (file watcher, readiness check, process exit, completion signal) instead of a timed delay.
+- When there is no alternative to `sleep`, keep it as short as the task allows — cap it at 10 seconds when possible.
+
 ## Pull requests
 
 The agent's PR routine, in order — each step completes before the next:
