@@ -118,3 +118,17 @@ test('a never-ending body does not linger — the settle frees the connection', 
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('a host the request could never carry is dead — the constructor judged too', async () => {
+  // The config's grammar admits every non-empty host string; HTTP
+  // cannot carry some — the host rides the Host header, and a control
+  // character or a non-ASCII literal throws synchronously at the
+  // request's construction, before any socket, listener, or deadline
+  // exists. A throw escaping there would reject the awaited probe and
+  // kill the CLI's one-JSON-refusal contract; the constructor's throw
+  // is judged like every failure class: not alive, no rejection.
+  const control = await probeLiveness({ host: 'a\nb', port: 3141 });
+  const nonAscii = await probeLiveness({ host: '😀', port: 3141 });
+  assert.equal(control, false);
+  assert.equal(nonAscii, false);
+});
