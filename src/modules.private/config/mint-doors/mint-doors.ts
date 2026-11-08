@@ -24,6 +24,10 @@ export const DOT_AGENT_REFUSAL =
 export const MODE_TEACHING =
   'the mode is ro or rw — read only, or read and write; changing it is revoke, then mint';
 
+/** The store name's teaching at the doors' shared voice. */
+export const STORE_NAME_TEACHING =
+  'the store name breaks the grammar — lowercase, starts with a letter, up to 32 characters (a-z, 0-9, dashes)';
+
 /** The mode's two words, and nothing else — the narrowing the mint's type demands. */
 export function isGrantMode(value: string | undefined): value is 'ro' | 'rw' {
   return value === 'ro' || value === 'rw';

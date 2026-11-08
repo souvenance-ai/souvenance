@@ -205,15 +205,13 @@ test('the birth chains — the secret exactly once, the row authored, rw by defa
       { configPath: home.configPath, liveness: DOWN, ...TTY },
     );
     assert.ok('grant' in answer.document);
+    const grant = answer.document.grant;
+    assert.ok(grant !== undefined);
     assert.deepEqual(
-      {
-        agent: answer.document.grant.agent,
-        store: answer.document.grant.store,
-        mode: answer.document.grant.mode,
-      },
+      { agent: grant.agent, store: grant.store, mode: grant.mode },
       { agent: 'continu', store: 'child', mode: 'rw' },
     );
-    assert.match(answer.document.grant.secret, /^souv-/);
+    assert.match(grant.secret, /^souv-/);
     assert.equal(answer.exitCode, 0);
     const tokens = readConfig(home.configPath).tokens;
     assert.equal(tokens.length, 1);
@@ -233,7 +231,7 @@ test('the birth\u2019s mode: --mode ro rides the chain', async () => {
       { configPath: home.configPath, liveness: DOWN, ...TTY },
     );
     assert.ok('grant' in answer.document);
-    assert.equal(answer.document.grant.mode, 'ro');
+    assert.equal(answer.document.grant?.mode, 'ro');
     assert.equal(answer.document.name, 'euria-fork');
   } finally {
     rmSync(home.root, { recursive: true, force: true });

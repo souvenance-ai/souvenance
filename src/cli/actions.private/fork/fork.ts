@@ -33,7 +33,7 @@
  * mid-gesture death is a child born unreached or a row whose store
  * file is already on disk.
  */
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import {
   ConfigError,
   type Config,
@@ -47,6 +47,7 @@ import {
   DOT_AGENT_REFUSAL,
   MODE_TEACHING,
   PIPED_TEACHING,
+  STORE_NAME_TEACHING,
   isGrantMode,
 } from '../../../modules.private/config/mint-doors/mint-doors.ts';
 import type { MintedStoreGrant } from '../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
@@ -55,6 +56,8 @@ import { Store } from '../../../modules.private/store/store.ts';
 import { StoreError } from '../../../modules.private/store/store-error/store-error.ts';
 import { composeForkName } from '../../../modules.private/store/utils/compose-fork-name/compose-fork-name.ts';
 import { storeDbPath } from '../../../modules.private/server/registry/store-db-path/store-db-path.ts';
+import { storeNames } from '../../../modules.private/server/registry/store-names/store-names.ts';
+import { missingArg } from '../missing-arg/missing-arg.ts';
 import { probeLiveness } from '../liveness-probe/liveness-probe.ts';
 
 /** The raw arguments the bin parsed — validation lives in the action. */
@@ -96,14 +99,8 @@ export type ForkDocument =
       readonly path: string;
       readonly memories: number;
       readonly edges: number;
-    }
-  | {
-      readonly source: string;
-      readonly name: string;
-      readonly path: string;
-      readonly memories: number;
-      readonly edges: number;
-      readonly grant: BirthGrant;
+      /** The birth mint's facts — absent, the fork was not a birth. */
+      readonly grant?: BirthGrant;
     }
   | { readonly error: string };
 
@@ -112,10 +109,6 @@ export interface ForkAnswer {
   readonly document: ForkDocument;
   readonly exitCode: 0 | 1 | 78;
 }
-
-/** The store name's teaching at the target's door — the grant slice's own words. */
-const STORE_NAME_TEACHING =
-  'the store name breaks the grammar — lowercase, starts with a letter, up to 32 characters (a-z, 0-9, dashes)';
 
 /**
  * The running-server refusal, fork voice: the wire door (the
@@ -152,11 +145,17 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
   if (await liveness()) {
     return { document: { error: runningTeaching(config) }, exitCode: 1 };
   }
-  if (missing(args.source)) {
+  // The dev's ruling's enumeration carries the shape gates in order: the
+  // source required, the target grammar, the mode pairing, the agent
+  // grammar, the mode's two words.
+  if (missingArg(args.source)) {
     return {
       document: { error: 'the source is required — souvenance fork <source> [target]' },
       exitCode: 1,
     };
+  }
+  if (args.target !== undefined && !STORE_NAME.test(args.target)) {
+    return { document: { error: STORE_NAME_TEACHING }, exitCode: 1 };
   }
   if (args.mode !== undefined && args.grant === undefined) {
     return {
@@ -167,13 +166,10 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
     };
   }
   if (args.grant !== undefined) {
-    if (missing(args.grant)) return { document: { error: AGENT_REQUIRED }, exitCode: 1 };
+    if (missingArg(args.grant)) return { document: { error: AGENT_REQUIRED }, exitCode: 1 };
     if (args.grant === '.' || args.grant === '..') {
       return { document: { error: DOT_AGENT_REFUSAL }, exitCode: 1 };
     }
-  }
-  if (args.target !== undefined && !STORE_NAME.test(args.target)) {
-    return { document: { error: STORE_NAME_TEACHING }, exitCode: 1 };
   }
   if (args.mode !== undefined && !isGrantMode(args.mode)) {
     return { document: { error: MODE_TEACHING }, exitCode: 1 };
@@ -186,10 +182,10 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
       exitCode: 1,
     };
   }
-  // The composition's occupied set is the dir's own scan — the registry
-  // enumerates the same way (every `*.db` there is a store); one scan,
-  // one predicate, the shared rule decides.
-  const occupied = scanStoreNames(storesDir);
+  // The composition's occupied set is the dir's own scan — the shared
+  // storeNames unit serves it (the registry's cold-open walks the same
+  // enumeration); one filter, the shared rule decides.
+  const occupied = new Set(storeNames(storesDir));
   const name = args.target ?? composeForkName(args.source, (candidate) => occupied.has(candidate));
   let opened: Store;
   try {
@@ -207,30 +203,20 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
       args.grant === undefined
         ? undefined
         : birthGrant(config, door, args.grant, args.mode ?? 'rw', name);
-    if (grant !== undefined) {
-      if ('error' in grant) return { document: { error: grant.error }, exitCode: 1 };
-      return {
-        document: {
-          source: args.source,
-          name,
-          path: result.path,
-          memories: result.memories,
-          edges: result.edges,
-          grant,
-        },
-        exitCode: 0,
-      };
+    if (grant !== undefined && 'error' in grant) {
+      return { document: { error: grant.error }, exitCode: 1 };
     }
-    return {
-      document: {
-        source: args.source,
-        name,
-        path: result.path,
-        memories: result.memories,
-        edges: result.edges,
-      },
-      exitCode: 0,
+    // The optional grant assembles in the branch: a birth's facts ride
+    // the copy's, a plain fork serves the facts alone.
+    const document: ForkDocument = {
+      source: args.source,
+      name,
+      path: result.path,
+      memories: result.memories,
+      edges: result.edges,
+      ...(grant !== undefined ? { grant } : {}),
     };
+    return { document, exitCode: 0 };
   } catch (error) {
     if (!(error instanceof StoreError)) throw error;
     return { document: { error: forkTeaching(error) }, exitCode: 1 };
@@ -292,17 +278,4 @@ function forkTeaching(error: StoreError): string {
     return `${error.message.split(' (pass')[0]} — the manager never overwrites; name another store, or remove the existing one`;
   }
   return error.message;
-}
-
-/** The dir scan's one shape: the registry's own filter, the names without their `.db`. */
-function scanStoreNames(storesDir: string): Set<string> {
-  const names = new Set<string>();
-  for (const entry of readdirSync(storesDir)) {
-    if (entry.endsWith('.db')) names.add(entry.slice(0, -3));
-  }
-  return names;
-}
-
-function missing(value: string | undefined): value is undefined {
-  return value === undefined || value.length === 0;
 }
