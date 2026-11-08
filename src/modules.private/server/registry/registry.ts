@@ -11,7 +11,7 @@
  * remove speak the same vocabulary the facade does, and the server maps
  * codes to statuses once, honestly.
  */
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { STORE_NAME } from '../../config/config.ts';
 import { Store, type Stats } from '../../store/store.ts';
@@ -20,6 +20,7 @@ import { sidecarPaths } from '../../store/utils/sidecar-paths/sidecar-paths.ts';
 import { composeForkName } from '../../store/utils/compose-fork-name/compose-fork-name.ts';
 import { OwnershipLock } from '../ownership-lock/ownership-lock.ts';
 import { storeDbPath } from './store-db-path/store-db-path.ts';
+import { storeNames } from './store-names/store-names.ts';
 
 /** One open store and the lock that proves who owns it. */
 interface Registered {
@@ -50,10 +51,8 @@ export class Registry {
   static open(storesDir: string): Registry {
     mkdirSync(storesDir, { recursive: true });
     const registry = new Registry(storesDir, new Map());
-    for (const entry of readdirSync(storesDir)) {
-      if (!entry.endsWith('.db')) continue;
-      const name = entry.slice(0, -3);
-      Registry.#assertName(name, `the registry file "${entry}"`);
+    for (const name of storeNames(storesDir)) {
+      Registry.#assertName(name, `the registry file "${name}.db"`);
       registry.#claim(name, (dbPath) => Store.open({ dbPath }));
     }
     return registry;

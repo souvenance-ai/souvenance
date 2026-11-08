@@ -2,8 +2,8 @@ import { program } from 'commander';
 import pkg from '../../package.json' with { type: 'json' };
 import { resolveLogRequests } from '../modules.private/config/config.ts';
 import { type ConfigAnswer, configAction } from './actions.private/config/config.ts';
-import { forkAction, type ForkAnswer } from './actions.private/fork/fork.ts';
 import { grantAction, type GrantAnswer } from './actions.private/grant/grant.ts';
+import { type ForkArgs, forkAction, type ForkAnswer } from './actions.private/fork/fork.ts';
 import { serve } from './actions.private/serve/serve.ts';
 
 program.name('souvenance').description('AI memory.').version(pkg.version);
@@ -146,7 +146,7 @@ forkFamily
     (
       source: string,
       target: string | undefined,
-      options: { readonly grant?: string; readonly mode?: string },
+      options: Pick<ForkArgs, 'grant' | 'mode'>,
     ): Promise<void> =>
       forkAction({
         source,
