@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -114,6 +117,66 @@ test('the composition walks the ladder when -fork is taken', async () => {
   }
 });
 
+test('the composed child dodges a grant\u2019s name by construction — the stale row never reaches', async () => {
+  const home = tempHome();
+  try {
+    seedStore(home.storesDir, 'euria', 1, 0);
+    writeFileSync(
+      home.configPath,
+      JSON.stringify({
+        storesDir: home.storesDir,
+        tokens: [
+          { agent: 'continu', secret: `souv-${'b'.repeat(32)}`, store: 'euria-fork', mode: 'rw' },
+        ],
+        management: [],
+      }),
+    );
+    const answer = await forkAction(
+      { source: 'euria' },
+      { configPath: home.configPath, liveness: DOWN },
+    );
+    assert.ok('name' in answer.document);
+    // The row's store left the disk, the row itself stayed — the
+    // composition's occupied set carries it, so the child is born under
+    // the next name and the derelict secret reaches nothing.
+    assert.equal(answer.document.name, 'euria-fork-2');
+    assert.equal(answer.exitCode, 0);
+    assert.equal(existsSync(storeDbPath(home.storesDir, 'euria-fork')), false);
+    assert.equal(existsSync(storeDbPath(home.storesDir, 'euria-fork-2')), true);
+    assert.deepEqual(readConfig(home.configPath).tokens, [
+      { agent: 'continu', secret: `souv-${'b'.repeat(32)}`, store: 'euria-fork', mode: 'rw' },
+    ]);
+  } finally {
+    rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
+test('the composition\u2019s bound conflict serves its JSON — no rejection past the await', async () => {
+  const home = tempHome();
+  try {
+    seedStore(home.storesDir, 'euria', 1, 0);
+    // Every candidate the shared rule can draw is a store file: the
+    // 100-bound conflict is the only answer left.
+    for (let attempt = 1; attempt < 100; attempt++) {
+      const suffix = attempt === 1 ? '-fork' : `-fork-${attempt}`;
+      writeFileSync(storeDbPath(home.storesDir, `euria${suffix}`), '');
+    }
+    const answer = await forkAction(
+      { source: 'euria' },
+      { configPath: home.configPath, liveness: DOWN },
+    );
+    assert.ok('error' in answer.document);
+    assert.match(answer.document.error, /no free fork name for "euria"/);
+    assert.equal(answer.exitCode, 1);
+    // Nothing was copied in the conflict's place: the dir holds the
+    // source and the rung files exactly, nothing new.
+    const stores = readdirSync(home.storesDir).filter((entry) => entry.endsWith('.db'));
+    assert.equal(stores.length, 100);
+  } finally {
+    rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
 test('an explicit target\u2019s collision refuses — the pass-force clause never crosses', async () => {
   const home = tempHome();
   try {
@@ -157,6 +220,34 @@ test('the target\u2019s grammar teaches — lowercase letters, digits, dashes', 
     assert.ok('error' in answer.document);
     assert.match(answer.document.error, /breaks the grammar/);
     assert.equal(answer.exitCode, 1);
+  } finally {
+    rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
+test('a traversal source dies at the grammar — no path is built, nothing is read', async () => {
+  const home = tempHome();
+  try {
+    // The wedge's premise made real: a compatible store file the
+    // traversal would resolve to, OUTSIDE the stores dir — it exists,
+    // and the copy must never reach it.
+    const outside = join(home.root, 'archive.db');
+    const archive = Store.open({ dbPath: outside });
+    archive.store('the archive memory', { kind: 'note' });
+    archive.close();
+    const answer = await forkAction(
+      { source: '../archive', target: 'child' },
+      { configPath: home.configPath, liveness: DOWN },
+    );
+    assert.ok('error' in answer.document);
+    assert.match(answer.document.error, /breaks the grammar/);
+    assert.equal(answer.document.error.includes('no store'), false);
+    assert.equal(answer.exitCode, 1);
+    // The gate stands before the path: the child's file was never
+    // written, the archive's memory never left home.
+    assert.equal(existsSync(storeDbPath(home.storesDir, 'child')), false);
+    const stores = readdirSync(home.storesDir).filter((entry) => entry.endsWith('.db'));
+    assert.deepEqual(stores, []);
   } finally {
     rmSync(home.root, { recursive: true, force: true });
   }
@@ -290,7 +381,7 @@ test('the dot birth agents refuse — the mint doors\u2019 own words', async () 
   }
 });
 
-test('a birth whose pair already holds refuses after the copy — the truth stands', async () => {
+test('an explicit target already named by a grant refuses before the copy — born unreached', async () => {
   const home = tempHome();
   try {
     seedStore(home.storesDir, 'euria', 1, 0);
@@ -309,14 +400,98 @@ test('a birth whose pair already holds refuses after the copy — the truth stan
       { configPath: home.configPath, liveness: DOWN, ...TTY },
     );
     assert.ok('error' in answer.document);
-    assert.match(answer.document.error, /already holds a grant/);
+    // The grants' state gate speaks before the copy: the row's store
+    // file was gone, so the copy would boot reached by the derelict
+    // secret — the gate refuses, the remedy is the grant family's own.
+    assert.match(
+      answer.document.error,
+      /fork target "child" already holds a store grant \(agent "continu"\)/,
+    );
+    assert.match(answer.document.error, /souvenance grant store remove <agent> <store>/);
     assert.equal(answer.exitCode, 1);
-    // The copy landed; the row is the config's own — the child stays born
-    // unreached by this mint, the operator knows both truths.
-    assert.equal(existsSync(storeDbPath(home.storesDir, 'child')), true);
+    // Nothing was written: no copy beside the row, no extra row — one
+    // refusal in the state the config already had.
+    assert.equal(existsSync(storeDbPath(home.storesDir, 'child')), false);
     assert.deepEqual(readConfig(home.configPath).tokens, [
       { agent: 'continu', secret: `souv-${'a'.repeat(32)}`, store: 'child', mode: 'rw' },
     ]);
+  } finally {
+    rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
+test('a mint\u2019s failure after the copy serves the copy\u2019s facts beside the refusal', async () => {
+  const home = tempHome();
+  try {
+    seedStore(home.storesDir, 'euria', 1, 0);
+    // The config's DIRECTORY goes read-only: the mint itself would
+    // succeed, the authoring cannot — a copy stands, a grant does not.
+    chmodSync(home.root, 0o500);
+    const answer = await forkAction(
+      { source: 'euria', target: 'child', grant: 'continu' },
+      { configPath: home.configPath, liveness: DOWN, ...TTY },
+    );
+    assert.ok('error' in answer.document);
+    assert.match(answer.document.error, /the credential write at .* failed/);
+    assert.ok('copy' in answer.document);
+    assert.deepEqual(answer.document.copy, {
+      source: 'euria',
+      name: 'child',
+      path: storeDbPath(home.storesDir, 'child'),
+      memories: 1,
+      edges: 0,
+    });
+    assert.equal(answer.exitCode, 1);
+    // The copy's truth rides the refusal: the file is on disk, the row
+    // is not — the operator sees both from the one document.
+    assert.equal(existsSync(storeDbPath(home.storesDir, 'child')), true);
+    assert.deepEqual(readConfig(home.configPath).tokens, []);
+  } finally {
+    chmodSync(home.root, 0o700);
+    rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
+test('a native open failure is served as JSON — no rejection past the await', async () => {
+  const home = tempHome();
+  try {
+    seedStore(home.storesDir, 'euria', 1, 0);
+    // The store's own open refuses a corrupt file with a typed error
+    // (the schema's teaching); a file the OS refuses to even read
+    // fails BELOW the types — the net still owes its JSON.
+    chmodSync(storeDbPath(home.storesDir, 'euria'), 0o000);
+    const answer = await forkAction(
+      { source: 'euria' },
+      { configPath: home.configPath, liveness: DOWN },
+    );
+    assert.ok('error' in answer.document);
+    assert.match(answer.document.error, /unable to open database/);
+    assert.equal(answer.document.error.includes('schema version'), false);
+    assert.equal(answer.exitCode, 1);
+    assert.equal(existsSync(storeDbPath(home.storesDir, 'euria-fork')), false);
+  } finally {
+    chmodSync(storeDbPath(home.storesDir, 'euria'), 0o600);
+    rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
+test('a native copy failure is served as JSON — the open\u2019s net at the copy\u2019s seam', async () => {
+  const home = tempHome();
+  try {
+    seedStore(home.storesDir, 'euria', 1, 0);
+    // The copy's own failure, made real: the target is a symlink that
+    // dangles — existsSync is false (the typed conflict never speaks)
+    // and the create through the link fails at the OS, a filesystem
+    // error the store does not type. The net still owes its JSON.
+    symlinkSync(join(home.root, 'nowhere-at-all', 'dest'), storeDbPath(home.storesDir, 'child'));
+    const answer = await forkAction(
+      { source: 'euria', target: 'child' },
+      { configPath: home.configPath, liveness: DOWN },
+    );
+    assert.ok('error' in answer.document);
+    assert.match(answer.document.error, /unable to open database/);
+    assert.equal(answer.document.error.includes('fork target already exists'), false);
+    assert.equal(answer.exitCode, 1);
   } finally {
     rmSync(home.root, { recursive: true, force: true });
   }

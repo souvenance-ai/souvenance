@@ -18,6 +18,15 @@
  * … — the store/utils unit, the dir scan as the occupied set here, the
  * registry's open map on the wire).
  *
+ * The two gates beside the copy (the GLOSSARY's Fork — born unreached,
+ * at every birth): the source passes the shared name grammar before any
+ * path is built (a traversal never reaches `existsSync` as a store), and
+ * no grant may already name the copy — a token row naming the target
+ * survives a vanished store file, so the copy would boot reached by the
+ * derelict secret. The composed name dodges those rows by construction
+ * (the rows join the occupied set); an explicit target is refused flat,
+ * the grant family's own remedy taught.
+ *
  * The birth mint (the dev's ruling, 2026-11-08): `--grant <agent>`
  * chains the child's first grant into the same gesture — copy, then the
  * store family's own mint and config authoring, the secret served
@@ -29,9 +38,12 @@
  * `--mode <ro|rw>` rides the chain (default `rw` — the child becomes
  * themselves); a mode without the grant refuses. The order is
  * load-bearing: the copy lands before the row is authored, so the
- * authored config never names a file that does not exist — the worst
- * mid-gesture death is a child born unreached or a row whose store
- * file is already on disk.
+ * authored config never names a file that does not exist — and the
+ * grants' state gate stands before the copy, so the copy never lands
+ * beside a grant that already names it. The worst mid-gesture death is
+ * a child born unreached or a row whose store file is already on disk —
+ * and the mint's failure is spoken with the copy's facts beside the
+ * refusal (`copy`): the file stood, the document says so.
  */
 import { existsSync } from 'node:fs';
 import {
@@ -90,19 +102,24 @@ export interface BirthGrant {
  * The one JSON document the verb serves on stdout (#17): the copy's
  * facts (the source, the child's name, the file's real path, the row
  * counts) — and the birth grant's facts beside them when the chain ran,
- * the secret inside it, exactly once. One `{error}` on every refusal.
+ * the secret inside it, exactly once. One `{error}` on every refusal —
+ * and when the mint refused after the copy stood, the refusal carries
+ * the copy's facts beside it (`copy`): the file is on disk, the
+ * document says so without the prose.
  */
+/** The copy's facts — the success document's body and the mint refusal's rider. */
+export interface CopyFacts {
+  readonly source: string;
+  readonly name: string;
+  readonly path: string;
+  readonly memories: number;
+  readonly edges: number;
+}
+
 export type ForkDocument =
-  | {
-      readonly source: string;
-      readonly name: string;
-      readonly path: string;
-      readonly memories: number;
-      readonly edges: number;
-      /** The birth mint's facts — absent, the fork was not a birth. */
-      readonly grant?: BirthGrant;
-    }
-  | { readonly error: string };
+  | (CopyFacts & { readonly grant?: BirthGrant })
+  | { readonly error: string }
+  | { readonly error: string; readonly copy: CopyFacts };
 
 /** What the verb answers: the document and its exit code (0/1/78 per #17). */
 export interface ForkAnswer {
@@ -146,13 +163,20 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
     return { document: { error: runningTeaching(config) }, exitCode: 1 };
   }
   // The dev's ruling's enumeration carries the shape gates in order: the
-  // source required, the target grammar, the mode pairing, the agent
-  // grammar, the mode's two words.
+  // source required, the source's grammar, the target grammar, the mode
+  // pairing, the agent grammar, the mode's two words.
   if (missingArg(args.source)) {
     return {
       document: { error: 'the source is required — souvenance fork <source> [target]' },
       exitCode: 1,
     };
+  }
+  // The shape gates carry the source's own grammar: the path is built
+  // after this gate, so a traversal ("../archive") never reaches
+  // existsSync as a store — the wedge dies at the name, the shared
+  // grammar's voice speaking what the target's gate speaks.
+  if (!STORE_NAME.test(args.source)) {
+    return { document: { error: STORE_NAME_TEACHING }, exitCode: 1 };
   }
   if (args.target !== undefined && !STORE_NAME.test(args.target)) {
     return { document: { error: STORE_NAME_TEACHING }, exitCode: 1 };
@@ -182,11 +206,34 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
       exitCode: 1,
     };
   }
-  // The composition's occupied set is the dir's own scan — the shared
-  // storeNames unit serves it (the registry's cold-open walks the same
-  // enumeration); one filter, the shared rule decides.
-  const occupied = new Set(storeNames(storesDir));
-  const name = args.target ?? composeForkName(args.source, (candidate) => occupied.has(candidate));
+  // The grants' state gate, beside the source's existence: a token row
+  // naming an explicit target would ride the copy's boot — a stale row
+  // whose store file left the disk is exactly the born-reached hole.
+  // The composed name dodges the rows by construction (they join the
+  // occupied set below); the explicit target is refused flat, the grant
+  // family's remedy taught.
+  const holdersTeaching = grantHoldersTeaching(config, args.target);
+  if (holdersTeaching !== undefined) {
+    return { document: { error: holdersTeaching }, exitCode: 1 };
+  }
+  // The name resolution under one boundary: the dir scan and the
+  // composition are here — the composition's occupied set is the dir's
+  // own scan joined with the grants' rows (the shared storeNames unit
+  // serves the scan; the registry's cold-open walks the same
+  // enumeration; the rows' stores join so the composed child never
+  // inherits a grant's stale row — the born-unreached law holds at
+  // birth). The 100-bound conflict of the shared rule throws here
+  // first: it is caught — the JSON document still answers.
+  let name: string;
+  try {
+    const occupied = new Set<string>([
+      ...storeNames(storesDir),
+      ...config.tokens.map((row) => row.store),
+    ]);
+    name = args.target ?? composeForkName(args.source, (candidate) => occupied.has(candidate));
+  } catch (error) {
+    return { document: { error: (error as Error).message }, exitCode: 1 };
+  }
   let opened: Store;
   try {
     // Read-only, always: the fork never writes the parent, an archive
@@ -194,8 +241,14 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
     // boot's remedy re-spoken in the manager's voice below.
     opened = Store.open({ dbPath: sourcePath, readOnly: true });
   } catch (error) {
-    if (!(error instanceof StoreError)) throw error;
-    return { document: { error: openTeaching(error, sourcePath) }, exitCode: 1 };
+    // The typed refusal keeps its teaching; anything the store did not
+    // type (a corrupt file's SQLITE_NOTADB, an open the OS refused)
+    // is the CLI's json-first bug net: one `{error}`, exit 1, no
+    // rejection past the await.
+    if (error instanceof StoreError) {
+      return { document: { error: openTeaching(error, sourcePath) }, exitCode: 1 };
+    }
+    return { document: { error: (error as Error).message }, exitCode: 1 };
   }
   try {
     const result = opened.fork(storeDbPath(storesDir, name));
@@ -204,7 +257,23 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
         ? undefined
         : birthGrant(config, door, args.grant, args.mode ?? 'rw', name);
     if (grant !== undefined && 'error' in grant) {
-      return { document: { error: grant.error }, exitCode: 1 };
+      // The mint refused with the copy already on disk: the refusal
+      // carries the copy's facts, so the operator knows the file stood
+      // in the same document that says the grant did not land — one
+      // truth, no prose.
+      return {
+        document: {
+          error: grant.error,
+          copy: {
+            source: args.source,
+            name,
+            path: result.path,
+            memories: result.memories,
+            edges: result.edges,
+          },
+        },
+        exitCode: 1,
+      };
     }
     // The optional grant assembles in the branch: a birth's facts ride
     // the copy's, a plain fork serves the facts alone.
@@ -218,11 +287,35 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
     };
     return { document, exitCode: 0 };
   } catch (error) {
-    if (!(error instanceof StoreError)) throw error;
-    return { document: { error: forkTeaching(error) }, exitCode: 1 };
+    // The copy's typed refusal keeps its re-speaks (the conflict, no
+    // pass-force clause); a native failure (an unwritable target's
+    // SQLITE_CANTOPEN, a full disk) is the same json-first net as the
+    // open's: one `{error}`, exit 1, the await always settled.
+    if (error instanceof StoreError) {
+      return { document: { error: forkTeaching(error) }, exitCode: 1 };
+    }
+    return { document: { error: (error as Error).message }, exitCode: 1 };
   } finally {
     opened.close();
   }
+}
+
+/**
+ * The grants' state gate's refusal voice (the born-reached hole): the
+ * copy would boot next to a row that already names it — the derelict
+ * secret reaches it at the next wake. The remedy is the grant family's
+ * own surgery, named in the umbrella form (one command per agent).
+ */
+function grantHoldersTeaching(config: Config, target: string | undefined): string | undefined {
+  if (target === undefined) return undefined;
+  const agents = config.tokens.filter((row) => row.store === target).map((row) => row.agent);
+  if (agents.length === 0) return undefined;
+  const label = agents.map((agent) => `"${agent}"`).join(', ');
+  const noun = agents.length === 1 ? 'agent' : 'agents';
+  return (
+    `fork target "${target}" already holds a store grant (${noun} ${label}) — ` +
+    `a copy would be born reached; revoke it first: souvenance grant store remove <agent> <store>`
+  );
 }
 
 /**
