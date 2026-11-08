@@ -45,9 +45,8 @@
  * and the mint's failure is spoken with the copy's facts beside the
  * refusal (`copy`): the file stood, the document says so.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import {
-  ConfigError,
   type Config,
   STORE_NAME,
   defaultConfigPath,
@@ -67,6 +66,7 @@ import { mintStoreGrant } from '../../../modules.private/config/mint-store-grant
 import { Store } from '../../../modules.private/store/store.ts';
 import { StoreError } from '../../../modules.private/store/store-error/store-error.ts';
 import { composeForkName } from '../../../modules.private/store/utils/compose-fork-name/compose-fork-name.ts';
+import { sidecarPaths } from '../../../modules.private/store/utils/sidecar-paths/sidecar-paths.ts';
 import { storeDbPath } from '../../../modules.private/server/registry/store-db-path/store-db-path.ts';
 import { storeNames } from '../../../modules.private/server/registry/store-names/store-names.ts';
 import { missingArg } from '../missing-arg/missing-arg.ts';
@@ -250,8 +250,14 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
     }
     return { document: { error: (error as Error).message }, exitCode: 1 };
   }
+  const targetPath = storeDbPath(storesDir, name);
+  // The copy's pre-answer, recorded before the attempt (the registry's
+  // #claim shape): a target pre-existing the copy is the operator's —
+  // its fate never ours — and the store's own conflict guard speaks for
+  // it at the copy's gate.
+  const handed = existsSync(targetPath);
   try {
-    const result = opened.fork(storeDbPath(storesDir, name));
+    const result = opened.fork(targetPath);
     const grant =
       args.grant === undefined
         ? undefined
@@ -287,6 +293,23 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
     };
     return { document, exitCode: 0 };
   } catch (error) {
+    // The failed-claim law (the registry's #claim, the same sidecar
+    // trio): a copy that died keeps to its OWN artifacts — when the
+    // target pre-existed the attempt, nothing goes (the file the
+    // attempt met is the operator's; the store's conflict voice names
+    // that file its own), and when it was born here, the db and its
+    // sidecars go — a half-born store must not cold-open at the next
+    // boot, nor make the name a retry's collision. The completed-copy
+    // cases never reach the catch: a mint's failure returns inside the
+    // try, the copy standing.
+    if (
+      !handed &&
+      !(error instanceof StoreError && error.message.startsWith(TARGET_EXISTS_PREFIX))
+    ) {
+      for (const path of sidecarPaths(targetPath)) {
+        rmSync(path, { force: true });
+      }
+    }
     // The copy's typed refusal keeps its re-speaks (the conflict, no
     // pass-force clause); a native failure (an unwritable target's
     // SQLITE_CANTOPEN, a full disk) is the same json-first net as the
@@ -320,10 +343,15 @@ function grantHoldersTeaching(config: Config, target: string | undefined): strin
 
 /**
  * The birth mint: the store family's own mint and config authoring (the
- * chain). The grant's only refusals here are the config's — the pair
- * (agent, child) exists already, or the authoring refused — and the
- * either/return carries them with the copy standing: the child is born
- * unreached in the failure path, the principle holds at every seam.
+ * chain). Every mint failure returns the error result — the pair-only
+ * check of the mint's typed surface, the broken generator's plain
+ * refusal, anything the mint's own call threw — with the completed
+ * copy's facts riding the caller's `{error, copy}` branch: the child is
+ * born unreached in every failure path, the principle holds at every
+ * seam. (The pair's early refusal lives upstream — the grants' state
+ * gate refuses an explicit target named by any row; the composed name
+ * dodges the rows by construction.) The authoring's failures already
+ * returned; nothing is rethrown past the copy.
  */
 function birthGrant(
   config: Config,
@@ -336,8 +364,7 @@ function birthGrant(
   try {
     minted = mintStoreGrant(config, { agent, store: name, mode });
   } catch (error) {
-    if (!(error instanceof ConfigError)) throw error;
-    return { error: error.message };
+    return { error: (error as Error).message };
   }
   try {
     authorCredentials(door.configPath ?? defaultConfigPath(), config, minted.next, 'the mint');

@@ -132,7 +132,11 @@ const forkFamily = program
   );
 
 forkFamily
-  .argument('<source>', 'the store to copy')
+  // The source is optional AT THE PARSER: Commander's arg-count check
+  // would reject `souvenance fork` on stderr and exit 2 — the one JSON
+  // document per answer (#17) demands the absence ride to the action's
+  // own gate, which asks for the shape in the verb's JSON voice.
+  .argument('[source]', 'the store to copy')
   .argument('[target]', 'the child\u2019s name — composed from the source\u2019s name when silent')
   .option(
     '--grant <agent>',
@@ -144,7 +148,7 @@ forkFamily
   )
   .action(
     (
-      source: string,
+      source: string | undefined,
       target: string | undefined,
       options: Pick<ForkArgs, 'grant' | 'mode'>,
     ): Promise<void> =>
