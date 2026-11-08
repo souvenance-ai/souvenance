@@ -44,6 +44,14 @@
  * a child born unreached or a row whose store file is already on disk —
  * and the mint's failure is spoken with the copy's facts beside the
  * refusal (`copy`): the file stood, the document says so.
+ *
+ * The claim's staleness, honestly: the copy itself is one synchronous
+ * statement, and the claim's heartbeat cannot fire under it — a copy
+ * that outruns the lock's staleness leaves the claim silent, and the
+ * action settles with a refusal rather than continuing under a claim
+ * another owner may already have taken: the document is re-read before
+ * the mint and before every cleanup step, the mutate that rides a dead
+ * claim never happens, and the completed copy stands untouched.
  */
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -236,45 +244,77 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
   } catch (error) {
     return { document: { error: (error as Error).message }, exitCode: 1 };
   }
-  let opened: Store;
-  try {
-    // Read-only, always: the fork never writes the parent, an archive
-    // forks without waking — and an out-of-date schema refuses with the
-    // boot's remedy re-spoken in the manager's voice below.
-    opened = Store.open({ dbPath: sourcePath, readOnly: true });
-  } catch (error) {
-    // The typed refusal keeps its teaching; anything the store did not
-    // type (a corrupt file's SQLITE_NOTADB, an open the OS refused)
-    // is the CLI's json-first bug net: one `{error}`, exit 1, no
-    // rejection past the await.
-    if (error instanceof StoreError) {
-      return { document: { error: openTeaching(error, sourcePath) }, exitCode: 1 };
-    }
-    return { document: { error: (error as Error).message }, exitCode: 1 };
-  }
   const targetPath = storeDbPath(storesDir, name);
   // The copy's claim (the ownership lock, ADR 0001 — the same
   // `<name>.lock` beside the db the registry claims): the target is
   // claimed before any existence check, and the claim holds through
-  // the copy, the cleanup and the mint — two forks of one target
-  // cannot both reach the copy, the loser hears the live claim's own
-  // refusal (the holding pid named), and no invocation's cleanup can
-  // meet another's completed copy. The lock beats its own heartbeat;
-  // every settle path releases exactly once.
+  // the source's open, the copy, the cleanup and the mint — two forks
+  // of one target cannot both reach the copy, the loser hears the live
+  // claim's own refusal (the holding pid named), and no invocation's
+  // cleanup can meet another's completed copy. The lock beats its own
+  // heartbeat; the claim's identity is verified before every mutative
+  // settle (the mint, each cleanup step) because the heartbeat cannot
+  // fire under the synchronous copy; every settle path releases
+  // exactly once.
   const lockPath = join(storesDir, `${name}.lock`);
   let claim: OwnershipLock;
   try {
     claim = OwnershipLock.acquire(lockPath);
   } catch (error) {
+    // The claim's own refusal, before the source is even opened: the
+    // loser never holds a connection it would have to abandon — the
+    // lock's teaching rides the document verbatim.
     return { document: { error: (error as Error).message }, exitCode: 1 };
   }
-  // The copy's pre-answer, recorded before the attempt (the registry's
-  // #claim shape): a target pre-existing the copy is the operator's —
-  // its fate never ours — and the store's own conflict guard speaks for
-  // it at the copy's gate.
-  const handed = existsSync(targetPath);
+  let opened: Store | undefined;
+  let handed = false;
   try {
+    try {
+      // Read-only, always: the fork never writes the parent, an archive
+      // forks without waking — and an out-of-date schema refuses with the
+      // boot's remedy re-spoken in the manager's voice below. The open
+      // rides inside the claim's hold: a refused acquire has no source
+      // to leak.
+      opened = Store.open({ dbPath: sourcePath, readOnly: true });
+    } catch (error) {
+      // The typed refusal keeps its teaching; anything the store did not
+      // type (a corrupt file's SQLITE_NOTADB, an open the OS refused)
+      // is the CLI's json-first bug net: one `{error}`, exit 1, no
+      // rejection past the await.
+      if (error instanceof StoreError) {
+        return { document: { error: openTeaching(error, sourcePath) }, exitCode: 1 };
+      }
+      return { document: { error: (error as Error).message }, exitCode: 1 };
+    }
+    // The copy's pre-answer, recorded before the attempt (the registry's
+    // #claim shape): a target pre-existing the copy is the operator's —
+    // its fate never ours — and the store's own conflict guard speaks for
+    // it at the copy's gate.
+    handed = existsSync(targetPath);
     const result = opened.fork(targetPath);
+    // The claim's identity, verified before the authoring: the copy
+    // blocked the heartbeat, so the claim may have died under it — an
+    // authoring that would ride a dead claim mints a row for a store
+    // another owner believes is theirs. The completed copy is artwork
+    // the action will not destroy: its facts ride the refusal, the row
+    // never authored.
+    if (args.grant !== undefined && !claim.verifyClaim()) {
+      return {
+        document: {
+          error:
+            `the target's claim went stale or changed during the copy — another owner took it; ` +
+            `the copy stands at ${result.path} untouched and no grant was minted for it`,
+          copy: {
+            source: args.source,
+            name,
+            path: result.path,
+            memories: result.memories,
+            edges: result.edges,
+          },
+        },
+        exitCode: 1,
+      };
+    }
     const grant =
       args.grant === undefined
         ? undefined
@@ -331,6 +371,23 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
     ) {
       try {
         for (const path of sidecarPaths(targetPath)) {
+          // The claim's identity, verified before every cleanup step: a
+          // dead or foreign claim stops the surgery — artifacts judged
+          // not ours anymore stay on disk untouched, the residue fact
+          // riding the refusal. The heartbeat cannot fire under the
+          // synchronous copy, so the document re-read is the only
+          // witness.
+          if (!claim.verifyClaim()) {
+            return {
+              document: {
+                error:
+                  `the target's claim went stale or changed during the copy — another owner ` +
+                  `took it; the copy refused (${copyVoice}); its residue stands at ` +
+                  `${targetPath} untouched`,
+              },
+              exitCode: 1,
+            };
+          }
           rmSync(path, { force: true });
         }
       } catch (cleanupError) {
@@ -350,11 +407,12 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
     return { document: { error: copyVoice }, exitCode: 1 };
   } finally {
     // The one-settle discipline (the probe's own): the opened source
-    // closes first, then the claim releases exactly once on every
-    // settle path — and the release's own refusal (a takeover judged
-    // this hand dead) never replaces the settled answer; the caveat
-    // lands on stderr, the answer stands.
-    opened.close();
+    // closes once (nothing ever opened when the open itself refused),
+    // then the claim releases exactly once on every settle path — and
+    // the release's own refusal (a takeover judged this hand dead)
+    // never replaces the settled answer; the caveat lands on stderr,
+    // the answer stands.
+    if (opened !== undefined) opened.close();
     try {
       claim.release();
     } catch (releaseError) {
