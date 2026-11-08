@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { test } from 'vitest';
 import { Store } from '../../../modules.private/store/store.ts';
 import { storeDbPath } from '../../../modules.private/server/registry/store-db-path/store-db-path.ts';
+import { OwnershipLock } from '../../../modules.private/server/ownership-lock/ownership-lock.ts';
 import { forkAction } from './fork.ts';
 
 const ALIVE = async (): Promise<boolean> => true;
@@ -524,6 +525,10 @@ test('a failed copy leaves no artifact of its own — the retry lands', async ()
       readdirSync(home.storesDir).filter((entry) => entry.endsWith('.db')),
       ['euria.db'],
     );
+    assert.ok(
+      !existsSync(join(home.storesDir, 'child.lock')),
+      'the claim released beside the cleanup',
+    );
     const retried = await forkAction(
       { source: 'euria', target: 'child' },
       { configPath: home.configPath, liveness: DOWN },
@@ -570,6 +575,118 @@ test('a malformed config stays 78 before the missing-source ask — the pinned o
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a live claim holds the target — the losing fork never copies', async () => {
+  const home = tempHome();
+  try {
+    seedStore(home.storesDir, 'euria', 1, 0);
+    // The winner's claim mid-copy (the same lock file the registry
+    // claims): the loser's acquire refuses with the holding pid's own
+    // teaching, before any existence check — no copy, no cleanup, the
+    // winner's name untouched even while its file is not yet there.
+    const winner = OwnershipLock.acquire(join(home.storesDir, 'child.lock'));
+    try {
+      const answer = await forkAction(
+        { source: 'euria', target: 'child' },
+        { configPath: home.configPath, liveness: DOWN },
+      );
+      assert.ok('error' in answer.document);
+      assert.match(answer.document.error, /store is owned by pid /);
+      assert.match(answer.document.error, /heartbeat /);
+      assert.equal(answer.exitCode, 1);
+      assert.equal(existsSync(storeDbPath(home.storesDir, 'child')), false);
+    } finally {
+      winner.release();
+    }
+    // The loser retried after the release lands the copy as ever.
+    const loser = await forkAction(
+      { source: 'euria', target: 'child' },
+      { configPath: home.configPath, liveness: DOWN },
+    );
+    assert.ok('name' in loser.document);
+    assert.equal(loser.exitCode, 0);
+  } finally {
+    rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
+test('a cleanup\u2019s own refusal rides the copy\u2019s — the answer always prints', async () => {
+  const home = tempHome();
+  try {
+    seedStore(home.storesDir, 'euria', 1, 0);
+    // The copy dies at its dangling link; the cleanup's own rm then
+    // dies at a sidecar made into a directory — `force: true` does not
+    // suppress it. The one document carries both facts, the copy's
+    // failure primary; the promise never rejects past the await.
+    symlinkSync(join(home.root, 'nowhere-at-all', 'dest'), storeDbPath(home.storesDir, 'child'));
+    mkdirSync(`${storeDbPath(home.storesDir, 'child')}-wal`);
+    const answer = await forkAction(
+      { source: 'euria', target: 'child' },
+      { configPath: home.configPath, liveness: DOWN },
+    );
+    assert.ok('error' in answer.document);
+    assert.match(
+      answer.document.error,
+      /^the copy refused \(.*\); its residue could not be cleared \(.*\)$/,
+    );
+    assert.match(answer.document.error, /unable to open database/);
+    assert.equal(answer.exitCode, 1);
+  } finally {
+    rmSync(home.root, { recursive: true, force: true });
+  }
+});
+
+test('a storesDir that moved mid-flight refuses with the copy\u2019s facts — the row never lands', async () => {
+  const home = tempHome();
+  try {
+    seedStore(home.storesDir, 'euria', 1, 0);
+    const elsewhere = join(home.root, 'stores-b');
+    mkdirSync(elsewhere);
+    // The hand lands between the copy's read and the authoring's
+    // re-read: the copy used storesDir A, the file now speaks B. The
+    // door's liveness seam carries the hand, exactly the awaited window
+    // the probe occupies.
+    const liveness = async (): Promise<boolean> => {
+      writeFileSync(
+        home.configPath,
+        JSON.stringify({ storesDir: elsewhere, tokens: [], management: [] }),
+      );
+      return false;
+    };
+    const answer = await forkAction(
+      { source: 'euria', target: 'child', grant: 'continu' },
+      { configPath: home.configPath, liveness, ...TTY },
+    );
+    assert.ok('error' in answer.document);
+    assert.match(
+      answer.document.error,
+      /^the config file's storesDir changed during the copy \(.* → .*\) — the copy stands in /,
+    );
+    assert.ok(answer.document.error.includes(home.storesDir), 'the copy\u2019s home named');
+    assert.ok(answer.document.error.includes(elsewhere), 'the file\u2019s new home named');
+    assert.match(answer.document.error, /hand edits stay restart-to-apply/);
+    assert.ok('copy' in answer.document);
+    assert.deepEqual(answer.document.copy, {
+      source: 'euria',
+      name: 'child',
+      path: storeDbPath(home.storesDir, 'child'),
+      memories: 1,
+      edges: 0,
+    });
+    assert.equal(answer.exitCode, 1);
+    // The copy's truth rides the refusal; the file kept the hand's edit
+    // (restart-to-apply) and no row was authored against it.
+    assert.equal(existsSync(storeDbPath(home.storesDir, 'child')), true);
+    const file = JSON.parse(readFileSync(home.configPath, 'utf8')) as {
+      storesDir?: string;
+      tokens: readonly unknown[];
+    };
+    assert.equal(file.storesDir, elsewhere);
+    assert.deepEqual(file.tokens, []);
+  } finally {
+    rmSync(home.root, { recursive: true, force: true });
   }
 });
 
