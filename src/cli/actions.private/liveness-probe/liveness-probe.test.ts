@@ -74,3 +74,47 @@ test('a dribbling server dies on the deadline — socket idleness alone would ha
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('a never-ending body does not linger — the settle frees the connection', async () => {
+  // Headers complete, body forever: the status line and header block
+  // conclude once, then one byte per heartbeat streams a body that
+  // never ends (no Content-Length, so the message closes only with its
+  // connection). The verdict is ALIVE at the headers — the pin is what
+  // follows: this server observes its connection closing promptly after
+  // the settle. A settle that freed nothing would hold the CLI process
+  // open past the answer it had already printed; the race names that
+  // betrayal instead of waiting on it.
+  let signalClosed: () => void = () => {};
+  const connectionClosed = new Promise<void>((resolve) => {
+    signalClosed = resolve;
+  });
+  const server: Server = createServer((_request, response) => {
+    const socket = response.socket;
+    socket?.write('HTTP/1.1 200 OK\r\n\r\n');
+    const stream = setInterval(() => {
+      socket?.write('x');
+    }, 200);
+    socket?.once('close', () => {
+      clearInterval(stream);
+      signalClosed();
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  try {
+    const address = server.address();
+    assert.ok(address !== null && typeof address === 'object');
+    const alive = await probeLiveness({ host: address.address, port: address.port });
+    assert.equal(alive, true);
+    const closed = await Promise.race([
+      connectionClosed,
+      new Promise<string>((resolve) => setTimeout(() => resolve('leaked'), 2_000)),
+    ]);
+    assert.equal(closed, undefined, 'the connection never closed — the settle leaked it');
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
