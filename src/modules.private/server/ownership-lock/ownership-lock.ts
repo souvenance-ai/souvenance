@@ -53,11 +53,13 @@ export class OwnershipLock {
   #heartbeatTimer: NodeJS.Timeout | undefined;
   readonly #lockPath: string;
   readonly #heartbeatMs: number;
+  readonly #staleMs: number;
   readonly #claim: string;
 
   private constructor(lockPath: string, options: OwnershipLockOptions, claim: string) {
     this.#lockPath = lockPath;
     this.#heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
+    this.#staleMs = options.staleMs ?? STALE_MS;
     this.#claim = claim;
   }
 
@@ -172,6 +174,29 @@ export class OwnershipLock {
     // alive past its listener — the listener is the reason we run.
     this.#heartbeatTimer.unref();
     return this;
+  }
+
+  /**
+   * The claim's readonly verification — a read of the lock document,
+   * never a write, no release implied: true only while the document's
+   * claim is ours AND its heartbeat is still fresh. A caller runs any
+   * mutative settle against what the claim guards behind this: a
+   * foreign document (the takeover's evidence) or a silent one (the
+   * copy blocked the heartbeat past the staleness) returns false, and
+   * the caller settles with its refusal rather than continue under a
+   * claim that is no longer its own.
+   */
+  verifyClaim(): boolean {
+    let held: LockDocument;
+    try {
+      held = OwnershipLock.#readHeld(this.#lockPath);
+    } catch {
+      // No readable document: there is no claim to verify, and a
+      // settle must not run — the caller's refusal can name the file
+      // and let the operator read the module's own teaching.
+      return false;
+    }
+    return held.claim === this.#claim && Date.now() - held.heartbeat_at <= this.#staleMs;
   }
 
   release(): void {

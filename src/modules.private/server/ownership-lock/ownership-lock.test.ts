@@ -9,7 +9,12 @@ function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'souvenance-lock-test-'));
 }
 
-function readDoc(path: string): { pid: number; acquired_at: number; heartbeat_at: number } {
+function readDoc(path: string): {
+  pid: number;
+  claim: string;
+  acquired_at: number;
+  heartbeat_at: number;
+} {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
@@ -84,6 +89,57 @@ test('a hand-corrupted lock refuses with the teaching — no owner can be named'
     const lockPath = join(dir, 'main.lock');
     writeFileSync(lockPath, '{ half a thought');
     assert.throws(() => OwnershipLock.acquire(lockPath), /does not parse/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('verifyClaim reads the document — ours and beating is true, stale or foreign is false', () => {
+  const dir = tempDir();
+  try {
+    const lockPath = join(dir, 'main.lock');
+    const lock = OwnershipLock.acquire(lockPath, { heartbeatMs: 60_000 });
+    // The heartbeat's own face: the claim just wrote it — ours and fresh.
+    assert.equal(lock.verifyClaim(), true);
+    // The staleness case by direct means: the document's heartbeat_at
+    // pinned to the past — no clock manipulated, the silence the
+    // module's own law reads as a dead owner.
+    const doc = readDoc(lockPath);
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ ...doc, claim: doc.claim, heartbeat_at: doc.heartbeat_at - 60_000 }),
+    );
+    assert.equal(lock.verifyClaim(), false, 'a silent heartbeat is not ours to settle behind');
+    // The takeover's shape, fresh: the claim identity is foreign even
+    // though the heartbeat beats — a successor's document is not ours.
+    const takeover = OwnershipLock.acquire(lockPath, { heartbeatMs: 60_000 });
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        ...readDoc(lockPath),
+        claim: 'a hand rewrote the successor',
+        heartbeat_at: Date.now(),
+      }),
+    );
+    assert.equal(takeover.verifyClaim(), false, 'a foreign claim is not ours to settle behind');
+    // A foreign document under this hand is the takeover's own law: the
+    // release refuses rather than delete the successor's claim.
+    assert.throws(() => takeover.release(), /ownership moved to pid/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('verifyClaim without a document is false — an unreadable lock is no settle\u2019s witness', () => {
+  const dir = tempDir();
+  try {
+    const lockPath = join(dir, 'main.lock');
+    const lock = OwnershipLock.acquire(lockPath, { heartbeatMs: 60_000 });
+    rmSync(lockPath, { force: true });
+    assert.equal(lock.verifyClaim(), false);
+    // The release's own law: no readable document, no release — the
+    // ENOENT rides raw, and the caller of a vanished claim settles.
+    assert.throws(() => lock.release(), /ENOENT/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
