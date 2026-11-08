@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
@@ -36,6 +44,11 @@ interface FamiliesFile {
 
 test('store add on a cold host mints the first grant — the file born 0600', async () => {
   const directory = tempHome();
+  const stores = join(directory, 'stores');
+  mkdirSync(stores, { recursive: true });
+  // The registry's own naming: every `<name>.db` in the stores dir is a
+  // store — the mint's existence gate passes because the file stands.
+  writeFileSync(join(stores, 'main.db'), '');
   const path = join(directory, 'sub', 'config.json');
   try {
     const answer = await grantAction(
@@ -43,6 +56,7 @@ test('store add on a cold host mints the first grant — the file born 0600', as
       { agent: 'mneme-laptop', store: 'main', mode: 'rw' },
       {
         configPath: path,
+        storesDir: stores,
         liveness: DOWN,
         ...TTY,
       },
@@ -71,7 +85,13 @@ test('store add on a cold host mints the first grant — the file born 0600', as
 
 test('store add tightens an existing loose file — the 0644 cheat dies on the first write', async () => {
   const directory = tempHome();
-  const path = looseConfigPath(directory, JSON.stringify({ port: 6553, tokens: [] }));
+  const stores = join(directory, 'stores');
+  mkdirSync(stores, { recursive: true });
+  writeFileSync(join(stores, 'main.db'), '');
+  const path = looseConfigPath(
+    directory,
+    JSON.stringify({ port: 6553, storesDir: stores, tokens: [] }),
+  );
   try {
     const answer = await grantAction(
       'store add',
@@ -169,9 +189,15 @@ test('a running server refuses the management mint with its own voice — no wir
 
 test('a second grant on the same pair refuses — the rotation remedy rides', async () => {
   const directory = tempHome();
+  const stores = join(directory, 'stores');
+  mkdirSync(stores, { recursive: true });
+  writeFileSync(join(stores, 'main.db'), '');
   const path = looseConfigPath(
     directory,
-    JSON.stringify({ tokens: [{ agent: 'atlas', secret: SECRET, store: 'main', mode: 'rw' }] }),
+    JSON.stringify({
+      storesDir: stores,
+      tokens: [{ agent: 'atlas', secret: SECRET, store: 'main', mode: 'rw' }],
+    }),
   );
   const before = readFileSync(path, 'utf8');
   try {
@@ -195,9 +221,15 @@ test('a second grant on the same pair refuses — the rotation remedy rides', as
 
 test('the same agent on another store mints — one row per (agent, store) pair', async () => {
   const directory = tempHome();
+  const stores = join(directory, 'stores');
+  mkdirSync(stores, { recursive: true });
+  writeFileSync(join(stores, 'forked.db'), '');
   const path = looseConfigPath(
     directory,
-    JSON.stringify({ tokens: [{ agent: 'atlas', secret: SECRET, store: 'main', mode: 'rw' }] }),
+    JSON.stringify({
+      storesDir: stores,
+      tokens: [{ agent: 'atlas', secret: SECRET, store: 'main', mode: 'rw' }],
+    }),
   );
   try {
     const answer = await grantAction(
@@ -257,6 +289,67 @@ test('a wrong mode refuses — the mode’s own teaching', async () => {
     assert.ok('error' in answer.document);
     assert.match(answer.document.error, /the mode is ro or rw/);
     assert.equal(answer.exitCode, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('store add on an absent store refuses — the boot’s gate taught offline, nothing written', async () => {
+  // The mint would persist a token row the serve.ts:72-84 boot refuses
+  // to start on (and the wire's mint door 404s) — refused here instead,
+  // the teaching carrying the remedy: the store is born on the wire.
+  const directory = tempHome();
+  const stores = join(directory, 'stores');
+  mkdirSync(stores, { recursive: true });
+  const path = looseConfigPath(directory, JSON.stringify({ storesDir: stores, tokens: [] }));
+  const before = readFileSync(path, 'utf8');
+  try {
+    const answer = await grantAction(
+      'store add',
+      { agent: 'atlas', store: 'ghost', mode: 'ro' },
+      {
+        configPath: path,
+        liveness: DOWN,
+        ...TTY,
+      },
+    );
+    assert.ok('error' in answer.document);
+    assert.match(answer.document.error, /"ghost" \(atlas\) names no store the registry has at/);
+    assert.ok(answer.document.error.includes(stores), 'the resolved stores dir rides');
+    assert.match(answer.document.error, /the boot refuses to start on such a token row/);
+    assert.match(answer.document.error, /POST \/stores, a management grant as the Bearer/);
+    assert.equal(answer.exitCode, 1);
+    assert.equal(readFileSync(path, 'utf8'), before);
+    assert.equal(
+      readdirSync(stores).length,
+      0,
+      'no db, no lock — the probe opened and claimed nothing',
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('store add on a present store mints — the existence gate’s good path', async () => {
+  const directory = tempHome();
+  const stores = join(directory, 'stores');
+  mkdirSync(stores, { recursive: true });
+  writeFileSync(join(stores, 'main.db'), '');
+  const path = looseConfigPath(directory, JSON.stringify({ storesDir: stores, tokens: [] }));
+  try {
+    const answer = await grantAction(
+      'store add',
+      { agent: 'atlas', store: 'main', mode: 'ro' },
+      {
+        configPath: path,
+        liveness: DOWN,
+        ...TTY,
+      },
+    );
+    assert.ok('mode' in answer.document);
+    assert.equal(answer.document.store, 'main');
+    assert.equal(answer.exitCode, 0);
+    assert.equal((readFamilies(path).tokens as unknown[]).length, 1);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

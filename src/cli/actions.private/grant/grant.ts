@@ -13,6 +13,10 @@
  * other door (the wire never serves a secret). With no server running
  * the manager owns the config, and add/remove speak the same pure mint
  * and revoke as the wire — the config module is the shared home (#98).
+ * The offline store mint also mirrors the boot's own validation (the
+ * serve.ts:72-84 boot refuses any tokens[] row whose store the registry
+ * does not open; the wire's mint door 404s the same names): a mint for
+ * a store absent from the resolved stores dir refuses before the row.
  *
  * The secret never crosses a pipe: `add` and `reveal` serve it on a TTY
  * alone, and `add` refuses BEFORE the mint — a piped mint is a script's
@@ -25,6 +29,8 @@
  * one `{error}` document and exit 1; the action answers, cli.ts prints
  * and exits.
  */
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   ConfigError,
   type Config,
@@ -62,12 +68,14 @@ export interface GrantArgs {
 
 /**
  * The door's seams, opened for the tests: the config file's path, the
- * liveness answer, the TTY verdict. Defaults speak reality — the one
- * home path, the real probe over the resolved config, stdout's own
- * TTY-ness.
+ * stores dir the store-existence probe consults, the liveness answer,
+ * the TTY verdict. Defaults speak reality — the one home path, the
+ * resolved config's stores dir, the real probe over the resolved
+ * config, stdout's own TTY-ness.
  */
 export interface GrantDoor {
   readonly configPath?: string;
+  readonly storesDir?: string;
   readonly liveness?: () => Promise<boolean>;
   readonly tty?: boolean;
 }
@@ -157,6 +165,24 @@ function runningManagementTeaching(config: Config): string {
   );
 }
 
+/**
+ * The absent-store refusal at the offline mint's door — the boot's own
+ * gate taught before the write. The serve.ts:72-84 boot refuses to
+ * start on any tokens[] row whose store the registry does not open, and
+ * the wire's mint door 404s the same names (grants.ts): minting one
+ * offline would persist exactly that boot-damning row — a grant able
+ * only to serve 404s forever. The remedy is ADR 0006's ceremony, the
+ * wire named and no more (the manager's own birth verb is a later
+ * slice): the store is born over HTTP, then the grant is minted.
+ */
+function absentStoreTeaching(config: Config, agent: string, store: string): string {
+  return (
+    `"${store}" (${agent}) names no store the registry has at ${config.storesDir} — ` +
+    `the boot refuses to start on such a token row and the wire's mint refuses it with a 404: ` +
+    `birth the store first on the wire (POST /stores, a management grant as the Bearer), then mint`
+  );
+}
+
 export async function grantAction(
   command: GrantCommand,
   args: GrantArgs,
@@ -175,11 +201,12 @@ export async function grantAction(
     return { document: { error: (error as Error).message }, exitCode: 78 };
   }
   const liveness = door.liveness ?? (() => probeLiveness(config));
+  const storesDir = door.storesDir ?? config.storesDir;
   // The dispatcher is exhaustive: reads never probe — the file rows are
   // the running server's echo; only the writes ask who holds the state.
   switch (command) {
     case 'store add':
-      return storeAdd(config, args, file, liveness);
+      return storeAdd(config, args, file, storesDir, liveness);
     case 'store remove':
       return storeRemove(config, args, file, liveness);
     case 'management add':
@@ -234,6 +261,7 @@ async function storeAdd(
   config: Config,
   args: GrantArgs,
   file: string,
+  storesDir: string,
   liveness: () => Promise<boolean>,
 ): Promise<GrantAnswer> {
   if (await liveness()) return { document: { error: runningStoreTeaching(config) }, exitCode: 1 };
@@ -258,6 +286,18 @@ async function storeAdd(
   }
   if (!isGrantMode(args.mode)) {
     return { document: { error: MODE_TEACHING }, exitCode: 1 };
+  }
+  // The boot's own gate, taught offline (serve.ts:72-84): the registry
+  // enumerates the stores dir — every `<name>.db` there is a store, no
+  // list beside it to drift — so the mirror is the file's existence
+  // alone. No database is opened, no lock claimed: the manager is not
+  // the owner while probing. The grammar gate above already refused the
+  // names the registry itself would fail the boot on.
+  if (!existsSync(join(storesDir, `${args.store}.db`))) {
+    return {
+      document: { error: absentStoreTeaching(config, args.agent, args.store) },
+      exitCode: 1,
+    };
   }
   let minted: MintedStoreGrant;
   try {
