@@ -120,11 +120,11 @@ const PIPED_TEACHING =
 
 /** The agent's one teaching, composed at the two mint doors. */
 const AGENT_REQUIRED =
-  'the agent\u2019s label is required — the request log\u2019s caller axis; per-terminal labels are preferred';
+  'the agent’s label is required — the request log’s caller axis; per-terminal labels are preferred';
 
 /** The dot-segment refusal at the offline mint's door — the wire mint's own words. */
 const DOT_AGENT_REFUSAL =
-  '"." and ".." refuse — the wire\u2019s revoke URL (/stores/{name}/grants/{agent}) ' +
+  '"." and ".." refuse — the wire’s revoke URL (/stores/{name}/grants/{agent}) ' +
   'could never address the grant: take a label it can carry';
 
 /** The mode's grammar, taught where a wrong one arrives. */
@@ -139,7 +139,7 @@ function runningStoreTeaching(config: Config): string {
   return (
     `the live credential state is the running server's (a ${config.host}:${config.port}) — ` +
     `mint and revoke the store family on the wire: POST/GET/DELETE /stores/{name}/grants\u2026, ` +
-    `a management grant as the Bearer; the manager\u2019s local credential writes refuse while the server runs`
+    `a management grant as the Bearer; the manager’s local credential writes refuse while the server runs`
   );
 }
 
@@ -152,7 +152,7 @@ function runningManagementTeaching(config: Config): string {
   return (
     `the live credential state is the running server's (a ${config.host}:${config.port}) — ` +
     `the management family has no wire door: the wire never mints management rows, ` +
-    `the host\u2019s hands own who manages. Hand-edit the file and restart to apply, or return ` +
+    `the host’s hands own who manages. Hand-edit the file and restart to apply, or return ` +
     `with the server down`
   );
 }
@@ -174,33 +174,50 @@ export async function grantAction(
   } catch (error) {
     return { document: { error: (error as Error).message }, exitCode: 78 };
   }
-  const serverRunning = await (door.liveness ?? (() => probeLiveness(config)))();
-  if (command === 'store add') return storeAdd(config, args, file, serverRunning);
-  if (command === 'store remove') return storeRemove(config, args, file, serverRunning);
-  if (command === 'management add') return managementAdd(config, args, file, serverRunning);
-  if (command === 'management remove') return managementRemove(config, args, file, serverRunning);
-  // The reads probe nothing (the file rows are the running server's
-  // echo); they only need the args their verb demands.
-  if (command === 'store list') {
-    return {
-      document: {
-        grants: config.tokens.map((row) => ({
-          agent: row.agent,
-          store: row.store,
-          mode: row.mode,
-        })),
-      },
-      exitCode: 0,
-    };
+  const liveness = door.liveness ?? (() => probeLiveness(config));
+  // The dispatcher is exhaustive: reads never probe — the file rows are
+  // the running server's echo; only the writes ask who holds the state.
+  switch (command) {
+    case 'store add':
+      return storeAdd(config, args, file, liveness);
+    case 'store remove':
+      return storeRemove(config, args, file, liveness);
+    case 'management add':
+      return managementAdd(config, args, file, liveness);
+    case 'management remove':
+      return managementRemove(config, args, file, liveness);
+    case 'store list':
+      return {
+        document: {
+          grants: config.tokens.map((row) => ({
+            agent: row.agent,
+            store: row.store,
+            mode: row.mode,
+          })),
+        },
+        exitCode: 0,
+      };
+    case 'management list':
+      return {
+        document: { grants: config.management.map((row) => ({ agent: row.agent })) },
+        exitCode: 0,
+      };
+    case 'store reveal':
+      return revealStoreRow(config, args);
+    case 'management reveal':
+      return revealManagementRow(config, args);
+    default:
+      return assertUnwired(command);
   }
-  if (command === 'management list') {
-    return {
-      document: { grants: config.management.map((row) => ({ agent: row.agent })) },
-      exitCode: 0,
-    };
-  }
-  if (command === 'store reveal') return revealStoreRow(config, args);
-  return revealManagementRow(config, args);
+}
+
+/**
+ * The dispatcher's net for a verb nobody wired: the switch's default
+ * receives a never only when every union member has its case — a new
+ * verb missing its branch never compiles past here.
+ */
+function assertUnwired(command: never): never {
+  throw new Error(`the grant command "${command}" has no branch on the dispatcher`);
 }
 
 /** The two doors that carry a secret — both TTY-only (#48 ruling 3). */
@@ -217,9 +234,9 @@ async function storeAdd(
   config: Config,
   args: GrantArgs,
   file: string,
-  serverRunning: boolean,
+  liveness: () => Promise<boolean>,
 ): Promise<GrantAnswer> {
-  if (serverRunning) return { document: { error: runningStoreTeaching(config) }, exitCode: 1 };
+  if (await liveness()) return { document: { error: runningStoreTeaching(config) }, exitCode: 1 };
   if (missing(args.agent)) return { document: { error: AGENT_REQUIRED }, exitCode: 1 };
   if (args.agent === '.' || args.agent === '..') {
     return { document: { error: DOT_AGENT_REFUSAL }, exitCode: 1 };
@@ -269,9 +286,9 @@ async function storeRemove(
   config: Config,
   args: GrantArgs,
   file: string,
-  serverRunning: boolean,
+  liveness: () => Promise<boolean>,
 ): Promise<GrantAnswer> {
-  if (serverRunning) return { document: { error: runningStoreTeaching(config) }, exitCode: 1 };
+  if (await liveness()) return { document: { error: runningStoreTeaching(config) }, exitCode: 1 };
   if (missing(args.agent) || missing(args.store)) {
     return {
       document: {
@@ -296,9 +313,11 @@ async function managementAdd(
   config: Config,
   args: GrantArgs,
   file: string,
-  serverRunning: boolean,
+  liveness: () => Promise<boolean>,
 ): Promise<GrantAnswer> {
-  if (serverRunning) return { document: { error: runningManagementTeaching(config) }, exitCode: 1 };
+  if (await liveness()) {
+    return { document: { error: runningManagementTeaching(config) }, exitCode: 1 };
+  }
   if (missing(args.agent)) return { document: { error: AGENT_REQUIRED }, exitCode: 1 };
   if (args.agent === '.' || args.agent === '..') {
     return { document: { error: DOT_AGENT_REFUSAL }, exitCode: 1 };
@@ -325,9 +344,11 @@ async function managementRemove(
   config: Config,
   args: GrantArgs,
   file: string,
-  serverRunning: boolean,
+  liveness: () => Promise<boolean>,
 ): Promise<GrantAnswer> {
-  if (serverRunning) return { document: { error: runningManagementTeaching(config) }, exitCode: 1 };
+  if (await liveness()) {
+    return { document: { error: runningManagementTeaching(config) }, exitCode: 1 };
+  }
   if (missing(args.agent)) {
     return {
       document: { error: 'the agent is required — grant management remove <agent>' },

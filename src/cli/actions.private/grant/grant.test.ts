@@ -117,13 +117,15 @@ test('a running server refuses the store mint — the wire door taught, the file
   const directory = tempHome();
   const path = looseConfigPath(directory, JSON.stringify({ port: 6553 }));
   const before = readFileSync(path, 'utf8');
+  const probed: string[] = [];
+  const liveness = async (): Promise<boolean> => (probed.push('mint'), true);
   try {
     const answer = await grantAction(
       'store add',
       { agent: 'atlas', store: 'main', mode: 'ro' },
       {
         configPath: path,
-        liveness: ALIVE,
+        liveness,
         ...TTY,
       },
     );
@@ -134,6 +136,7 @@ test('a running server refuses the store mint — the wire door taught, the file
     assert.match(answer.document.error, /127\.0\.0\.1:6553/);
     assert.equal(answer.exitCode, 1);
     assert.equal(readFileSync(path, 'utf8'), before);
+    assert.equal(probed.length, 1, 'the write probes exactly once');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -214,7 +217,7 @@ test('the same agent on another store mints — one row per (agent, store) pair'
   }
 });
 
-test('the dot-segment agents refuse at the offline mint door — the wire\u2019s own words', async () => {
+test('the dot-segment agents refuse at the offline mint door — the wire’s own words', async () => {
   const directory = tempHome();
   const path = join(directory, 'config.json');
   try {
@@ -238,7 +241,7 @@ test('the dot-segment agents refuse at the offline mint door — the wire\u2019s
   }
 });
 
-test('a wrong mode refuses — the mode\u2019s own teaching', async () => {
+test('a wrong mode refuses — the mode’s own teaching', async () => {
   const directory = tempHome();
   const path = join(directory, 'config.json');
   try {
@@ -262,18 +265,21 @@ test('a wrong mode refuses — the mode\u2019s own teaching', async () => {
 test('a malformed file refuses with exit 78 at every door — the probe never consulted', async () => {
   const directory = tempHome();
   const path = looseConfigPath(directory, '{ not json');
+  const probed: string[] = [];
+  const liveness = async (): Promise<boolean> => (probed.push('probe'), true);
   try {
     for (const command of ['store add', 'store list', 'store remove', 'management add'] as const) {
       const args = command.includes('list') ? {} : { agent: 'atlas', store: 'main', mode: 'ro' };
       const answer = await grantAction(command, args, {
         configPath: path,
-        liveness: ALIVE,
+        liveness,
         ...TTY,
       });
       assert.ok('error' in answer.document, `${command}: ${JSON.stringify(answer.document)}`);
       assert.match(answer.document.error, /not valid JSON/);
       assert.equal(answer.exitCode, 78);
     }
+    assert.equal(probed.length, 0, 'the 78 comes before any probe — the config verdict first');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -289,7 +295,11 @@ test('store list serves the rows, never the secrets — and no management row', 
     }),
   );
   try {
-    const answer = await grantAction('store list', {}, { configPath: path, ...PIPED });
+    const answer = await grantAction(
+      'store list',
+      {},
+      { configPath: path, ...PIPED, liveness: ALIVE },
+    );
     assert.ok('grants' in answer.document);
     assert.deepEqual(answer.document.grants, [{ agent: 'atlas', store: 'main', mode: 'rw' }]);
     assert.equal(answer.exitCode, 0);
@@ -484,7 +494,7 @@ test('management list serves the agents alone', async () => {
   }
 });
 
-test('management reveal serves the secret — the first match, the boot\u2019s own resolution', async () => {
+test('management reveal serves the secret — the first match, the boot’s own resolution', async () => {
   const directory = tempHome();
   const other = `souv-${'b'.repeat(32)}`;
   const path = looseConfigPath(
@@ -558,14 +568,17 @@ test('management remove with no row refuses', async () => {
   }
 });
 
-test('the reads probe nothing — a piped list reads the file, TTY or not', async () => {
+test('the reads probe nothing — the echo is read free, TTY or not', async () => {
   const directory = tempHome();
   const path = looseConfigPath(directory, JSON.stringify({ tokens: [] }));
+  const probed: string[] = [];
+  const liveness = async (): Promise<boolean> => (probed.push('read'), true);
   try {
-    const answer = await grantAction('store list', {}, { configPath: path });
+    const answer = await grantAction('store list', {}, { configPath: path, liveness });
     assert.ok('grants' in answer.document);
     assert.deepEqual(answer.document.grants, []);
     assert.equal(answer.exitCode, 0);
+    assert.equal(probed.length, 0, 'the reads never probe');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
