@@ -17,7 +17,9 @@ import { STORE_NAME } from '../../config/config.ts';
 import { Store, type Stats } from '../../store/store.ts';
 import { StoreError } from '../../store/store-error/store-error.ts';
 import { sidecarPaths } from '../../store/utils/sidecar-paths/sidecar-paths.ts';
+import { composeForkName } from '../../store/utils/compose-fork-name/compose-fork-name.ts';
 import { OwnershipLock } from '../ownership-lock/ownership-lock.ts';
+import { storeDbPath } from './store-db-path/store-db-path.ts';
 
 /** One open store and the lock that proves who owns it. */
 interface Registered {
@@ -75,7 +77,7 @@ export class Registry {
    * cold-open, create, fork.
    */
   #claim(name: string, build: (dbPath: string) => Store): Store {
-    const dbPath = join(this.#storesDir, `${name}.db`);
+    const dbPath = storeDbPath(this.#storesDir, name);
     const lock = OwnershipLock.acquire(join(this.#storesDir, `${name}.lock`));
     // A failed claim must not leave its birth behind: a half-copied fork
     // or a refused open would otherwise resurrect at the next boot — cold
@@ -130,7 +132,8 @@ export class Registry {
   /**
    * Forks a store into a new one. When the forked name is absent the
    * server composes one — `<source>-fork`, then `-fork-2`, … — the first
-   * grammar-valid name free of collisions. Returns the forked name.
+   * grammar-valid name free of collisions (the shared compose rule, the
+   * registry's open map as the occupied set). Returns the forked name.
    */
   fork(source: string, forked?: string): string {
     const sourceStore = this.get(source);
@@ -138,7 +141,7 @@ export class Registry {
       throw new StoreError('not_found', `no store "${source}" in the registry`);
     }
     if (forked !== undefined) Registry.#assertName(forked);
-    const name = forked ?? this.#composeForkName(source);
+    const name = forked ?? composeForkName(source, (candidate) => this.#registered.has(candidate));
     if (this.#registered.has(name)) {
       throw new StoreError('conflict', `store "${name}" already exists`);
     }
@@ -148,21 +151,6 @@ export class Registry {
       return Store.open({ dbPath });
     });
     return name;
-  }
-
-  /**
-   * The composed fork name: `<source>-fork`, then `-fork-2`, … — the
-   * first candidate free in the registry wins. The suffix is bounded so
-   * the composition never breaks the 32-char grammar: a long source
-   * truncates before the suffix lands.
-   */
-  #composeForkName(source: string): string {
-    for (let n = 1; n < 100; n++) {
-      const suffix = n === 1 ? '-fork' : `-fork-${n}`;
-      const candidate = `${source.slice(0, 32 - suffix.length)}${suffix}`;
-      if (STORE_NAME.test(candidate) && !this.#registered.has(candidate)) return candidate;
-    }
-    throw new StoreError('conflict', `no free fork name for "${source}"`);
   }
 
   /**
@@ -185,7 +173,7 @@ export class Registry {
     } finally {
       registered.lock.release();
     }
-    const dbPath = join(this.#storesDir, `${name}.db`);
+    const dbPath = storeDbPath(this.#storesDir, name);
     for (const path of sidecarPaths(dbPath)) {
       rmSync(path, { force: true });
     }

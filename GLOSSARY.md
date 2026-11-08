@@ -57,7 +57,7 @@ The management surface's URL scheme: `/stores`, `/stores/<name>`, `/stores/<name
 _Avoid_: mount point, attachment, root store, top-level routes (retired — the data routes are top-level)
 
 **Fork**:
-An exact copy of a store as a new store — a backup, or a state set aside to examine. Born from the management surface and born unreached: no credential reaches the copy until one is minted for it. Never self-service — an individual cannot duplicate itself; forking never makes one individual two.
+An exact copy of a store as a new store — a backup, or a state set aside to examine. Born from the management surface and born unreached: no credential reaches the copy until one is minted for it. The birth may mint the copy's first grant in the same gesture — the operator's choice at an offline birth; the copy still carries no credential by itself, and the mint remains its own deliberate act. Never self-service — an individual cannot duplicate itself; forking never makes one individual two.
 _Avoid_: clone, copy, self-duplication, continuity
 
 **Cursor**:
