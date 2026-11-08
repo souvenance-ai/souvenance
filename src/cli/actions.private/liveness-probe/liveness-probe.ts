@@ -11,7 +11,10 @@
  * without the terminator, say — never goes silent, so the promise
  * carries its absolute deadline and settles exactly once, whatever
  * lands first (an answer, a refusal, the second's end); a slow-header
- * hang is refused like every other failure. The probe speaks
+ * hang is refused like every other failure. The connection never
+ * outlives its verdict: the one settle — alive or dead — frees the
+ * socket, so a body that streams forever cannot hold the CLI process
+ * open past the answer it already printed. The probe speaks
  * `node:http`'s request, not `fetch`: the fetch spec refuses whole
  * port ranges before a packet leaves (X11's 6000 among them), so a
  * live server on one of those ports was reported dead and the manager
@@ -39,14 +42,16 @@ const LIVENESS_TIMEOUT_MS = 1_000;
 export async function probeLiveness(target: LivenessTarget): Promise<boolean> {
   return new Promise((resolve) => {
     // The deadline is the promise's only judge: one verdict, whatever
-    // lands first. The first settle clears the clock; the rest (an
-    // 'error' the destroy releases finds its way here) read the flag
-    // and stand down — exactly one settle per request.
+    // lands first. The first settle clears the clock AND frees the
+    // connection — the socket must never outlive its verdict — and the
+    // rest (an 'error' the destroy releases finds its way here) read
+    // the flag and stand down: exactly one settle per request.
     let settled = false;
     const settle = (verdict: boolean): void => {
       if (settled) return;
       settled = true;
       clearTimeout(deadline);
+      probe.destroy();
       resolve(verdict);
     };
     const probe = request(
@@ -56,22 +61,24 @@ export async function probeLiveness(target: LivenessTarget): Promise<boolean> {
         method: 'GET',
         path: '/healthz',
       },
-      (response) => {
+      () => {
         // Any answer — this port is served. A foreign server on the
         // config's port is a collision the boot would have refused
-        // anyway. The body is never read: drained, the verdict stands.
-        response.resume();
+        // config's port is a collision the boot would have refused
+        // anyway. The body is never read: the arrival is the whole
+        // verdict, and the settle's destroy frees the connection — a
+        // body that streams forever cannot hold the CLI process open
+        // past the answer it already printed.
         settle(true);
       },
     );
     // The request-wide patience: a down port refuses in microseconds,
     // an idle black hole dies at the second — but a server dribbling
     // bytes never leaves the socket idle, so the judge is the absolute
-    // deadline. On its fire the verdict falls and the probe (the
-    // socket, the files no one else will reap) is destroyed.
+    // deadline. On its fire the verdict falls, the destroy rides the
+    // settle itself.
     const deadline = setTimeout(() => {
       settle(false);
-      probe.destroy();
     }, LIVENESS_TIMEOUT_MS);
     // Refused connection, unresolvable host, a destroyed probe — every
     // failure class collapses into one verdict: not alive.
