@@ -28,7 +28,13 @@ local process the host's whole memory estate. It survives exactly once.
   an agent must not duplicate itself. Fork serves backup and state-examination, never
   self-continuity: the copy is born unreached (no credential reaches it; a reader is
   minted for it later, a restart away), so a fork can never silently become the
-  agent's second self.
+  agent's second self. _Amended 2026-11-08 (the manager's offline fork, #48 slice 4):
+  the birth may mint the copy's first grant in the same gesture — `fork … --grant
+<agent>`, the operator's explicit choice chaining the birth's copy and the store
+  family's own mint. The amendment keeps the principle's law intact: the copy itself
+  still carries no credential, the chain is an explicit mint at birth (never an
+  inheritance, never always-on — a backup forked piped stays scriptable), and the
+  wire's fork remains unbundled._
 - **A zero-credential host refuses to serve** — fail-fast, whatever the bind: no
   token, no memory. A management-only boot is legal, and necessary: with store grants
   alone a fresh host deadlocks (every grant names a store the registry never opened,

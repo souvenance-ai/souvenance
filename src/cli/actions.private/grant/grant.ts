@@ -30,7 +30,6 @@
  * and exits.
  */
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   ConfigError,
   type Config,
@@ -43,9 +42,17 @@ import type { MintedManagementGrant } from '../../../modules.private/config/mint
 import { mintManagementGrant } from '../../../modules.private/config/mint-management-grant/mint-management-grant.ts';
 import type { MintedStoreGrant } from '../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
 import { mintStoreGrant } from '../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
+import {
+  AGENT_REQUIRED,
+  DOT_AGENT_REFUSAL,
+  MODE_TEACHING,
+  PIPED_TEACHING,
+  isGrantMode,
+} from '../../../modules.private/config/mint-doors/mint-doors.ts';
 import { withoutManagementGrant } from '../../../modules.private/config/without-management-grant/without-management-grant.ts';
 import { withoutStoreGrant } from '../../../modules.private/config/without-store-grant/without-store-grant.ts';
 import { probeLiveness } from '../liveness-probe/liveness-probe.ts';
+import { storeDbPath } from '../../../modules.private/server/registry/store-db-path/store-db-path.ts';
 
 /** The two credential families as the CLI speaks them (#63, the GLOSSARY's Grant). */
 export type GrantCommand =
@@ -121,23 +128,6 @@ export interface GrantAnswer {
   readonly document: GrantDocument;
   readonly exitCode: 0 | 1 | 78;
 }
-
-/** The one TTY refusal, spoken at both doors that serve a secret (#48 ruling 3). */
-const PIPED_TEACHING =
-  'the secret never crosses a pipe — run it in a terminal, where stdout is a TTY';
-
-/** The agent's one teaching, composed at the two mint doors. */
-const AGENT_REQUIRED =
-  'the agent’s label is required — the request log’s caller axis; per-terminal labels are preferred';
-
-/** The dot-segment refusal at the offline mint's door — the wire mint's own words. */
-const DOT_AGENT_REFUSAL =
-  '"." and ".." refuse — the wire’s revoke URL (/stores/{name}/grants/{agent}) ' +
-  'could never address the grant: take a label it can carry';
-
-/** The mode's grammar, taught where a wrong one arrives. */
-const MODE_TEACHING =
-  'the mode is ro or rw — read only, or read and write; changing it is revoke, then mint';
 
 /**
  * The running-server refusal, store voice: the wire door exists — the
@@ -293,7 +283,7 @@ async function storeAdd(
   // alone. No database is opened, no lock claimed: the manager is not
   // the owner while probing. The grammar gate above already refused the
   // names the registry itself would fail the boot on.
-  if (!existsSync(join(storesDir, `${args.store}.db`))) {
+  if (!existsSync(storeDbPath(storesDir, args.store))) {
     return {
       document: { error: absentStoreTeaching(config, args.agent, args.store) },
       exitCode: 1,
@@ -445,10 +435,7 @@ function revealManagementRow(config: Config, args: GrantArgs): GrantAnswer {
   return { document: { agent: row.agent, secret: row.secret }, exitCode: 0 };
 }
 
-/** The mode's two words, and nothing else — the narrowing the mint's type demands. */
-function isGrantMode(value: string | undefined): value is 'ro' | 'rw' {
-  return value === 'ro' || value === 'rw';
-}
+/** The mode's narrowing lives in the mint doors' shared voice. */
 
 /**
  * True when absent — the guard's negative branch narrows the raw arg to

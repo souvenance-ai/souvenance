@@ -2,6 +2,7 @@ import { program } from 'commander';
 import pkg from '../../package.json' with { type: 'json' };
 import { resolveLogRequests } from '../modules.private/config/config.ts';
 import { type ConfigAnswer, configAction } from './actions.private/config/config.ts';
+import { forkAction, type ForkAnswer } from './actions.private/fork/fork.ts';
 import { grantAction, type GrantAnswer } from './actions.private/grant/grant.ts';
 import { serve } from './actions.private/serve/serve.ts';
 
@@ -124,8 +125,39 @@ grantManagement
     grantAction('management remove', { agent }).then(emitAnswer),
   );
 
+const forkFamily = program
+  .command('fork')
+  .description(
+    'offline fork — an exact copy born unreached; refuses while the server owns (fork on the wire, then)',
+  );
+
+forkFamily
+  .argument('<source>', 'the store to copy')
+  .argument('[target]', 'the child\u2019s name — composed from the source\u2019s name when silent')
+  .option(
+    '--grant <agent>',
+    'mint the child\u2019s first grant in the same gesture — the birth\u2019s own mint',
+  )
+  .option(
+    '--mode <mode>',
+    'the birth grant\u2019s mode — ro or rw (pairs with --grant; default rw)',
+  )
+  .action(
+    (
+      source: string,
+      target: string | undefined,
+      options: { readonly grant?: string; readonly mode?: string },
+    ): Promise<void> =>
+      forkAction({
+        source,
+        target,
+        grant: options.grant,
+        mode: options.mode,
+      }).then(emitAnswer),
+  );
+
 /** The one stdout gesture (#17): exactly one JSON document, then the exit code. */
-function emitAnswer(answer: ConfigAnswer | GrantAnswer): void {
+function emitAnswer(answer: ConfigAnswer | GrantAnswer | ForkAnswer): void {
   process.stdout.write(`${JSON.stringify(answer.document)}\n`);
   process.exitCode = answer.exitCode;
 }
