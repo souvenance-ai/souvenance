@@ -117,13 +117,19 @@ function rowsEqual(left: readonly unknown[], right: readonly unknown[]): boolean
  * loadConfig on the manager), `next` is the post-splice state, and
  * `gesture` names the route's gesture on the stderr notes. Success is
  * silent; every refusal leaves the file and the caller's state as they
- * were.
+ * were. `expectedStoresDir` is the caller's own view of where stores
+ * live (absent on every caller that does not hand one): the same re-read
+ * that checks the rows' drift also resolves the file's own storesDir —
+ * through the config grammar, never a guess — and a change refuses: the
+ * caller's next row would name a store the file's new directory does
+ * not carry, and the remedy names the copy's fate.
  */
 export function authorCredentials(
   configPath: string,
   expected: CredentialFamilies,
   next: CredentialFamilies,
   gesture = 'the authoring',
+  expectedStoresDir?: string,
 ): void {
   let raw: string;
   let created = false;
@@ -164,6 +170,28 @@ export function authorCredentials(
     throw new CredentialDriftError(
       `the config file's credential rows have drifted from the running state — ${DRIFT_TEACHING}`,
     );
+  }
+  // The sibling-key guard (the copy's door): the rows' drift is judged
+  // above on this same read — a storesDir that moved between the
+  // caller's read and this re-read is the same hand in the same
+  // window. The resolution rides the config module's own grammar (the
+  // schema's shape, the defaults, the `~` expansion — parsed, never
+  // guessed), and a change refuses with the three facts: where the
+  // file's directory went, where the caller's copy stands, and what
+  // stays restart-to-apply. A caller that does not hand a directory
+  // keeps the check out of its path entirely.
+  if (expectedStoresDir !== undefined) {
+    const doc = rawDoc as Record<string, unknown>;
+    const effective = parseConfig(
+      Object.hasOwn(doc, 'storesDir') ? { storesDir: doc['storesDir'] } : {},
+    ).storesDir;
+    if (effective !== expectedStoresDir) {
+      throw new CredentialDriftError(
+        `the config file's storesDir changed during the copy (${expectedStoresDir} → ${effective}) — ` +
+          `the copy stands in ${expectedStoresDir}: move it into ${effective}, or revert the file; ` +
+          `hand edits stay restart-to-apply`,
+      );
+    }
   }
   const spliced = {
     ...(rawDoc as Record<string, unknown>),

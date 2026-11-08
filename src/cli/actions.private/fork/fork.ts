@@ -46,6 +46,7 @@
  * refusal (`copy`): the file stood, the document says so.
  */
 import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   type Config,
   STORE_NAME,
@@ -69,6 +70,7 @@ import { composeForkName } from '../../../modules.private/store/utils/compose-fo
 import { sidecarPaths } from '../../../modules.private/store/utils/sidecar-paths/sidecar-paths.ts';
 import { storeDbPath } from '../../../modules.private/server/registry/store-db-path/store-db-path.ts';
 import { storeNames } from '../../../modules.private/server/registry/store-names/store-names.ts';
+import { OwnershipLock } from '../../../modules.private/server/ownership-lock/ownership-lock.ts';
 import { missingArg } from '../missing-arg/missing-arg.ts';
 import { probeLiveness } from '../liveness-probe/liveness-probe.ts';
 
@@ -251,6 +253,21 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
     return { document: { error: (error as Error).message }, exitCode: 1 };
   }
   const targetPath = storeDbPath(storesDir, name);
+  // The copy's claim (the ownership lock, ADR 0001 — the same
+  // `<name>.lock` beside the db the registry claims): the target is
+  // claimed before any existence check, and the claim holds through
+  // the copy, the cleanup and the mint — two forks of one target
+  // cannot both reach the copy, the loser hears the live claim's own
+  // refusal (the holding pid named), and no invocation's cleanup can
+  // meet another's completed copy. The lock beats its own heartbeat;
+  // every settle path releases exactly once.
+  const lockPath = join(storesDir, `${name}.lock`);
+  let claim: OwnershipLock;
+  try {
+    claim = OwnershipLock.acquire(lockPath);
+  } catch (error) {
+    return { document: { error: (error as Error).message }, exitCode: 1 };
+  }
   // The copy's pre-answer, recorded before the attempt (the registry's
   // #claim shape): a target pre-existing the copy is the operator's —
   // its fate never ours — and the store's own conflict guard speaks for
@@ -293,33 +310,58 @@ export async function forkAction(args: ForkArgs, door: ForkDoor = {}): Promise<F
     };
     return { document, exitCode: 0 };
   } catch (error) {
+    // The copy's typed refusal keeps its re-speaks (the conflict, no
+    // pass-force clause); a native failure (an unwritable target's
+    // SQLITE_CANTOPEN, a full disk) is the same json-first net as the
+    // open's: one `{error}`, exit 1, the await always settled.
+    const copyVoice = error instanceof StoreError ? forkTeaching(error) : (error as Error).message;
     // The failed-claim law (the registry's #claim, the same sidecar
     // trio): a copy that died keeps to its OWN artifacts — when the
     // target pre-existed the attempt, nothing goes (the file the
     // attempt met is the operator's; the store's conflict voice names
     // that file its own), and when it was born here, the db and its
     // sidecars go — a half-born store must not cold-open at the next
-    // boot, nor make the name a retry's collision. The completed-copy
-    // cases never reach the catch: a mint's failure returns inside the
-    // try, the copy standing.
+    // boot, nor make the name a retry's collision. The claim holds
+    // through the cleanup, so no concurrent fork meets it; the
+    // completed-copy cases never reach the catch: a mint's failure
+    // returns inside the try, the copy standing.
     if (
       !handed &&
       !(error instanceof StoreError && error.message.startsWith(TARGET_EXISTS_PREFIX))
     ) {
-      for (const path of sidecarPaths(targetPath)) {
-        rmSync(path, { force: true });
+      try {
+        for (const path of sidecarPaths(targetPath)) {
+          rmSync(path, { force: true });
+        }
+      } catch (cleanupError) {
+        // The cleanup's own refusal must never swallow the copy's
+        // answer: the original failure stays primary in the same
+        // document, the residue's fact riding beside it.
+        return {
+          document: {
+            error:
+              `the copy refused (${copyVoice}); ` +
+              `its residue could not be cleared (${(cleanupError as Error).message})`,
+          },
+          exitCode: 1,
+        };
       }
     }
-    // The copy's typed refusal keeps its re-speaks (the conflict, no
-    // pass-force clause); a native failure (an unwritable target's
-    // SQLITE_CANTOPEN, a full disk) is the same json-first net as the
-    // open's: one `{error}`, exit 1, the await always settled.
-    if (error instanceof StoreError) {
-      return { document: { error: forkTeaching(error) }, exitCode: 1 };
-    }
-    return { document: { error: (error as Error).message }, exitCode: 1 };
+    return { document: { error: copyVoice }, exitCode: 1 };
   } finally {
+    // The one-settle discipline (the probe's own): the opened source
+    // closes first, then the claim releases exactly once on every
+    // settle path — and the release's own refusal (a takeover judged
+    // this hand dead) never replaces the settled answer; the caveat
+    // lands on stderr, the answer stands.
     opened.close();
+    try {
+      claim.release();
+    } catch (releaseError) {
+      process.stderr.write(
+        `ownership claim at ${lockPath} survived its release: ${(releaseError as Error).message}\n`,
+      );
+    }
   }
 }
 
@@ -367,7 +409,18 @@ function birthGrant(
     return { error: (error as Error).message };
   }
   try {
-    authorCredentials(door.configPath ?? defaultConfigPath(), config, minted.next, 'the mint');
+    authorCredentials(
+      door.configPath ?? defaultConfigPath(),
+      config,
+      minted.next,
+      'the mint',
+      // The sibling-key guard's expected dir: the directory the copy
+      // itself used (the same loadConfig read the copy's path came
+      // from) — a mid-flight hand on the file's storesDir refuses with
+      // the copy's facts beside it, the row never authored against a
+      // directory that would refuse the next boot.
+      config.storesDir,
+    );
   } catch (error) {
     return { error: (error as Error).message };
   }
