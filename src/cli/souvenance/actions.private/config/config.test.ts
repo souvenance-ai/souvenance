@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
 import { configAction } from './config.ts';
-import { defaultConfigPath } from '../../../modules.private/config/config.ts';
+import { defaultConfigPath } from '../../../../modules.private/config/config.ts';
 
 const SECRET = `souv-${'a'.repeat(32)}`;
 const MANAGEMENT_SECRET = `souv-${'b'.repeat(32)}`;

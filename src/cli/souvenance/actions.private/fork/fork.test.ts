@@ -14,9 +14,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'vitest';
-import { Store } from '../../../modules.private/store/store.ts';
-import { storeDbPath } from '../../../modules.private/server/registry/store-db-path/store-db-path.ts';
-import { OwnershipLock } from '../../../modules.private/server/ownership-lock/ownership-lock.ts';
+import { Store } from '../../../../modules.private/store/store.ts';
+import { storeDbPath } from '../../../../modules.private/server/registry/store-db-path/store-db-path.ts';
+import { OwnershipLock } from '../../../../modules.private/server/ownership-lock/ownership-lock.ts';
 import { forkAction } from './fork.ts';
 
 const ALIVE = async (): Promise<boolean> => true;

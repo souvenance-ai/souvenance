@@ -5,9 +5,9 @@
  * the truth. A refused config is the CLI's exit 78 (#17) — the refusal
  * message teaches, the code says "configuration".
  */
-import { defaultConfigPath, loadConfig } from '../../../modules.private/config/config.ts';
-import { startServer } from '../../../modules.private/server/serve/serve.ts';
-import pkg from '../../../../package.json' with { type: 'json' };
+import { defaultConfigPath, loadConfig } from '../../../../modules.private/config/config.ts';
+import { startServer } from '../../../../modules.private/server/serve/serve.ts';
+import pkg from '../../../../../package.json' with { type: 'json' };
 
 export interface ServeOptions {
   readonly port?: number;

@@ -15,7 +15,7 @@ The contract's files: the prompt is [`prompt.md`](prompt.md), the grid is
 The production posture, on the real host:
 
 - The real `~/.souvenance` — the config carries both credential families;
-  the server boots `node src/cli/cli.ts serve --port 18601` from a checkout
+  the server boots `node src/cli/souvenance/cli.ts serve --port 18601` from a checkout
   of `release/0.2.0`. The living port is `18601`.
 - The individual carries one bearer credential to one store (`rw`) and
   nothing else: no management door, no second family. Births, forks, and
