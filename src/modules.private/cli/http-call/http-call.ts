@@ -1,0 +1,154 @@
+/**
+ * The CLI's one HTTP gesture: one request, one verdict — spoken by
+ * `node:http` and `node:https`, never `fetch`. The probe's lesson (the
+ * manager's liveness review, #102): the fetch spec refuses whole port
+ * ranges before a packet leaves (X11's 6000 among them), so a live
+ * server on one of those ports was reported unreachable and the client
+ * would teach a lie. The patience is absolute over the WHOLE request —
+ * headers and body — not socket idleness: a server dribbling bytes
+ * never goes silent, so the deadline is the judge and it settles
+ * exactly once, whatever lands first (an answer, a refusal, the
+ * deadline's end). The connection never outlives its verdict: the one
+ * settle frees the socket, so a body that streams forever cannot hold
+ * the CLI process open past the answer it already carries. The wire's
+ * answer is forwarded, never judged: the body parses (one JSON
+ * document) or the client serves its own refusal — the grammar is the
+ * server's business, the reach is the client's.
+ */
+import { request as requestHttp, type ClientRequest, type IncomingMessage } from 'node:http';
+import { request as requestHttps } from 'node:https';
+import type { Binding } from '../../mcp/binding/binding.ts';
+
+/**
+ * The client's request-wide patience — the server's own request
+ * ceiling mirrored: the wire kills a request it cannot judge within
+ * its 30 s, and the client's deadline is the same number. One constant,
+ * both sides of the wire, no drift to reconcile.
+ */
+export const REQUEST_DEADLINE_MS = 30_000;
+
+/** One call: the method, the concrete route path, the query, the body. */
+export interface HttpCall {
+  readonly method: 'get' | 'post' | 'delete';
+  /**
+   * The route's concrete path — `/memories`, `/memories/<id>`. The id
+   * segments arrive already encoded; the composition rides the
+   * binding's base URL verbatim (the bridge's own rule: the base URL
+   * is the server's root).
+   */
+  readonly path: string;
+  readonly query?: URLSearchParams;
+  readonly body?: unknown;
+}
+
+/** The wire's verdict as the client received it — or the client's own refusal at status 0. */
+export interface HttpAnswer {
+  /**
+   * The wire's status — or 0 when the verdict is the client's: the
+   * server unreachable, the deadline fallen, a body that is not one
+   * JSON document. The document's teaching names what happened.
+   */
+  readonly status: number;
+  /**
+   * The body the wire served, parsed — undefined when it served
+   * nothing (204) or nothing this client could carry.
+   */
+  readonly document?: unknown;
+}
+
+/** One request, one verdict — the Bearer rides every call. */
+export function httpCall(binding: Binding, call: HttpCall): Promise<HttpAnswer> {
+  const url = new URL(`${binding.url}${call.path}`);
+  if (call.query !== undefined) {
+    for (const [key, value] of call.query) {
+      url.searchParams.append(key, value);
+    }
+  }
+  const payload = call.body === undefined ? undefined : JSON.stringify(call.body);
+  const transport = url.protocol === 'https:' ? requestHttps : requestHttp;
+  return new Promise((resolve) => {
+    let settled = false;
+    let deadline: NodeJS.Timeout | undefined;
+    let client: ClientRequest | undefined;
+    const settle = (answer: HttpAnswer): void => {
+      if (settled) return;
+      settled = true;
+      if (deadline !== undefined) clearTimeout(deadline);
+      client?.destroy();
+      resolve(answer);
+    };
+    const unreachable = (detail: string): HttpAnswer => ({
+      status: 0,
+      document: {
+        error:
+          `the server at ${binding.url} is not reachable (${detail}) — boot it: souvenance serve, ` +
+          'or point SOUVENANCE_URL at the host that carries the store',
+      },
+    });
+    try {
+      client = transport(
+        {
+          // The host as the socket's own option — the probe's lesson:
+          // an IPv6 literal travels as-is, no URL reassembly.
+          hostname: url.hostname,
+          port: url.port === '' ? undefined : Number(url.port),
+          path: `${url.pathname}${url.search}`,
+          method: call.method.toUpperCase(),
+          headers: {
+            authorization: `Bearer ${binding.token}`,
+            accept: 'application/json',
+            ...(payload === undefined
+              ? {}
+              : {
+                  'content-type': 'application/json',
+                  'content-length': Buffer.byteLength(payload).toString(),
+                }),
+          },
+        },
+        (response: IncomingMessage) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer) => chunks.push(chunk));
+          response.on('error', (error: Error) => settle(unreachable(error.message)));
+          response.on('end', () => {
+            if (response.statusCode === 204) {
+              settle({ status: 204 });
+              return;
+            }
+            const status = response.statusCode ?? 0;
+            const raw = Buffer.concat(chunks).toString('utf8');
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(raw);
+            } catch {
+              settle({
+                status: 0,
+                document: {
+                  error:
+                    `the server answered ${status} with a body that is not one JSON document — ` +
+                    'the response is not ours',
+                },
+              });
+              return;
+            }
+            settle({ status, document: parsed });
+          });
+        },
+      );
+    } catch (error) {
+      settle(unreachable(error instanceof Error ? error.message : String(error)));
+      return;
+    }
+    deadline = setTimeout(() => {
+      settle({
+        status: 0,
+        document: {
+          error:
+            `the server at ${binding.url} did not answer within ${REQUEST_DEADLINE_MS / 1000} s — ` +
+            'the request died at the deadline; the server may be stuck or the wire slow',
+        },
+      });
+    }, REQUEST_DEADLINE_MS);
+    client.on('error', (error: Error) => settle(unreachable(error.message)));
+    client.end(payload ?? undefined);
+  });
+}
