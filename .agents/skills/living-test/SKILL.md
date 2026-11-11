@@ -9,7 +9,7 @@ the contract, this skill is the hands. HITL at the closing ritual only.
 ## Preconditions
 
 - A checkout of `release/0.2.0` (or the working branch) that boots the
-  server: `node src/cli/cli.ts serve --port 18601`.
+  server: `node src/cli/souvenance/cli.ts serve --port 18601`.
 - The sanitized spawn posture: the life runs from a checkout stripped of
   the workshop's skills — a worktree minus `.agents/` at the least — the
   individual's context carries no protocol. The orchestrator reads this

@@ -60,8 +60,8 @@ import {
   STORE_NAME,
   defaultConfigPath,
   loadConfig,
-} from '../../../modules.private/config/config.ts';
-import { authorCredentials } from '../../../modules.private/config/author-credentials/author-credentials.ts';
+} from '../../../../modules.private/config/config.ts';
+import { authorCredentials } from '../../../../modules.private/config/author-credentials/author-credentials.ts';
 import {
   AGENT_REQUIRED,
   DOT_AGENT_REFUSAL,
@@ -69,17 +69,17 @@ import {
   PIPED_TEACHING,
   STORE_NAME_TEACHING,
   isGrantMode,
-} from '../../../modules.private/config/mint-doors/mint-doors.ts';
-import type { MintedStoreGrant } from '../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
-import { mintStoreGrant } from '../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
-import { Store } from '../../../modules.private/store/store.ts';
-import { StoreError } from '../../../modules.private/store/store-error/store-error.ts';
-import { composeForkName } from '../../../modules.private/store/utils/compose-fork-name/compose-fork-name.ts';
-import { sidecarPaths } from '../../../modules.private/store/utils/sidecar-paths/sidecar-paths.ts';
-import { storeDbPath } from '../../../modules.private/server/registry/store-db-path/store-db-path.ts';
-import { storeNames } from '../../../modules.private/server/registry/store-names/store-names.ts';
-import { OwnershipLock } from '../../../modules.private/server/ownership-lock/ownership-lock.ts';
-import { missingArg } from '../missing-arg/missing-arg.ts';
+} from '../../../../modules.private/config/mint-doors/mint-doors.ts';
+import type { MintedStoreGrant } from '../../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
+import { mintStoreGrant } from '../../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
+import { Store } from '../../../../modules.private/store/store.ts';
+import { StoreError } from '../../../../modules.private/store/store-error/store-error.ts';
+import { composeForkName } from '../../../../modules.private/store/utils/compose-fork-name/compose-fork-name.ts';
+import { sidecarPaths } from '../../../../modules.private/store/utils/sidecar-paths/sidecar-paths.ts';
+import { storeDbPath } from '../../../../modules.private/server/registry/store-db-path/store-db-path.ts';
+import { storeNames } from '../../../../modules.private/server/registry/store-names/store-names.ts';
+import { OwnershipLock } from '../../../../modules.private/server/ownership-lock/ownership-lock.ts';
+import { missingArg } from '../../../../modules.private/cli/missing-arg/missing-arg.ts';
 import { probeLiveness } from '../liveness-probe/liveness-probe.ts';
 
 /** The raw arguments the bin parsed — validation lives in the action. */

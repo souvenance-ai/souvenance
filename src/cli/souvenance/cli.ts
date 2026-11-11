@@ -1,6 +1,6 @@
 import { program } from 'commander';
-import pkg from '../../package.json' with { type: 'json' };
-import { resolveLogRequests } from '../modules.private/config/config.ts';
+import pkg from '../../../package.json' with { type: 'json' };
+import { resolveLogRequests } from '../../modules.private/config/config.ts';
 import { type ConfigAnswer, configAction } from './actions.private/config/config.ts';
 import { grantAction, type GrantAnswer } from './actions.private/grant/grant.ts';
 import { type ForkArgs, forkAction, type ForkAnswer } from './actions.private/fork/fork.ts';

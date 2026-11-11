@@ -17,7 +17,7 @@ import {
   ConfigError,
   defaultConfigPath,
   loadConfig,
-} from '../../../modules.private/config/config.ts';
+} from '../../../../modules.private/config/config.ts';
 
 export type ConfigCommand = 'file' | 'get' | 'validate';
 

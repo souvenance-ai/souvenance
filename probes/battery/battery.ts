@@ -154,11 +154,15 @@ export class Server {
   /** Cold boot: the process spawns and either dies or reports its log. */
   async rawBoot(env: Record<string, string> = {}): Promise<void> {
     await mkdir(dirname(this.logPath), { recursive: true });
-    this.child = spawn('node', ['src/cli/cli.ts', 'serve', '--port', String(this.port)], {
-      cwd: REPO,
-      env: { ...process.env, HOME: this.home, ...env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    this.child = spawn(
+      'node',
+      ['src/cli/souvenance/cli.ts', 'serve', '--port', String(this.port)],
+      {
+        cwd: REPO,
+        env: { ...process.env, HOME: this.home, ...env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
     const stdout: string[] = [];
     const stderr: string[] = [];
     this.child.stdout?.on('data', (chunk) => stdout.push(String(chunk)));

@@ -36,12 +36,12 @@ import {
   STORE_NAME,
   defaultConfigPath,
   loadConfig,
-} from '../../../modules.private/config/config.ts';
-import { authorCredentials } from '../../../modules.private/config/author-credentials/author-credentials.ts';
-import type { MintedManagementGrant } from '../../../modules.private/config/mint-management-grant/mint-management-grant.ts';
-import { mintManagementGrant } from '../../../modules.private/config/mint-management-grant/mint-management-grant.ts';
-import type { MintedStoreGrant } from '../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
-import { mintStoreGrant } from '../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
+} from '../../../../modules.private/config/config.ts';
+import { authorCredentials } from '../../../../modules.private/config/author-credentials/author-credentials.ts';
+import type { MintedManagementGrant } from '../../../../modules.private/config/mint-management-grant/mint-management-grant.ts';
+import { mintManagementGrant } from '../../../../modules.private/config/mint-management-grant/mint-management-grant.ts';
+import type { MintedStoreGrant } from '../../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
+import { mintStoreGrant } from '../../../../modules.private/config/mint-store-grant/mint-store-grant.ts';
 import {
   AGENT_REQUIRED,
   DOT_AGENT_REFUSAL,
@@ -49,11 +49,11 @@ import {
   PIPED_TEACHING,
   STORE_NAME_TEACHING,
   isGrantMode,
-} from '../../../modules.private/config/mint-doors/mint-doors.ts';
-import { missingArg } from '../missing-arg/missing-arg.ts';
-import { storeDbPath } from '../../../modules.private/server/registry/store-db-path/store-db-path.ts';
-import { withoutManagementGrant } from '../../../modules.private/config/without-management-grant/without-management-grant.ts';
-import { withoutStoreGrant } from '../../../modules.private/config/without-store-grant/without-store-grant.ts';
+} from '../../../../modules.private/config/mint-doors/mint-doors.ts';
+import { missingArg } from '../../../../modules.private/cli/missing-arg/missing-arg.ts';
+import { storeDbPath } from '../../../../modules.private/server/registry/store-db-path/store-db-path.ts';
+import { withoutManagementGrant } from '../../../../modules.private/config/without-management-grant/without-management-grant.ts';
+import { withoutStoreGrant } from '../../../../modules.private/config/without-store-grant/without-store-grant.ts';
 import { probeLiveness } from '../liveness-probe/liveness-probe.ts';
 
 /** The two credential families as the CLI speaks them (#63, the GLOSSARY's Grant). */
