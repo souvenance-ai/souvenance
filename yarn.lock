@@ -1639,7 +1639,7 @@ __metadata:
     vitest: "npm:^5.0.5"
     zod: "npm:^4.6.7"
   bin:
-    souvenance: src/cli/cli.ts
+    souvenance: src/cli/souvenance/cli.ts
   languageName: unknown
   linkType: soft
 
