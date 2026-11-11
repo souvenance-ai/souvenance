@@ -94,3 +94,28 @@ test('a malformed numeric flag rides to the wire\u2019s judge — the truth, not
     await wire.close();
   }
 });
+
+test('a body that does not travel refuses in the envelope\u2019s voice — valid JSON, serializer-refused depths', async () => {
+  // Valid JSON that parses but nests past the serializer's ceiling: the
+  // parse gate passes, the stringify would RangeError outside any
+  // try/catch — the Copilot round's find. The wire's own birth
+  // ceremony + the real bin, end to end.
+  const wire = await bootTestWire();
+  try {
+    const deep = '{"a": ' + '['.repeat(16_000) + '1' + ']'.repeat(16_000) + '}';
+    const env = {
+      ...process.env,
+      SOUVENANCE_URL: wire.store.url,
+      SOUVENANCE_TOKEN: wire.store.token,
+    };
+    const run = await runBin(
+      ['memory', 'store', 'hello', '--kind', 'note', '--metadata', deep],
+      env,
+    );
+    assert.equal(run.code, 1);
+    const document = JSON.parse(run.stdout) as { error: unknown };
+    assert.match(String(document.error), /does not travel/);
+  } finally {
+    await wire.close();
+  }
+});
