@@ -132,6 +132,32 @@ test('a closed port teaches the boot — the reachability refusal, exit-1 class'
   );
 });
 
+test('an IPv6 binding reaches the live server — the brackets leave at the parse', async () => {
+  // new URL().hostname keeps the brackets; the socket's option wants
+  // the bare literal (the Copilot round's find: '[::1]' is a name the
+  // resolver chases — ENOTFOUND — while the bare literal connects).
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '::1', resolve);
+  });
+  const address = server.address();
+  assert.ok(address !== null && typeof address === 'object');
+  try {
+    const answer = await httpCall(
+      { url: `http://[${address.address}]:${address.port}`, token: 'souv-x' },
+      { method: 'get', path: '/healthz' },
+    );
+    assert.equal(answer.status, 200);
+    assert.deepEqual(answer.document, { ok: true });
+  } finally {
+    await closeServer(server);
+  }
+});
+
 /**
  * The deadline's fixture: a server that answers only in part, forever —
  * `headers` never completes the header block, `body` streams a body

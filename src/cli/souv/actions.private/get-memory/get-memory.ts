@@ -19,6 +19,13 @@ export async function getMemory(binding: Binding, args: GetMemoryArgs): Promise<
   if (missingArg(args.id)) {
     return refusalOf("the id is missing — pass the memory's id as the command's first argument");
   }
+  // The dot segments escape the path: encodeURIComponent leaves '..'
+  // unchanged, and the URL parser folds /memories/.. into / — the
+  // discovery door answering where a memory was asked. Refused before
+  // the URL is built; every other malformed id is the wire's verdict.
+  if (args.id === '.' || args.id === '..') {
+    return refusalOf('the id is not ours — a dot segment is not a memory id');
+  }
   const query = new URLSearchParams();
   if (args.depth !== undefined) query.set('depth', String(args.depth));
   const answer = await httpCall(binding, {

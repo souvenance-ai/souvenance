@@ -68,6 +68,23 @@ test('a malformed id is the wire\u2019s refusal — served verbatim', async () =
   }
 });
 
+test('a dot segment refuses before the URL is built — the discovery door must not answer', async () => {
+  // encodeURIComponent leaves '..' unchanged and the URL parser folds
+  // /memories/.. into / — without the gate, the discovery pointer
+  // answers 200 where a memory was asked (the Copilot round's find).
+  const wire = await bootTestWire();
+  try {
+    const dot = await getMemory(wire.store, { id: '.' });
+    assert.equal(dot.exitCode, 1);
+    assert.match(String((dot.document as { error: string }).error), /dot segment/);
+    const dotdot = await getMemory(wire.store, { id: '..' });
+    assert.equal(dotdot.exitCode, 1);
+    assert.match(String((dotdot.document as { error: string }).error), /dot segment/);
+  } finally {
+    await wire.close();
+  }
+});
+
 test('--depth expands the out-edges — the projection walks', async () => {
   const wire = await bootTestWire();
   try {
