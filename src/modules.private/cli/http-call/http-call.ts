@@ -41,6 +41,36 @@ export interface HttpCall {
   readonly body?: unknown;
 }
 
+/**
+ * The body's own local gate: valid JSON can still be too deep for the
+ * serializer — a parse that succeeded leaves a tree JSON.stringify
+ * refuses (a RangeError, the stack's own ceiling). The body that does
+ * not travel is a refusal, not a crash: one envelope, the client's
+ * verdict at status 0.
+ */
+interface Serialized {
+  readonly payload?: string;
+  readonly refusal?: HttpAnswer;
+}
+
+function serialize(body: unknown): Serialized {
+  if (body === undefined) return {};
+  try {
+    return { payload: JSON.stringify(body) };
+  } catch {
+    return {
+      refusal: {
+        status: 0,
+        document: {
+          error:
+            'the body does not travel as one JSON document — the serializer refused it ' +
+            '(valid JSON can still nest past the serializer\u2019s depths)',
+        },
+      },
+    };
+  }
+}
+
 /** The wire's verdict as the client received it — or the client's own refusal at status 0. */
 export interface HttpAnswer {
   /**
@@ -64,7 +94,9 @@ export function httpCall(binding: Binding, call: HttpCall): Promise<HttpAnswer> 
       url.searchParams.append(key, value);
     }
   }
-  const payload = call.body === undefined ? undefined : JSON.stringify(call.body);
+  const serialized = serialize(call.body);
+  if (serialized.refusal !== undefined) return Promise.resolve(serialized.refusal);
+  const payload = serialized.payload;
   const transport = url.protocol === 'https:' ? requestHttps : requestHttp;
   return new Promise((resolve) => {
     let settled = false;

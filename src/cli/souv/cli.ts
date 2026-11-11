@@ -118,9 +118,23 @@ memory
 
 /** The one stdout gesture: exactly one JSON document, then the exit code —
  * the write is synchronous: the parser-error paths end the loop right
- * after it, and a piped stdout must not lose the verdict on exit. */
+ * after it, and a piped stdout must not lose the verdict on exit. The
+ * document's own serialization is guarded: a served tree the
+ * serializer refuses is a refusal, not a crash (today the wire's own
+ * c.json 500s first — this is the day that ever changes). */
 function emitAnswer(answer: SouvAnswer): void {
-  writeSync(1, `${JSON.stringify(answer.document)}\n`);
+  let line: string;
+  try {
+    line = `${JSON.stringify(answer.document)}\n`;
+  } catch {
+    line = `${JSON.stringify({
+      error: 'the answer does not travel as one JSON document — the serializer refused it',
+    })}\n`;
+    process.exitCode = 1;
+    writeSync(1, line);
+    return;
+  }
+  writeSync(1, line);
   process.exitCode = answer.exitCode;
 }
 
