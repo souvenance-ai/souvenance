@@ -181,22 +181,33 @@ export class OwnershipLock {
    * never a write, no release implied: true only while the document's
    * claim is ours AND its heartbeat is still fresh. A caller runs any
    * mutative settle against what the claim guards behind this: a
-   * foreign document (the takeover's evidence) or a silent one (the
-   * copy blocked the heartbeat past the staleness) returns false, and
-   * the caller settles with its refusal rather than continue under a
-   * claim that is no longer its own.
+   * foreign document (the takeover's evidence), a silent one (the
+   * copy blocked the heartbeat past the staleness), or a malformed
+   * one (a hand-written `null` is legal JSON; a string or an array
+   * names no owner — the shapes distinguished, never coerced, the
+   * credential authoring's own law) returns false, and the caller
+   * settles with its refusal rather than continue under a claim that
+   * is no longer its own.
    */
   verifyClaim(): boolean {
-    let held: LockDocument;
     try {
-      held = OwnershipLock.#readHeld(this.#lockPath);
+      const raw = OwnershipLock.#readHeld(this.#lockPath) as unknown;
+      // The whole verification rides inside the try: a document that
+      // parses but is not a lock document is an unverified claim — the
+      // same false an unreadable file returns, never a throw past the
+      // witness (a thrown verify would send a completed copy's caller
+      // into its failure cleanup as if the copy had died).
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+        return false;
+      }
+      const held = raw as LockDocument;
+      return held.claim === this.#claim && Date.now() - held.heartbeat_at <= this.#staleMs;
     } catch {
       // No readable document: there is no claim to verify, and a
       // settle must not run — the caller's refusal can name the file
       // and let the operator read the module's own teaching.
       return false;
     }
-    return held.claim === this.#claim && Date.now() - held.heartbeat_at <= this.#staleMs;
   }
 
   release(): void {
