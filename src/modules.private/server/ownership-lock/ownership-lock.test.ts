@@ -122,9 +122,41 @@ test('verifyClaim reads the document — ours and beating is true, stale or fore
       }),
     );
     assert.equal(takeover.verifyClaim(), false, 'a foreign claim is not ours to settle behind');
-    // A foreign document under this hand is the takeover's own law: the
-    // release refuses rather than delete the successor's claim.
+    // A foreign document under either hand is the takeover's own law:
+    // the release refuses rather than delete the successor's claim —
+    // and the refusal still clears the refusing hand's heartbeat
+    // timer: an unclaimed lock never beats again, or its orphan timer
+    // would outlive the test's directory and read a deleted document
+    // uncaught.
+    assert.throws(() => lock.release(), /ownership moved to pid/);
     assert.throws(() => takeover.release(), /ownership moved to pid/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('verifyClaim reads a malformed document as unverified — null, string, array, no throw', () => {
+  const dir = tempDir();
+  try {
+    const lockPath = join(dir, 'main.lock');
+    const lock = OwnershipLock.acquire(lockPath, { heartbeatMs: 60_000 });
+    const doc = readDoc(lockPath);
+    // `null` is legal JSON: the read and the parse both succeed, the
+    // document names no owner — an unverified claim, false, never a
+    // throw past the witness.
+    writeFileSync(lockPath, 'null');
+    assert.equal(lock.verifyClaim(), false);
+    // The rest of the malformed family, the same one spelling: a
+    // string, an array — shapes distinguished, never coerced.
+    writeFileSync(lockPath, '"a hand wrote a string"');
+    assert.equal(lock.verifyClaim(), false);
+    writeFileSync(lockPath, '[]');
+    assert.equal(lock.verifyClaim(), false);
+    // The claim's own document restored, the claim never moved: the
+    // healthy shape reads true again.
+    writeFileSync(lockPath, JSON.stringify(doc));
+    assert.equal(lock.verifyClaim(), true);
+    lock.release();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
