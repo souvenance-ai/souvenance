@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { test } from 'vitest';
+import { bootTestWire } from '../../modules.private/cli/test-wire/test-wire.ts';
 
 const REPO = process.cwd();
 
@@ -52,4 +53,44 @@ test('--help works bindingless — the bin\u2019s own door, no envelope demanded
   const run = await runBin(['--help'], bindingless());
   assert.equal(run.code, 0);
   assert.match(run.stdout, /memory/);
+});
+
+test('the parser\u2019s refusals teach on stdout — one envelope, exit 1 (a missing option value)', async () => {
+  const run = await runBin(['memory', 'store', 'hello', '--kind'], bindingless());
+  assert.equal(run.code, 1);
+  const document = JSON.parse(run.stdout) as { error: unknown };
+  assert.match(String(document.error), /--kind/);
+});
+
+test('an unknown option refuses in the envelope\u2019s voice', async () => {
+  const run = await runBin(['memory', 'list', '--nope'], bindingless());
+  assert.equal(run.code, 1);
+  const document = JSON.parse(run.stdout) as { error: unknown };
+  assert.match(String(document.error), /--nope|unknown option/i);
+});
+
+test('an unknown command refuses in the envelope\u2019s voice', async () => {
+  const run = await runBin(['frobnicate'], bindingless());
+  assert.equal(run.code, 1);
+  const document = JSON.parse(run.stdout) as { error: unknown };
+  assert.match(String(document.error), /frobnicate|unknown command/i);
+});
+
+test('a malformed numeric flag rides to the wire\u2019s judge — the truth, not a silent parse', async () => {
+  // parseInt('2.5') was 2 — silently accepted. Number('2.5') is 2.5,
+  // and the wire's int shape refuses it with its teaching.
+  const wire = await bootTestWire();
+  try {
+    const env = {
+      ...process.env,
+      SOUVENANCE_URL: wire.store.url,
+      SOUVENANCE_TOKEN: wire.store.token,
+    };
+    const run = await runBin(['memory', 'list', '--limit', '2.5'], env);
+    assert.equal(run.code, 1);
+    const document = JSON.parse(run.stdout) as { error: unknown };
+    assert.match(String(document.error), /limit|integer|expected/i);
+  } finally {
+    await wire.close();
+  }
 });

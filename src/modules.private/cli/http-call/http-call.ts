@@ -88,9 +88,11 @@ export function httpCall(binding: Binding, call: HttpCall): Promise<HttpAnswer> 
     try {
       client = transport(
         {
-          // The host as the socket's own option — the probe's lesson:
-          // an IPv6 literal travels as-is, no URL reassembly.
-          hostname: url.hostname,
+          // The host as the socket's own option (the probe's lesson: no
+          // URL reassembly) — and the URL parser's brackets leave here:
+          // the option wants the bare literal (`::1`), the bracketed
+          // form is a name the resolver chases (ENOTFOUND).
+          hostname: url.hostname.startsWith('[') ? url.hostname.slice(1, -1) : url.hostname,
           port: url.port === '' ? undefined : Number(url.port),
           path: `${url.pathname}${url.search}`,
           method: call.method.toUpperCase(),
