@@ -50,7 +50,7 @@ export async function bootTestWire(): Promise<TestWire> {
     `${JSON.stringify({ management: [{ agent: 'valentin', secret: MANAGEMENT_SECRET }] }, null, 2)}\n`,
     'utf8',
   );
-  let running: RunningServer | undefined;
+  let running: RunningServer;
   try {
     running = await startServer({
       port: 0,
@@ -69,40 +69,40 @@ export async function bootTestWire(): Promise<TestWire> {
     url: `http://127.0.0.1:${running.port}`,
     token: MANAGEMENT_SECRET,
   };
-  const birth = await httpCall(management, {
-    method: 'post',
-    path: '/stores',
-    body: { name: STORE_NAME },
-  });
-  if (birth.status !== 201) {
+  try {
+    const birth = await httpCall(management, {
+      method: 'post',
+      path: '/stores',
+      body: { name: STORE_NAME },
+    });
+    if (birth.status !== 201) {
+      throw new Error(`the test wire's birth refused: ${JSON.stringify(birth.document)}`);
+    }
+    const mint = await httpCall(management, {
+      method: 'post',
+      path: `/stores/${STORE_NAME}/grants`,
+      body: { agent: AGENT, mode: 'rw' },
+    });
+    if (mint.status !== 201 || typeof mint.document !== 'object' || mint.document === null) {
+      throw new Error(`the test wire's mint refused: ${JSON.stringify(mint.document)}`);
+    }
+    const { secret } = mint.document as { secret: unknown };
+    if (typeof secret !== 'string') {
+      throw new Error('the test wire\u2019s mint served no secret');
+    }
+    return {
+      management,
+      store: { url: management.url, token: secret },
+      storeName: STORE_NAME,
+      agent: AGENT,
+      close: async () => {
+        await running.close();
+        rmSync(dir, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
     await running.close();
     rmSync(dir, { recursive: true, force: true });
-    throw new Error(`the test wire's birth refused: ${JSON.stringify(birth.document)}`);
+    throw error;
   }
-  const mint = await httpCall(management, {
-    method: 'post',
-    path: `/stores/${STORE_NAME}/grants`,
-    body: { agent: AGENT, mode: 'rw' },
-  });
-  if (mint.status !== 201 || typeof mint.document !== 'object' || mint.document === null) {
-    await running.close();
-    rmSync(dir, { recursive: true, force: true });
-    throw new Error(`the test wire's mint refused: ${JSON.stringify(mint.document)}`);
-  }
-  const { secret } = mint.document as { secret: unknown };
-  if (typeof secret !== 'string') {
-    await running.close();
-    rmSync(dir, { recursive: true, force: true });
-    throw new Error('the test wire\u2019s mint served no secret');
-  }
-  return {
-    management,
-    store: { url: management.url, token: secret },
-    storeName: STORE_NAME,
-    agent: AGENT,
-    close: async () => {
-      await running.close();
-      rmSync(dir, { recursive: true, force: true });
-    },
-  };
 }

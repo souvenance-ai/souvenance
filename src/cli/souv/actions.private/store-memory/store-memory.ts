@@ -3,14 +3,14 @@
  * authored summary, the metadata, relations born with it, and the
  * birth curation. The local gates judge before any call (fail-fast):
  * the content and the kind by the missing-arg door, the JSON flags by
- * their own parse. The wire judges the grammar; the client judges only
- * that a JSON flag parses — one grammar, one judge.
+ * their own parse — the client judges only that a flag parses, the
+ * wire judges the grammar. One grammar, one judge.
  */
 import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
 import { missingArg } from '../../../../modules.private/cli/missing-arg/missing-arg.ts';
 import type { Binding } from '../../../../modules.private/mcp/binding/binding.ts';
-import type { SouvAnswer } from '../answer/answer.ts';
-import { answerOf } from '../answer/answer.ts';
+import { answerOf, type SouvAnswer } from '../answer/answer.ts';
+import { refusalOf } from '../refusal/refusal.ts';
 
 export interface StoreMemoryArgs {
   readonly content?: string;
@@ -22,38 +22,28 @@ export interface StoreMemoryArgs {
 }
 
 /** The JSON flags' local gate: parse or refuse — the shape is the wire's verdict. */
-function parseFlag(
-  flag: string,
-  raw: string | undefined,
-): { parsed?: unknown; refusal?: SouvAnswer } {
+interface ParsedFlag {
+  readonly parsed?: unknown;
+  readonly refusal?: SouvAnswer;
+}
+
+function parseFlag(flag: string, raw: string | undefined): ParsedFlag {
   if (raw === undefined) return {};
   try {
     return { parsed: JSON.parse(raw) };
   } catch {
-    return {
-      refusal: {
-        document: { error: `${flag} must be one JSON document — this does not parse` },
-        exitCode: 1,
-      },
-    };
+    return { refusal: refusalOf(`${flag} must be one JSON document — this does not parse`) };
   }
 }
 
 export async function storeMemory(binding: Binding, args: StoreMemoryArgs): Promise<SouvAnswer> {
   if (missingArg(args.content)) {
-    return {
-      document: { error: "the content is missing — pass it as the command's first argument" },
-      exitCode: 1,
-    };
+    return refusalOf("the content is missing — pass it as the command's first argument");
   }
   if (missingArg(args.kind)) {
-    return {
-      document: {
-        error:
-          'the kind is missing — pass --kind: a memory is born classified (the vocabulary is free)',
-      },
-      exitCode: 1,
-    };
+    return refusalOf(
+      'the kind is missing — pass --kind: a memory is born classified (the vocabulary is free)',
+    );
   }
   const metadata = parseFlag('--metadata', args.metadata);
   if (metadata.refusal !== undefined) return metadata.refusal;

@@ -9,7 +9,7 @@
  * absence ride to the action's own gate (the fork's precedent).
  */
 import { program } from 'commander';
-import pkg from '../../../package.json' with { type: 'json' };
+import manifest from '../../../package.json' with { type: 'json' };
 import { collectStrings } from '../../modules.private/cli/collect-strings/collect-strings.ts';
 import { ConfigError } from '../../modules.private/config/config.ts';
 import { resolveBinding, type Binding } from '../../modules.private/mcp/binding/binding.ts';
@@ -25,7 +25,7 @@ import { storeMemory } from './actions.private/store-memory/store-memory.ts';
 program
   .name('souv')
   .description('the client of a running souvenance server — one JSON document per invocation')
-  .version(pkg.version);
+  .version(manifest.version);
 
 const memory = program
   .command('memory')
