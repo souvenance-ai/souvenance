@@ -96,11 +96,22 @@ test('--depth expands the out-edges — the projection walks', async () => {
       body: { to, kind: 'continues' },
     });
     assert.equal(linked.status, 201);
+    // Depth 1: raw edges — the target stays unreached (the server's own
+    // default, which is why the flag's FORWARDING needs the deeper case
+    // beside it: dropping --depth here would leave this half passing).
     const answer = await getMemory(wire.store, { id: from, depth: 1 });
     assert.equal(answer.exitCode, 0);
     const node = answer.document as { relations: { out: readonly { to_id: string }[] } };
     assert.equal(node.relations.out.length, 1);
     assert.equal(node.relations.out[0]?.to_id, to);
+    // Depth 2: the edge's target carries the expanded memory — the flag
+    // rode, the projection walked.
+    const deeper = await getMemory(wire.store, { id: from, depth: 2 });
+    assert.equal(deeper.exitCode, 0);
+    const walked = deeper.document as {
+      relations: { out: readonly { to_id: string; target: { id: string } | null }[] };
+    };
+    assert.equal(walked.relations.out[0]?.target?.id, to);
   } finally {
     await wire.close();
   }
