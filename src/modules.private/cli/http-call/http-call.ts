@@ -25,7 +25,7 @@ import type { Binding } from '../../mcp/binding/binding.ts';
  * its 30 s, and the client's deadline is the same number. One constant,
  * both sides of the wire, no drift to reconcile.
  */
-export const REQUEST_DEADLINE_MS = 30_000;
+const REQUEST_DEADLINE_MS = 30_000;
 
 /** One call: the method, the concrete route path, the query, the body. */
 export interface HttpCall {

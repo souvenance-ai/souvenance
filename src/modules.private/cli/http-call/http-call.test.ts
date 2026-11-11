@@ -2,9 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { test, vi } from 'vitest';
 import { bootTestWire } from '../test-wire/test-wire.ts';
-import { httpCall, REQUEST_DEADLINE_MS } from './http-call.ts';
-
-type RawServer = Server;
+import { httpCall } from './http-call.ts';
 
 /** One plain HTTP server on an ephemeral port — the client-mechanics fixtures. */
 async function listen(
@@ -12,7 +10,7 @@ async function listen(
     req: import('node:http').IncomingMessage,
     res: import('node:http').ServerResponse,
   ) => void,
-): Promise<{ server: RawServer; url: string }> {
+): Promise<{ server: Server; url: string }> {
   const server = createServer(serve);
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -23,7 +21,7 @@ async function listen(
   return { server, url: `http://127.0.0.1:${address.port}` };
 }
 
-async function closeServer(server: RawServer): Promise<void> {
+async function closeServer(server: Server): Promise<void> {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
@@ -134,10 +132,20 @@ test('a closed port teaches the boot — the reachability refusal, exit-1 class'
   );
 });
 
-test('a dribbling server dies at the deadline — the verdict is absolute over headers, the connection freed', async () => {
-  // Partial headers, forever (the probe's fixture): the status line
-  // lands once, then one byte per heartbeat extends a header that never
-  // sees its CR LF terminator — the parser stays content and incomplete.
+/**
+ * The deadline's fixture: a server that answers only in part, forever —
+ * `headers` never completes the header block, `body` streams a body
+ * that never ends. The arrival gate keeps the clock from moving before
+ * the server holds the connection (a pre-connect destroy would leave
+ * the handler unrun and the close unobserved); the close signal is what
+ * the settle must fire.
+ */
+async function partialServer(frame: 'headers' | 'body'): Promise<{
+  server: Server;
+  url: string;
+  requestArrived: Promise<void>;
+  connectionClosed: Promise<void>;
+}> {
   let signalArrived: () => void = () => {};
   const requestArrived = new Promise<void>((resolve) => {
     signalArrived = resolve;
@@ -149,93 +157,73 @@ test('a dribbling server dies at the deadline — the verdict is absolute over h
   const server = createServer((_req, res) => {
     signalArrived();
     const socket = res.socket;
-    socket?.write('HTTP/1.1 200 OK\r\n');
-    const dribble = setInterval(() => socket?.write('x'), 200);
+    socket?.write(frame === 'headers' ? 'HTTP/1.1 200 OK\r\n' : 'HTTP/1.1 200 OK\r\n\r\n');
+    const heartbeat = setInterval(() => socket?.write('x'), 200);
     socket?.once('close', () => {
-      clearInterval(dribble);
+      clearInterval(heartbeat);
       signalClosed();
     });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address() as { address: string; port: number };
+  const address = server.address();
+  assert.ok(address !== null && typeof address === 'object');
+  return { server, url: `http://127.0.0.1:${address.port}`, requestArrived, connectionClosed };
+}
+
+test('a dribbling server dies at the deadline — the verdict is absolute over headers, the connection freed', async () => {
+  const fixture = await partialServer('headers');
   try {
-    const binding = { url: `http://127.0.0.1:${address.port}`, token: 'souv-x' };
+    const binding = { url: fixture.url, token: 'souv-x' };
     // The deadline is 30 s of wall clock — the judge is moved to its
     // firing, the real socket IO keeps flowing (fake timers own only
-    // the clocks). The request's arrival is awaited FIRST: the clock
-    // never moves before the server holds the connection — a pre-connect
-    // destroy would leave the handler unrun and the close unobserved.
+    // the clocks).
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const pending = httpCall(binding, { method: 'get', path: '/memories' });
-    await requestArrived;
-    const answer = await vi.advanceTimersByTimeAsync(REQUEST_DEADLINE_MS).then(() => pending);
+    await fixture.requestArrived;
+    const answer = await vi.advanceTimersByTimeAsync(30_000).then(() => pending);
     assert.equal(answer.status, 0);
     assert.match(
       String((answer.document as { error: string }).error),
-      new RegExp(`did not answer within ${REQUEST_DEADLINE_MS / 1000} s`),
+      /did not answer within 30 s/,
     );
     // The settle tore the connection down: the server observes its
     // close promptly, on the real clock (the leaked-promise race names
     // a settle that freed nothing).
     vi.useRealTimers();
     const closed = await Promise.race([
-      connectionClosed.then(() => true),
+      fixture.connectionClosed.then(() => true),
       new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_000)),
     ]);
     assert.equal(closed, true, 'the settle must free the connection');
   } finally {
     vi.useRealTimers();
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    fixture.server.closeAllConnections();
+    await new Promise<void>((resolve) => fixture.server.close(() => resolve()));
   }
 });
 
 test('a never-ending body dies at the deadline too — the absolute judge covers the body', async () => {
-  // Headers complete once, body forever: the message closes only with
-  // its connection. The client reads the body chunks — the deadline is
-  // still the judge, and the settle frees the socket. The request's
-  // arrival is awaited before the clock moves (the close listener lives
-  // in the server's handler).
-  let signalArrived: () => void = () => {};
-  const requestArrived = new Promise<void>((resolve) => {
-    signalArrived = resolve;
-  });
-  let signalClosed: () => void = () => {};
-  const connectionClosed = new Promise<void>((resolve) => {
-    signalClosed = resolve;
-  });
-  const server = createServer((_req, res) => {
-    signalArrived();
-    const socket = res.socket;
-    socket?.write('HTTP/1.1 200 OK\r\n\r\n');
-    const stream = setInterval(() => socket?.write('x'), 200);
-    socket?.once('close', () => {
-      clearInterval(stream);
-      signalClosed();
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address() as { address: string; port: number };
+  const fixture = await partialServer('body');
   try {
-    const binding = { url: `http://127.0.0.1:${address.port}`, token: 'souv-x' };
+    const binding = { url: fixture.url, token: 'souv-x' };
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const pending = httpCall(binding, { method: 'get', path: '/memories' });
-    await requestArrived;
-    const answer = await vi.advanceTimersByTimeAsync(REQUEST_DEADLINE_MS).then(() => pending);
+    await fixture.requestArrived;
+    const answer = await vi.advanceTimersByTimeAsync(30_000).then(() => pending);
     assert.equal(answer.status, 0);
     assert.match(
       String((answer.document as { error: string }).error),
-      new RegExp(`did not answer within ${REQUEST_DEADLINE_MS / 1000} s`),
+      /did not answer within 30 s/,
     );
     vi.useRealTimers();
     const closed = await Promise.race([
-      connectionClosed.then(() => true),
+      fixture.connectionClosed.then(() => true),
       new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_000)),
     ]);
     assert.equal(closed, true, 'the settle must free the connection');
   } finally {
     vi.useRealTimers();
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    fixture.server.closeAllConnections();
+    await new Promise<void>((resolve) => fixture.server.close(() => resolve()));
   }
 });

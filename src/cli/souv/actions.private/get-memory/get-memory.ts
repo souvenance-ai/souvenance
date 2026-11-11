@@ -8,6 +8,7 @@ import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts
 import { missingArg } from '../../../../modules.private/cli/missing-arg/missing-arg.ts';
 import type { Binding } from '../../../../modules.private/mcp/binding/binding.ts';
 import { answerOf, type SouvAnswer } from '../answer/answer.ts';
+import { refusalOf } from '../refusal/refusal.ts';
 
 export interface GetMemoryArgs {
   readonly id?: string;
@@ -16,12 +17,7 @@ export interface GetMemoryArgs {
 
 export async function getMemory(binding: Binding, args: GetMemoryArgs): Promise<SouvAnswer> {
   if (missingArg(args.id)) {
-    return {
-      document: {
-        error: "the id is missing — pass the memory's id as the command's first argument",
-      },
-      exitCode: 1,
-    };
+    return refusalOf("the id is missing — pass the memory's id as the command's first argument");
   }
   const query = new URLSearchParams();
   if (args.depth !== undefined) query.set('depth', String(args.depth));
