@@ -276,7 +276,10 @@ program
   .description('the bridge\u2019s bin door — MCP over stdio, the environment binds')
   // Not the run() door: stdout is protocol-only here (the MCP client
   // parses it byte-for-byte), so the door's own refusals speak on
-  // stderr and the process exit carries the verdict.
+  // stderr and the process exit carries the verdict. The parser's
+  // refusals stay the bin's voice — the envelope on stdout (the
+  // bin-wide letter, every door): each refusal speaks at its layer,
+  // and a session's stdout is silent until the first line is spoken.
   .action((): Promise<void> => mcpDoor(process.env));
 
 /** The one stdout gesture: the door's own document — one JSON document,
