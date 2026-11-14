@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { test } from 'vitest';
 import { bootTestWire } from '../../modules.private/cli/test-wire/test-wire.ts';
 
@@ -117,5 +118,37 @@ test('a body that does not travel refuses in the envelope\u2019s voice — valid
     assert.match(String(document.error), /does not travel/);
   } finally {
     await wire.close();
+  }
+});
+
+test('a rogue answer that parses but cannot re-serialize refuses in the envelope\u2019s voice — the response side\u2019s guard', async () => {
+  // The parse-passes-stringify asymmetry rides the RESPONSE too: a
+  // foreign server answers 200 with one deep JSON document — httpCall
+  // parses it, and the tree JSON.stringify refuses. The bin serves its
+  // own envelope, exit 1: one document per invocation, never a crash.
+  const deep = '{"a": ' + '['.repeat(16_000) + '1' + ']'.repeat(16_000) + '}';
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(deep);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  try {
+    const address = server.address();
+    assert.ok(address !== null && typeof address === 'object');
+    const env = {
+      ...process.env,
+      SOUVENANCE_URL: `http://127.0.0.1:${address.port}`,
+      SOUVENANCE_TOKEN: 'souv-x',
+    };
+    const run = await runBin(['memory', 'list'], env);
+    assert.equal(run.code, 1);
+    const document = JSON.parse(run.stdout) as { error: unknown };
+    assert.match(String(document.error), /does not travel/);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
