@@ -9,7 +9,7 @@ import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts
 import { missingArg } from '../../../../modules.private/cli/missing-arg/missing-arg.ts';
 import type { Binding } from '../../../../modules.private/mcp/binding/binding.ts';
 import { answerOf, type SouvAnswer } from '../answer/answer.ts';
-import { dotSegmentRefusal } from '../dot-segment/dot-segment.ts';
+import { memoryId } from '../memory-id/memory-id.ts';
 import { jsonFlag } from '../json-flag/json-flag.ts';
 import { refusalOf } from '../refusal/refusal.ts';
 
@@ -26,11 +26,8 @@ export async function supersedeMemory(
   binding: Binding,
   args: SupersedeMemoryArgs,
 ): Promise<SouvAnswer> {
-  if (missingArg(args.id)) {
-    return refusalOf("the id is missing — pass the memory's id as the command's first argument");
-  }
-  const dot = dotSegmentRefusal(args.id);
-  if (dot !== undefined) return dot;
+  const addressed = memoryId(args.id);
+  if (addressed.state === 'refuse') return addressed.refusal;
   if (missingArg(args.content)) {
     return refusalOf(
       "the content is missing — pass the successor's content as the command's second argument",
@@ -47,7 +44,7 @@ export async function supersedeMemory(
   if (relations.parsed !== undefined) body['relations'] = relations.parsed;
   const answer = await httpCall(binding, {
     method: 'post',
-    path: `/memories/${encodeURIComponent(args.id)}/supersede`,
+    path: `/memories/${encodeURIComponent(addressed.id)}/supersede`,
     body,
   });
   return answerOf(answer.status, answer.document);

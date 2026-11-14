@@ -3,24 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'vitest';
 import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
 import { MAX_SUMMARY_LENGTH } from '../../../../modules.private/store/store.ts';
-import {
-  bootTestWire,
-  type TestWire,
-} from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import { seedMemory } from '../../../../modules.private/cli/seed-memory/seed-memory.ts';
+import { bootTestWire } from '../../../../modules.private/cli/test-wire/test-wire.ts';
 import { mergeMemories } from './merge-memories.ts';
-
-/** One memory seeded through the wire — the action under test stays the only subject. */
-async function seed(wire: TestWire, body: Record<string, unknown>): Promise<string> {
-  const answer = await httpCall(wire.store, { method: 'post', path: '/memories', body });
-  assert.equal(answer.status, 201, `the seed refused: ${JSON.stringify(answer.document)}`);
-  return (answer.document as { id: string }).id;
-}
 
 test('the fusion serves the wire’s 201 — the head exists, the sources die merged, bridged as provenance', async () => {
   const wire = await bootTestWire();
   try {
-    const first = await seed(wire, { content: 'the first', kind: 'note' });
-    const second = await seed(wire, { content: 'the second', kind: 'note' });
+    const first = await seedMemory(wire, { content: 'the first', kind: 'note' });
+    const second = await seedMemory(wire, { content: 'the second', kind: 'note' });
     const answer = await mergeMemories(wire.store, {
       ids: [first, second],
       content: 'the fused',
@@ -54,7 +45,7 @@ test('the fusion serves the wire’s 201 — the head exists, the sources die me
 test('the ≥2 is the wire’s verdict — one source, its 400 teaching verbatim', async () => {
   const wire = await bootTestWire();
   try {
-    const lone = await seed(wire, { content: 'the lone', kind: 'note' });
+    const lone = await seedMemory(wire, { content: 'the lone', kind: 'note' });
     const answer = await mergeMemories(wire.store, { ids: [lone], content: 'the fused' });
     assert.equal(answer.exitCode, 1);
     assert.match(String((answer.document as { error: string }).error), /at least 2 memories/);
@@ -69,8 +60,8 @@ test('the ≥2 is the wire’s verdict — one source, its 400 teaching verbatim
 test('the kind the disagreeing sources demand — the 400 names the candidates, verbatim', async () => {
   const wire = await bootTestWire();
   try {
-    const decision = await seed(wire, { content: 'the decision', kind: 'decision' });
-    const note = await seed(wire, { content: 'the note', kind: 'note' });
+    const decision = await seedMemory(wire, { content: 'the decision', kind: 'decision' });
+    const note = await seedMemory(wire, { content: 'the note', kind: 'note' });
     const refused = await mergeMemories(wire.store, {
       ids: [decision, note],
       content: 'the fused',
@@ -108,7 +99,7 @@ test('the content is demanded locally — one envelope, no call', async () => {
 test('the wire’s refusals are served verbatim — the unknown source, the ceiling, the metadata gate', async () => {
   const wire = await bootTestWire();
   try {
-    const known = await seed(wire, { content: 'the known', kind: 'note' });
+    const known = await seedMemory(wire, { content: 'the known', kind: 'note' });
     const unknown = await mergeMemories(wire.store, {
       ids: [known, randomUUID()],
       content: 'the fused',
@@ -116,7 +107,7 @@ test('the wire’s refusals are served verbatim — the unknown source, the ceil
     assert.equal(unknown.exitCode, 1);
     assert.match(String((unknown.document as { error: string }).error), /not found/);
     const ceiling = await mergeMemories(wire.store, {
-      ids: [known, await seed(wire, { content: 'the other', kind: 'note' })],
+      ids: [known, await seedMemory(wire, { content: 'the other', kind: 'note' })],
       content: 'the fused',
       summary: 'x'.repeat(MAX_SUMMARY_LENGTH + 1),
     });
@@ -140,8 +131,8 @@ test('the wire’s refusals are served verbatim — the unknown source, the ceil
 test('the hot status unions — a hot source heats the fusion', async () => {
   const wire = await bootTestWire();
   try {
-    const hot = await seed(wire, { content: 'the hot', kind: 'note', hot: true });
-    const cold = await seed(wire, { content: 'the cold', kind: 'note' });
+    const hot = await seedMemory(wire, { content: 'the hot', kind: 'note', hot: true });
+    const cold = await seedMemory(wire, { content: 'the cold', kind: 'note' });
     const answer = await mergeMemories(wire.store, { ids: [hot, cold], content: 'the fused' });
     assert.equal(answer.exitCode, 0);
     const head = (answer.document as { id: string }).id;

@@ -3,23 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'vitest';
 import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
 import { MAX_SUMMARY_LENGTH } from '../../../../modules.private/store/store.ts';
-import {
-  bootTestWire,
-  type TestWire,
-} from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import { seedMemory } from '../../../../modules.private/cli/seed-memory/seed-memory.ts';
+import { bootTestWire } from '../../../../modules.private/cli/test-wire/test-wire.ts';
 import { supersedeMemory } from './supersede-memory.ts';
-
-/** One memory seeded through the wire — the action under test stays the only subject. */
-async function seed(wire: TestWire, body: Record<string, unknown>): Promise<string> {
-  const answer = await httpCall(wire.store, { method: 'post', path: '/memories', body });
-  assert.equal(answer.status, 201, `the seed refused: ${JSON.stringify(answer.document)}`);
-  return (answer.document as { id: string }).id;
-}
 
 test('the revision serves the wire’s 201 — the successor exists, the old turns superseded', async () => {
   const wire = await bootTestWire();
   try {
-    const old = await seed(wire, { content: 'the draft', kind: 'note' });
+    const old = await seedMemory(wire, { content: 'the draft', kind: 'note' });
     const answer = await supersedeMemory(wire.store, { id: old, content: 'the revised' });
     assert.equal(answer.exitCode, 0);
     const successor = (answer.document as { id: string }).id;
@@ -38,7 +29,7 @@ test('the revision serves the wire’s 201 — the successor exists, the old tur
 test('the reclassification rides — the body’s kind wins over the inherited one', async () => {
   const wire = await bootTestWire();
   try {
-    const old = await seed(wire, { content: 'the draft', kind: 'note' });
+    const old = await seedMemory(wire, { content: 'the draft', kind: 'note' });
     const answer = await supersedeMemory(wire.store, {
       id: old,
       content: 'the revised',
@@ -56,8 +47,8 @@ test('the reclassification rides — the body’s kind wins over the inherited o
 test('the source’s outgoing edges inherit verbatim when the body births none', async () => {
   const wire = await bootTestWire();
   try {
-    const old = await seed(wire, { content: 'the draft', kind: 'note' });
-    const target = await seed(wire, { content: 'the related', kind: 'note' });
+    const old = await seedMemory(wire, { content: 'the draft', kind: 'note' });
+    const target = await seedMemory(wire, { content: 'the related', kind: 'note' });
     const linked = await httpCall(wire.store, {
       method: 'post',
       path: `/memories/${old}/link`,
@@ -84,9 +75,9 @@ test('the source’s outgoing edges inherit verbatim when the body births none',
 test('explicit relations replace the inheritance — the body births the successor’s own', async () => {
   const wire = await bootTestWire();
   try {
-    const old = await seed(wire, { content: 'the draft', kind: 'note' });
-    const inherited = await seed(wire, { content: 'the inherited', kind: 'note' });
-    const fresh = await seed(wire, { content: 'the fresh', kind: 'note' });
+    const old = await seedMemory(wire, { content: 'the draft', kind: 'note' });
+    const inherited = await seedMemory(wire, { content: 'the inherited', kind: 'note' });
+    const fresh = await seedMemory(wire, { content: 'the fresh', kind: 'note' });
     await httpCall(wire.store, {
       method: 'post',
       path: `/memories/${old}/link`,
@@ -120,7 +111,7 @@ test('explicit relations replace the inheritance — the body births the success
 test('the hot status transfers — the revision replaces what checkin would have served', async () => {
   const wire = await bootTestWire();
   try {
-    const old = await seed(wire, { content: 'the draft', kind: 'note', hot: true });
+    const old = await seedMemory(wire, { content: 'the draft', kind: 'note', hot: true });
     const answer = await supersedeMemory(wire.store, { id: old, content: 'the revised' });
     assert.equal(answer.exitCode, 0);
     const successor = (answer.document as { id: string }).id;
@@ -204,7 +195,7 @@ test('the wire’s refusals are served verbatim — the unknown, the status figh
     });
     assert.equal(unknown.exitCode, 1);
     assert.match(String((unknown.document as { error: string }).error), /not found/);
-    const doomed = await seed(wire, { content: 'born to die', kind: 'note' });
+    const doomed = await seedMemory(wire, { content: 'born to die', kind: 'note' });
     const deprecated = await httpCall(wire.store, {
       method: 'post',
       path: `/memories/${doomed}/deprecate`,

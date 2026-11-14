@@ -1,18 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
-import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
-import {
-  bootTestWire,
-  type TestWire,
-} from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import { seedMemory } from '../../../../modules.private/cli/seed-memory/seed-memory.ts';
+import { bootTestWire } from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import { hotMemory } from '../hot-memory/hot-memory.ts';
+import { linkMemories } from '../link-memories/link-memories.ts';
 import { checkout } from './checkout.ts';
-
-/** One memory seeded through the wire — the action under test stays the only subject. */
-async function seed(wire: TestWire, body: Record<string, unknown>): Promise<string> {
-  const answer = await httpCall(wire.store, { method: 'post', path: '/memories', body });
-  assert.equal(answer.status, 201, `the seed refused: ${JSON.stringify(answer.document)}`);
-  return (answer.document as { id: string }).id;
-}
 
 test('the empty store is healthy — nothing to serve, nothing owed', async () => {
   const wire = await bootTestWire();
@@ -30,8 +22,8 @@ test('the empty store is healthy — nothing to serve, nothing owed', async () =
 test('the red verdict names the debts, each with its payment hint', async () => {
   const wire = await bootTestWire();
   try {
-    await seed(wire, { content: 'the first', kind: 'note' });
-    await seed(wire, { content: 'the second', kind: 'note' });
+    await seedMemory(wire, { content: 'the first', kind: 'note' });
+    await seedMemory(wire, { content: 'the second', kind: 'note' });
     const answer = await checkout(wire.store);
     assert.equal(answer.exitCode, 0);
     const report = answer.document as {
@@ -67,23 +59,18 @@ test('the red verdict names the debts, each with its payment hint', async () => 
 test('the round-trip: store → red → pay → green — the light the agent watches', async () => {
   const wire = await bootTestWire();
   try {
-    const first = await seed(wire, { content: 'the session note', kind: 'note' });
-    const second = await seed(wire, { content: 'the session fact', kind: 'fact' });
+    const first = await seedMemory(wire, { content: 'the session note', kind: 'note' });
+    const second = await seedMemory(wire, { content: 'the session fact', kind: 'fact' });
     const red = await checkout(wire.store);
     assert.equal((red.document as { healthy: boolean }).healthy, false, 'the session opens a debt');
-    // The payment: a hot block exists, the islands hold an edge.
-    const heated = await httpCall(wire.store, {
-      method: 'post',
-      path: `/memories/${first}/hot`,
-      body: { hot: true },
-    });
-    assert.equal(heated.status, 204);
-    const linked = await httpCall(wire.store, {
-      method: 'post',
-      path: `/memories/${first}/link`,
-      body: { to: second, kind: 'continues' },
-    });
-    assert.equal(linked.status, 201);
+    // The payment rides the shipped verbs: a hot block exists, the
+    // islands hold an edge.
+    const heated = await hotMemory(wire.store, { id: first, verdict: 'on' });
+    assert.equal(heated.exitCode, 0);
+    assert.deepEqual(heated.document, { id: first, hot: true });
+    const linked = await linkMemories(wire.store, { id: first, target: second, kind: 'continues' });
+    assert.equal(linked.exitCode, 0);
+    assert.deepEqual(linked.document, { from_id: first, to_id: second, kind: 'continues' });
     const green = await checkout(wire.store);
     assert.equal(green.exitCode, 0);
     const report = green.document as { healthy: boolean; findings: readonly unknown[] };
@@ -97,20 +84,24 @@ test('the round-trip: store → red → pay → green — the light the agent wa
 test('a duplicate title is a debt too — two living memories under one heading', async () => {
   const wire = await bootTestWire();
   try {
-    const first = await seed(wire, { content: '# the plan\nthe body', kind: 'note', hot: true });
-    const second = await seed(wire, {
+    const first = await seedMemory(wire, {
+      content: '# the plan\nthe body',
+      kind: 'note',
+      hot: true,
+    });
+    const second = await seedMemory(wire, {
       content: '# the plan\nanother body',
       kind: 'note',
       hot: true,
     });
     // The other debts are paid in the seed: the block is hot, the pair
     // holds an edge — only the title duplication is left to name.
-    const linked = await httpCall(wire.store, {
-      method: 'post',
-      path: `/memories/${first}/link`,
-      body: { to: second, kind: 'duplicates' },
+    const linked = await linkMemories(wire.store, {
+      id: first,
+      target: second,
+      kind: 'duplicates',
     });
-    assert.equal(linked.status, 201);
+    assert.equal(linked.exitCode, 0);
     const answer = await checkout(wire.store);
     const report = answer.document as {
       healthy: boolean;

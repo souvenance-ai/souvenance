@@ -2,24 +2,15 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'vitest';
 import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
-import {
-  bootTestWire,
-  type TestWire,
-} from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import { seedMemory } from '../../../../modules.private/cli/seed-memory/seed-memory.ts';
+import { bootTestWire } from '../../../../modules.private/cli/test-wire/test-wire.ts';
 import { linkMemories } from './link-memories.ts';
-
-/** One memory seeded through the wire — the action under test stays the only subject. */
-async function seed(wire: TestWire, body: Record<string, unknown>): Promise<string> {
-  const answer = await httpCall(wire.store, { method: 'post', path: '/memories', body });
-  assert.equal(answer.status, 201, `the seed refused: ${JSON.stringify(answer.document)}`);
-  return (answer.document as { id: string }).id;
-}
 
 test('the edge serves the wire’s 201 echo verbatim — and the edge exists', async () => {
   const wire = await bootTestWire();
   try {
-    const from = await seed(wire, { content: 'the source', kind: 'note' });
-    const to = await seed(wire, { content: 'the target', kind: 'note' });
+    const from = await seedMemory(wire, { content: 'the source', kind: 'note' });
+    const to = await seedMemory(wire, { content: 'the target', kind: 'note' });
     const answer = await linkMemories(wire.store, { id: from, target: to, kind: 'continues' });
     assert.equal(answer.exitCode, 0);
     assert.deepEqual(answer.document, { from_id: from, to_id: to, kind: 'continues' });
@@ -42,8 +33,8 @@ test('the edge serves the wire’s 201 echo verbatim — and the edge exists', a
 test('the edge metadata rides — free-form JSON, judged by the wire', async () => {
   const wire = await bootTestWire();
   try {
-    const from = await seed(wire, { content: 'the source', kind: 'note' });
-    const to = await seed(wire, { content: 'the target', kind: 'note' });
+    const from = await seedMemory(wire, { content: 'the source', kind: 'note' });
+    const to = await seedMemory(wire, { content: 'the target', kind: 'note' });
     const answer = await linkMemories(wire.store, {
       id: from,
       target: to,
@@ -98,7 +89,7 @@ test('the gates judge locally — id, target, the born-classified kind, the JSON
 test('the wire’s refusals are served verbatim — the self-edge and the unknown', async () => {
   const wire = await bootTestWire();
   try {
-    const id = await seed(wire, { content: 'the source', kind: 'note' });
+    const id = await seedMemory(wire, { content: 'the source', kind: 'note' });
     const self = await linkMemories(wire.store, { id, target: id, kind: 'continues' });
     assert.equal(self.exitCode, 1);
     assert.match(String((self.document as { error: string }).error), /self/);

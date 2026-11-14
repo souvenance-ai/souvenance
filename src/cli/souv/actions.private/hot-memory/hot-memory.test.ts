@@ -2,23 +2,14 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'vitest';
 import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
-import {
-  bootTestWire,
-  type TestWire,
-} from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import { seedMemory } from '../../../../modules.private/cli/seed-memory/seed-memory.ts';
+import { bootTestWire } from '../../../../modules.private/cli/test-wire/test-wire.ts';
 import { hotMemory } from './hot-memory.ts';
-
-/** One memory seeded through the wire — the action under test stays the only subject. */
-async function seed(wire: TestWire, body: Record<string, unknown>): Promise<string> {
-  const answer = await httpCall(wire.store, { method: 'post', path: '/memories', body });
-  assert.equal(answer.status, 201, `the seed refused: ${JSON.stringify(answer.document)}`);
-  return (answer.document as { id: string }).id;
-}
 
 test('on lands the memory in the hot block — the echo speaks the verdict', async () => {
   const wire = await bootTestWire();
   try {
-    const id = await seed(wire, { content: 'the morning note', kind: 'note' });
+    const id = await seedMemory(wire, { content: 'the morning note', kind: 'note' });
     const answer = await hotMemory(wire.store, { id, verdict: 'on' });
     assert.equal(answer.exitCode, 0);
     assert.deepEqual(answer.document, { id, hot: true });
@@ -32,7 +23,7 @@ test('on lands the memory in the hot block — the echo speaks the verdict', asy
 test('off cools it back to active — the one reversible edge', async () => {
   const wire = await bootTestWire();
   try {
-    const id = await seed(wire, { content: 'the morning note', kind: 'note', hot: true });
+    const id = await seedMemory(wire, { content: 'the morning note', kind: 'note', hot: true });
     const answer = await hotMemory(wire.store, { id, verdict: 'off' });
     assert.equal(answer.exitCode, 0);
     assert.deepEqual(answer.document, { id, hot: false });
@@ -69,7 +60,7 @@ test('the wire’s refusals are served verbatim — the unknown and the terminal
     const unknown = await hotMemory(wire.store, { id: randomUUID(), verdict: 'on' });
     assert.equal(unknown.exitCode, 1);
     assert.match(String((unknown.document as { error: string }).error), /not found/);
-    const old = await seed(wire, { content: 'the draft', kind: 'note' });
+    const old = await seedMemory(wire, { content: 'the draft', kind: 'note' });
     const revised = await httpCall(wire.store, {
       method: 'post',
       path: `/memories/${old}/supersede`,

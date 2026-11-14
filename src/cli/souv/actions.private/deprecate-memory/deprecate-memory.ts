@@ -6,11 +6,9 @@
  * verbatim.
  */
 import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
-import { missingArg } from '../../../../modules.private/cli/missing-arg/missing-arg.ts';
 import type { Binding } from '../../../../modules.private/mcp/binding/binding.ts';
 import { answerOf, type SouvAnswer } from '../answer/answer.ts';
-import { dotSegmentRefusal } from '../dot-segment/dot-segment.ts';
-import { refusalOf } from '../refusal/refusal.ts';
+import { memoryId } from '../memory-id/memory-id.ts';
 
 export interface DeprecateMemoryArgs {
   readonly id?: string;
@@ -20,17 +18,14 @@ export async function deprecateMemory(
   binding: Binding,
   args: DeprecateMemoryArgs,
 ): Promise<SouvAnswer> {
-  if (missingArg(args.id)) {
-    return refusalOf("the id is missing — pass the memory's id as the command's first argument");
-  }
-  const dot = dotSegmentRefusal(args.id);
-  if (dot !== undefined) return dot;
+  const addressed = memoryId(args.id);
+  if (addressed.state === 'refuse') return addressed.refusal;
   const answer = await httpCall(binding, {
     method: 'post',
-    path: `/memories/${encodeURIComponent(args.id)}/deprecate`,
+    path: `/memories/${encodeURIComponent(addressed.id)}/deprecate`,
   });
   if (answer.status === 204) {
-    return { document: { id: args.id, deprecated: true }, exitCode: 0 };
+    return { document: { id: addressed.id, deprecated: true }, exitCode: 0 };
   }
   return answerOf(answer.status, answer.document);
 }
