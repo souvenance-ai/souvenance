@@ -15,12 +15,12 @@ interface Spawned {
 /** The bin as the process runs it — the composition the publication ships. */
 function runBin(
   args: readonly string[],
-  env: Record<string, string | undefined>,
+  environment: Record<string, string | undefined>,
 ): Promise<Spawned> {
   return new Promise((resolve) => {
     const child = spawn('node', ['src/cli/souv/cli.ts', ...args], {
       cwd: REPO,
-      env,
+      environment,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -37,10 +37,10 @@ function runBin(
 
 /** The environment without the binding — the token's absence is the 78 verdict. */
 function bindingless(): Record<string, string | undefined> {
-  const env = { ...process.env };
-  delete env['SOUVENANCE_URL'];
-  delete env['SOUVENANCE_TOKEN'];
-  return env;
+  const environment = { ...process.env };
+  delete environment['SOUVENANCE_URL'];
+  delete environment['SOUVENANCE_TOKEN'];
+  return environment;
 }
 
 test('the bin refuses without the binding — one envelope on stdout, exit 78', async () => {
@@ -82,12 +82,12 @@ test('a malformed numeric flag rides to the wire\u2019s judge — the truth, not
   // and the wire's int shape refuses it with its teaching.
   const wire = await bootTestWire();
   try {
-    const env = {
+    const environment = {
       ...process.env,
       SOUVENANCE_URL: wire.store.url,
       SOUVENANCE_TOKEN: wire.store.token,
     };
-    const run = await runBin(['memory', 'list', '--limit', '2.5'], env);
+    const run = await runBin(['memory', 'list', '--limit', '2.5'], environment);
     assert.equal(run.code, 1);
     const document = JSON.parse(run.stdout) as { error: unknown };
     assert.match(String(document.error), /limit|integer|expected/i);
@@ -104,14 +104,14 @@ test('a body that does not travel refuses in the envelope\u2019s voice — valid
   const wire = await bootTestWire();
   try {
     const deep = '{"a": ' + '['.repeat(16_000) + '1' + ']'.repeat(16_000) + '}';
-    const env = {
+    const environment = {
       ...process.env,
       SOUVENANCE_URL: wire.store.url,
       SOUVENANCE_TOKEN: wire.store.token,
     };
     const run = await runBin(
       ['memory', 'store', 'hello', '--kind', 'note', '--metadata', deep],
-      env,
+      environment,
     );
     assert.equal(run.code, 1);
     const document = JSON.parse(run.stdout) as { error: unknown };
@@ -138,12 +138,12 @@ test('a rogue answer that parses but cannot re-serialize refuses in the envelope
   try {
     const address = server.address();
     assert.ok(address !== null && typeof address === 'object');
-    const env = {
+    const environment = {
       ...process.env,
       SOUVENANCE_URL: `http://127.0.0.1:${address.port}`,
       SOUVENANCE_TOKEN: 'souv-x',
     };
-    const run = await runBin(['memory', 'list'], env);
+    const run = await runBin(['memory', 'list'], environment);
     assert.equal(run.code, 1);
     const document = JSON.parse(run.stdout) as { error: unknown };
     assert.match(String(document.error), /does not travel/);
