@@ -82,11 +82,17 @@ export interface HttpAnswer {
    */
   readonly status: number;
   /**
-   * The body the wire served, parsed — or the raw text when the wire
-   * declared markdown (the skills' body, carried verbatim). Undefined
-   * when it served nothing (204) or nothing this client could carry.
+   * The body the wire served, parsed — undefined when it served
+   * nothing (204) or nothing this client could carry.
    */
   readonly document?: unknown;
+  /**
+   * The wire's DECLARED markdown carried verbatim (the skills' body) —
+   * present only when the declaration said so; the value's runtime
+   * type never decides the shape (a JSON document that parses to a
+   * bare string is still the parsed document, never the carry).
+   */
+  readonly text?: string;
 }
 
 /** One request, one verdict — the Bearer rides every call. */
@@ -182,7 +188,7 @@ export function httpCall(binding: Binding, call: HttpCall): Promise<HttpAnswer> 
             }
             const contentType = (response.headers['content-type'] ?? '').toLowerCase();
             if (status >= 200 && status < 300 && contentType.startsWith('text/markdown')) {
-              settle({ status, document: raw });
+              settle({ status, text: raw });
               return;
             }
             settle(notOurs(status));
