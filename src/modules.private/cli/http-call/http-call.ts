@@ -12,8 +12,10 @@
  * settle frees the socket, so a body that streams forever cannot hold
  * the CLI process open past the answer it already carries. The wire's
  * answer is forwarded, never judged: the body parses (one JSON
- * document) or the client serves its own refusal — the grammar is the
- * server's business, the reach is the client's.
+ * document), the wire's declared markdown rides verbatim (the skills'
+ * SKILL.md — an installation is a copy, never a transform, #77), or
+ * the client serves its own refusal — the grammar is the server's
+ * business, the reach is the client's.
  */
 import { request as requestHttp, type ClientRequest, type IncomingMessage } from 'node:http';
 import { request as requestHttps } from 'node:https';
@@ -80,8 +82,9 @@ export interface HttpAnswer {
    */
   readonly status: number;
   /**
-   * The body the wire served, parsed — undefined when it served
-   * nothing (204) or nothing this client could carry.
+   * The body the wire served, parsed — or the raw text when the wire
+   * declared markdown (the skills' body, carried verbatim). Undefined
+   * when it served nothing (204) or nothing this client could carry.
    */
   readonly document?: unknown;
 }
@@ -117,6 +120,16 @@ export function httpCall(binding: Binding, call: HttpCall): Promise<HttpAnswer> 
           'or point SOUVENANCE_URL at the host that carries the store',
       },
     });
+    // The one "not ours" verdict: a body the client can neither parse
+    // (one JSON document) nor carry (the wire's declared markdown).
+    const notOurs = (status: number): HttpAnswer => ({
+      status: 0,
+      document: {
+        error:
+          `the server answered ${status} with a body that is not one JSON document — ` +
+          'the response is not ours',
+      },
+    });
     try {
       client = transport(
         {
@@ -130,7 +143,10 @@ export function httpCall(binding: Binding, call: HttpCall): Promise<HttpAnswer> 
           method: call.method.toUpperCase(),
           headers: {
             authorization: `Bearer ${binding.token}`,
-            accept: 'application/json',
+            // The two shapes the client carries — the one header, no
+            // per-call judge (the wire's routes declare their shapes,
+            // the header is the client's declared tongue).
+            accept: 'application/json, text/markdown',
             ...(payload === undefined
               ? {}
               : {
@@ -150,21 +166,27 @@ export function httpCall(binding: Binding, call: HttpCall): Promise<HttpAnswer> 
             }
             const status = response.statusCode ?? 0;
             const raw = Buffer.concat(chunks).toString('utf8');
-            let parsed: unknown;
-            try {
-              parsed = JSON.parse(raw);
-            } catch {
-              settle({
-                status: 0,
-                document: {
-                  error:
-                    `the server answered ${status} with a body that is not one JSON document — ` +
-                    'the response is not ours',
-                },
-              });
+            const contentType = (response.headers['content-type'] ?? '').toLowerCase();
+            if (contentType.startsWith('application/json')) {
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(raw);
+              } catch {
+                settle(notOurs(status));
+                return;
+              }
+              settle({ status, document: parsed });
               return;
             }
-            settle({ status, document: parsed });
+            // The one text shape the wire declares — the skills'
+            // SKILL.md body, an installation is a copy (#77, #82): the
+            // raw rides verbatim. Every other text (a proxy's html
+            // page, a redirect's prose) is not ours.
+            if (status >= 200 && status < 300 && contentType.startsWith('text/markdown')) {
+              settle({ status, document: raw });
+              return;
+            }
+            settle(notOurs(status));
           });
         },
       );

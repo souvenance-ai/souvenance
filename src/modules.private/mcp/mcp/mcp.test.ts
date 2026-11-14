@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it, vi } from 'vitest';
 import { BridgeError } from '../bridge/bridge.ts';
-import { runMcpServer, type McpTool, type McpServerOptions } from './mcp.ts';
+import { runMcpServer, type McpEnding, type McpTool, type McpServerOptions } from './mcp.ts';
 
 /** One JSON-RPC response as the tests read it — `result` stays loose on purpose. */
 interface TestResponse {
@@ -284,7 +284,8 @@ describe('runMcpServer', () => {
 
   it('an unterminated line past the 10 MiB cap refuses once and ends the session', async () => {
     // The cap: one giant unterminated chunk → exactly one refusal, then the loop ends.
-    const responses = await writeRawAndCollect('a'.repeat(10 * 1024 * 1024 + 1));
+    const { responses, ending } = await writeRawAndCollect('a'.repeat(10 * 1024 * 1024 + 1));
+    assert.equal(ending, 'session-ended');
     assert.equal(responses.length, 1);
     const parsed = JSON.parse(responses[0] ?? '') as {
       id: null;
@@ -296,7 +297,8 @@ describe('runMcpServer', () => {
   });
 
   it('a terminated line past the 10 MiB cap refuses too — the cap judges every line', async () => {
-    const responses = await writeRawAndCollect('b'.repeat(10 * 1024 * 1024 + 1) + '\n');
+    const { responses, ending } = await writeRawAndCollect('b'.repeat(10 * 1024 * 1024 + 1) + '\n');
+    assert.equal(ending, 'session-ended');
     assert.equal(responses.length, 1);
     const parsed = JSON.parse(responses[0] ?? '') as {
       id: null;
@@ -307,7 +309,10 @@ describe('runMcpServer', () => {
     assert.match(parsed.error.message, /10 MiB cap/);
   });
 
-  async function writeRawAndCollect(chunk: string): Promise<string[]> {
+  async function writeRawAndCollect(chunk: string): Promise<{
+    responses: string[];
+    ending: McpEnding;
+  }> {
     const input = new PassThrough();
     const collected: string[] = [];
     const running = runMcpServer(
@@ -316,15 +321,15 @@ describe('runMcpServer', () => {
     );
     input.write(chunk);
     input.end();
-    await running;
-    return collected;
+    const ending = await running;
+    return { responses: collected, ending };
   }
 
   it('a refusing probe ends the session before speaking — the teaching lands on stderr', async () => {
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const input = new PassThrough();
     const collected: string[] = [];
-    await runMcpServer(
+    const ending = await runMcpServer(
       { input, output: { write: (data) => collected.push(data) } },
       {
         bridge: { call: async () => undefined },
@@ -337,6 +342,7 @@ describe('runMcpServer', () => {
     input.write(INIT + '\n');
     input.end();
     await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(ending, 'probe-refused', 'the composition root learns the probe refused');
     assert.equal(collected.length, 0, 'nothing was answered — the bridge never spoke');
     assert.ok(stderr.mock.calls.some((args) => String(args[0]).includes('refuses to speak')));
     assert.ok(stderr.mock.calls.some((args) => String(args[0]).includes('is not reachable')));
