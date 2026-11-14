@@ -17,13 +17,21 @@ import { ConfigError } from '../../modules.private/config/config.ts';
 import { resolveBinding, type Binding } from '../../modules.private/mcp/binding/binding.ts';
 import { TEACHING } from '../../modules.private/teaching/teaching.ts';
 import type { SouvAnswer } from './actions.private/answer/answer.ts';
+import { checkin } from './actions.private/checkin/checkin.ts';
+import { checkout } from './actions.private/checkout/checkout.ts';
+import { deprecateMemory } from './actions.private/deprecate-memory/deprecate-memory.ts';
 import { getMemory } from './actions.private/get-memory/get-memory.ts';
+import { hotMemory } from './actions.private/hot-memory/hot-memory.ts';
+import { linkMemories } from './actions.private/link-memories/link-memories.ts';
 import type { ListMemoriesArgs } from './actions.private/list-memories/list-memories.ts';
 import { listMemories } from './actions.private/list-memories/list-memories.ts';
+import { mergeMemories } from './actions.private/merge-memories/merge-memories.ts';
+import { refusalOf } from './actions.private/refusal/refusal.ts';
 import type { SearchMemoriesArgs } from './actions.private/search-memories/search-memories.ts';
 import { searchMemories } from './actions.private/search-memories/search-memories.ts';
-import { refusalOf } from './actions.private/refusal/refusal.ts';
 import { storeMemory } from './actions.private/store-memory/store-memory.ts';
+import { supersedeMemory } from './actions.private/supersede-memory/supersede-memory.ts';
+import { unlinkMemories } from './actions.private/unlink-memories/unlink-memories.ts';
 
 program
   .name('souv')
@@ -115,6 +123,143 @@ memory
   .action((text: string | undefined, options: Omit<SearchMemoriesArgs, 'text'>): Promise<void> =>
     run((binding) => searchMemories(binding, { ...options, text })),
   );
+
+memory
+  .command('supersede')
+  .description('revise a memory — the content moves to a successor, the old turns superseded')
+  .argument('[id]', TEACHING.memoryId)
+  .argument('[content]', "the successor's content")
+  .option('--kind <kind>', TEACHING.kindSuccessor)
+  .option('--summary <summary>', TEACHING.summary)
+  .option(
+    '--metadata <json>',
+    `${TEACHING.metadataAuthored} — one JSON document, judged by the wire`,
+  )
+  .option(
+    '--relations <json>',
+    'relations born with the successor — one JSON array, each edge carrying its target and its kind; absent, the source\u2019s outgoing edges inherit verbatim',
+  )
+  .action(
+    (
+      id: string | undefined,
+      content: string | undefined,
+      options: {
+        readonly kind?: string;
+        readonly summary?: string;
+        readonly metadata?: string;
+        readonly relations?: string;
+      },
+    ): Promise<void> => run((binding) => supersedeMemory(binding, { id, content, ...options })),
+  );
+
+memory
+  .command('deprecate')
+  .description('retire a memory — a terminal: every gesture refuses it afterward')
+  .argument('[id]', TEACHING.memoryId)
+  .action((id: string | undefined): Promise<void> =>
+    run((binding) => deprecateMemory(binding, { id })),
+  );
+
+memory
+  .command('hot')
+  .description(
+    "the reversible curation — active ↔ hot, the sub-state a fresh session's checkin serves",
+  )
+  .argument('[id]', TEACHING.memoryId)
+  .argument(
+    '[verdict]',
+    'the verdict — on lands the memory in the hot block, off cools it back to active',
+  )
+  .action((id: string | undefined, verdict: string | undefined): Promise<void> =>
+    run((binding) => hotMemory(binding, { id, verdict })),
+  );
+
+memory
+  .command('link')
+  .description('relate two memories — one directed edge, born with its kind')
+  .argument('[id]', TEACHING.memoryId)
+  .option('--to <id>', TEACHING.edgeTo)
+  .option('--kind <kind>', TEACHING.edgeKind)
+  .option('--metadata <json>', `${TEACHING.edgeMetadata} — one JSON document, judged by the wire`)
+  .action(
+    (
+      id: string | undefined,
+      options: { readonly to?: string; readonly kind?: string; readonly metadata?: string },
+    ): Promise<void> =>
+      run((binding) =>
+        linkMemories(binding, {
+          id,
+          target: options.to,
+          kind: options.kind,
+          metadata: options.metadata,
+        }),
+      ),
+  );
+
+memory
+  .command('unlink')
+  .description(
+    'unrelate two memories — ambiguous edges need the kind, the wire names the candidates',
+  )
+  .argument('[id]', TEACHING.memoryId)
+  .option('--to <id>', TEACHING.unlinkTo)
+  .option('--kind <kind>', TEACHING.unlinkKind)
+  .action(
+    (
+      id: string | undefined,
+      options: { readonly to?: string; readonly kind?: string },
+    ): Promise<void> =>
+      run((binding) => unlinkMemories(binding, { id, target: options.to, kind: options.kind })),
+  );
+
+memory
+  .command('merge')
+  .description(
+    'fuse memories — the sources become one, each keeping its merges bridge as provenance',
+  )
+  .argument('[content]', "the fusion's content")
+  .option('--id <id>', "a source memory's id — repeat the flag for several", collectStrings)
+  .option('--kind <kind>', TEACHING.kindFusion)
+  .option('--summary <summary>', TEACHING.summary)
+  .option(
+    '--metadata <json>',
+    `${TEACHING.metadataAuthored} — one JSON document, judged by the wire`,
+  )
+  .action(
+    (
+      content: string | undefined,
+      options: {
+        readonly id?: readonly string[];
+        readonly kind?: string;
+        readonly summary?: string;
+        readonly metadata?: string;
+      },
+    ): Promise<void> =>
+      run((binding) =>
+        mergeMemories(binding, {
+          content,
+          ids: options.id,
+          kind: options.kind,
+          summary: options.summary,
+          metadata: options.metadata,
+        }),
+      ),
+  );
+
+program
+  .command('checkin')
+  .description(
+    "open a session — the hot memories with their relations, the store's stats, the waking guidance",
+  )
+  .option('--limit <limit>', TEACHING.limitCheckin, (value: string): number => Number(value))
+  .action((options: { readonly limit?: number }): Promise<void> =>
+    run((binding) => checkin(binding, options)),
+  );
+
+program
+  .command('checkout')
+  .description('close a session — the consolidation verdict, healthy or the payable findings')
+  .action((): Promise<void> => run((binding) => checkout(binding)));
 
 /** The one stdout gesture: exactly one JSON document, then the exit code —
  * written synchronously at fd 1 (stdout): the parser-error paths end the
