@@ -30,13 +30,38 @@ function override(value: string | undefined): string | undefined {
   return value !== undefined && value.trim().length > 0 ? value : undefined;
 }
 
+/**
+ * The config's own URL. The host rides the URL bracketed when it is an
+ * IPv6 literal — `http://[::1]:3141` travels, the bare `http://::1:3141`
+ * throws the URL parser before a request exists (the review's find);
+ * httpCall strips the brackets back off for the socket, where the bare
+ * literal is the honest form (its own lesson, the probe's review). A
+ * host the URL grammar cannot carry at all is the binding's verdict,
+ * not a crash: the liveness probe judges such a host not-alive for the
+ * file's writes, and the wire verbs cannot even compose their request —
+ * the teaching (exit 78) is the honest door.
+ */
+function composeConfigUrl(config: Config): string {
+  const host = config.host.includes(':') ? `[${config.host}]` : config.host;
+  const url = `http://${host}:${config.port}`;
+  try {
+    new URL(url);
+  } catch {
+    throw new ConfigError(
+      `invalid binding — the configured host "${config.host}" does not travel as a URL host ` +
+        `(${url}) — fix the config\u2019s host, or set SOUVENANCE_URL for the remote one`,
+    );
+  }
+  return url;
+}
+
 export function resolveManagerBinding(environment: Environment, config: Config): Binding {
   const envUrl = override(environment['SOUVENANCE_URL']);
-  const url = envUrl !== undefined ? normalizeUrl(envUrl) : `http://${config.host}:${config.port}`;
+  const url = envUrl !== undefined ? normalizeUrl(envUrl) : composeConfigUrl(config);
   const envToken = override(environment['SOUVENANCE_TOKEN']);
   if (envToken !== undefined) return { url, token: envToken };
-  const single = config.management.length === 1 ? config.management[0] : undefined;
-  if (single === undefined) {
+  const soleRow = config.management.length === 1 ? config.management[0] : undefined;
+  if (soleRow === undefined) {
     if (config.management.length === 0) {
       throw new ConfigError(
         'invalid binding — the config carries no management row and SOUVENANCE_TOKEN is absent: ' +
@@ -50,5 +75,5 @@ export function resolveManagerBinding(environment: Environment, config: Config):
         'the manager needs exactly one. Keep one row, or set SOUVENANCE_TOKEN to name the caller.',
     );
   }
-  return { url, token: single.secret };
+  return { url, token: soleRow.secret };
 }

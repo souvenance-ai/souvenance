@@ -106,3 +106,16 @@ export async function bootTestWire(): Promise<TestWire> {
     throw error;
   }
 }
+
+/** A binding that reaches nothing — the local gates must precede any call. */
+export const UNREACHABLE: Binding = { url: 'http://127.0.0.1:1', token: 'souv-0000' };
+
+/** One test's body on its own wire — the boot and the close, one gesture. */
+export async function onWire(run: (wire: TestWire) => Promise<void>): Promise<void> {
+  const wire = await bootTestWire();
+  try {
+    await run(wire);
+  } finally {
+    await wire.close();
+  }
+}
