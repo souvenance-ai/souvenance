@@ -2,18 +2,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'vitest';
 import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
+import { seedMemory } from '../../../../modules.private/cli/seed-memory/seed-memory.ts';
 import {
   bootTestWire,
   type TestWire,
 } from '../../../../modules.private/cli/test-wire/test-wire.ts';
 import { unlinkMemories } from './unlink-memories.ts';
-
-/** One memory seeded through the wire — the action under test stays the only subject. */
-async function seed(wire: TestWire, body: Record<string, unknown>): Promise<string> {
-  const answer = await httpCall(wire.store, { method: 'post', path: '/memories', body });
-  assert.equal(answer.status, 201, `the seed refused: ${JSON.stringify(answer.document)}`);
-  return (answer.document as { id: string }).id;
-}
 
 /** One edge linked through the wire — the unlink's subject, born classified. */
 async function link(wire: TestWire, from: string, to: string, kind: string): Promise<void> {
@@ -28,8 +22,8 @@ async function link(wire: TestWire, from: string, to: string, kind: string): Pro
 test('the single edge is gone — the echo of the gesture, the projection empty', async () => {
   const wire = await bootTestWire();
   try {
-    const from = await seed(wire, { content: 'the source', kind: 'note' });
-    const to = await seed(wire, { content: 'the target', kind: 'note' });
+    const from = await seedMemory(wire, { content: 'the source', kind: 'note' });
+    const to = await seedMemory(wire, { content: 'the target', kind: 'note' });
     await link(wire, from, to, 'continues');
     const answer = await unlinkMemories(wire.store, { id: from, target: to });
     assert.equal(answer.exitCode, 0);
@@ -51,8 +45,8 @@ test('the single edge is gone — the echo of the gesture, the projection empty'
 test('the ambiguity is the wire’s verdict — the 400 names the candidate kinds, verbatim', async () => {
   const wire = await bootTestWire();
   try {
-    const from = await seed(wire, { content: 'the source', kind: 'note' });
-    const to = await seed(wire, { content: 'the target', kind: 'note' });
+    const from = await seedMemory(wire, { content: 'the source', kind: 'note' });
+    const to = await seedMemory(wire, { content: 'the target', kind: 'note' });
     await link(wire, from, to, 'extends');
     await link(wire, from, to, 'references');
     const ambiguous = await unlinkMemories(wire.store, { id: from, target: to });
@@ -97,7 +91,7 @@ test('the gates judge locally — the id and the target, no call', async () => {
 test('the wire’s refusals are served verbatim — the unknown memory', async () => {
   const wire = await bootTestWire();
   try {
-    const id = await seed(wire, { content: 'the source', kind: 'note' });
+    const id = await seedMemory(wire, { content: 'the source', kind: 'note' });
     const unknown = await unlinkMemories(wire.store, { id: randomUUID(), target: id });
     assert.equal(unknown.exitCode, 1);
     assert.match(String((unknown.document as { error: string }).error), /not found/);

@@ -1,18 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
-import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
-import {
-  bootTestWire,
-  type TestWire,
-} from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import { seedMemory } from '../../../../modules.private/cli/seed-memory/seed-memory.ts';
+import { bootTestWire } from '../../../../modules.private/cli/test-wire/test-wire.ts';
 import { checkin } from './checkin.ts';
-
-/** One memory seeded through the wire — the action under test stays the only subject. */
-async function seed(wire: TestWire, body: Record<string, unknown>): Promise<string> {
-  const answer = await httpCall(wire.store, { method: 'post', path: '/memories', body });
-  assert.equal(answer.status, 201, `the seed refused: ${JSON.stringify(answer.document)}`);
-  return (answer.document as { id: string }).id;
-}
 
 /** The #34 guard's gate: distinct created_at — ms ties leave the serving order undefined. */
 async function nextMillisecond(): Promise<void> {
@@ -23,12 +13,12 @@ async function nextMillisecond(): Promise<void> {
 test('the report serves verbatim — the hot block newest first, the stats, the waking voice', async () => {
   const wire = await bootTestWire();
   try {
-    const first = await seed(wire, { content: '# first', kind: 'note', hot: true });
+    const first = await seedMemory(wire, { content: '# first', kind: 'note', hot: true });
     await nextMillisecond();
-    const second = await seed(wire, { content: '# second', kind: 'note', hot: true });
+    const second = await seedMemory(wire, { content: '# second', kind: 'note', hot: true });
     await nextMillisecond();
-    const third = await seed(wire, { content: '# third', kind: 'note', hot: true });
-    await seed(wire, { content: 'the cold one', kind: 'note' });
+    const third = await seedMemory(wire, { content: '# third', kind: 'note', hot: true });
+    await seedMemory(wire, { content: 'the cold one', kind: 'note' });
     const answer = await checkin(wire.store, {});
     assert.equal(answer.exitCode, 0);
     const report = answer.document as {
@@ -55,11 +45,11 @@ test('the report serves verbatim — the hot block newest first, the stats, the 
 test('--limit trims the session block — an explicit block of two of three', async () => {
   const wire = await bootTestWire();
   try {
-    const first = await seed(wire, { content: '# a', kind: 'note', hot: true });
+    const first = await seedMemory(wire, { content: '# a', kind: 'note', hot: true });
     await nextMillisecond();
-    const second = await seed(wire, { content: '# b', kind: 'note', hot: true });
+    const second = await seedMemory(wire, { content: '# b', kind: 'note', hot: true });
     await nextMillisecond();
-    const third = await seed(wire, { content: '# c', kind: 'note', hot: true });
+    const third = await seedMemory(wire, { content: '# c', kind: 'note', hot: true });
     const answer = await checkin(wire.store, { limit: 2 });
     assert.equal(answer.exitCode, 0);
     const report = answer.document as { hot: readonly { id: string }[] };
@@ -76,7 +66,7 @@ test('--limit trims the session block — an explicit block of two of three', as
 test('the limit has no ceiling — 5000 is an honest block, not a cap to refuse', async () => {
   const wire = await bootTestWire();
   try {
-    await seed(wire, { content: '# only', kind: 'note', hot: true });
+    await seedMemory(wire, { content: '# only', kind: 'note', hot: true });
     const answer = await checkin(wire.store, { limit: 5000 });
     assert.equal(answer.exitCode, 0);
     assert.equal((answer.document as { hot: readonly unknown[] }).hot.length, 1);

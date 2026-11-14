@@ -2,23 +2,14 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'vitest';
 import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
-import {
-  bootTestWire,
-  type TestWire,
-} from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import { seedMemory } from '../../../../modules.private/cli/seed-memory/seed-memory.ts';
+import { bootTestWire } from '../../../../modules.private/cli/test-wire/test-wire.ts';
 import { deprecateMemory } from './deprecate-memory.ts';
-
-/** One memory seeded through the wire — the action under test stays the only subject. */
-async function seed(wire: TestWire, body: Record<string, unknown>): Promise<string> {
-  const answer = await httpCall(wire.store, { method: 'post', path: '/memories', body });
-  assert.equal(answer.status, 201, `the seed refused: ${JSON.stringify(answer.document)}`);
-  return (answer.document as { id: string }).id;
-}
 
 test('the retirement serves the echo of the gesture — the mute 204 spoken', async () => {
   const wire = await bootTestWire();
   try {
-    const id = await seed(wire, { content: 'born to die', kind: 'note' });
+    const id = await seedMemory(wire, { content: 'born to die', kind: 'note' });
     const answer = await deprecateMemory(wire.store, { id });
     assert.equal(answer.exitCode, 0);
     assert.deepEqual(answer.document, { id, deprecated: true });
@@ -59,7 +50,7 @@ test('the wire’s refusals are served verbatim — the unknown and the status f
     const unknown = await deprecateMemory(wire.store, { id: randomUUID() });
     assert.equal(unknown.exitCode, 1);
     assert.match(String((unknown.document as { error: string }).error), /not found/);
-    const doomed = await seed(wire, { content: 'twice retired', kind: 'note' });
+    const doomed = await seedMemory(wire, { content: 'twice retired', kind: 'note' });
     const first = await deprecateMemory(wire.store, { id: doomed });
     assert.equal(first.exitCode, 0);
     const fight = await deprecateMemory(wire.store, { id: doomed });
@@ -76,7 +67,7 @@ test('the wire’s refusals are served verbatim — the unknown and the status f
 test('a superseded memory is a terminal too — the fight is the wire’s voice', async () => {
   const wire = await bootTestWire();
   try {
-    const old = await seed(wire, { content: 'the draft', kind: 'note' });
+    const old = await seedMemory(wire, { content: 'the draft', kind: 'note' });
     const revised = await httpCall(wire.store, {
       method: 'post',
       path: `/memories/${old}/supersede`,
