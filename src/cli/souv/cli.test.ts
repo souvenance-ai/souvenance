@@ -155,7 +155,7 @@ test('a rogue answer that parses but cannot re-serialize refuses in the envelope
 });
 
 /** The bin's environment over a booted wire — the spawn pins' shared posture. */
-function boundEnv(
+function boundEnvironment(
   wire: Awaited<ReturnType<typeof bootTestWire>>,
 ): Record<string, string | undefined> {
   return {
@@ -181,7 +181,7 @@ test('the merge’s repeated --id rides — the collector’s wiring, the fusion
     const second = await seed('the second');
     const run = await runBin(
       ['memory', 'merge', '--id', first, '--id', second, 'the fused'],
-      boundEnv(wire),
+      boundEnvironment(wire),
     );
     assert.equal(run.code, 0);
     const head = JSON.parse(run.stdout) as { id: string };
@@ -203,7 +203,7 @@ test('the hot verdict rides both positionals — the bin’s own composition', a
     });
     assert.equal(answer.status, 201);
     const id = (answer.document as { id: string }).id;
-    const run = await runBin(['memory', 'hot', id, 'on'], boundEnv(wire));
+    const run = await runBin(['memory', 'hot', id, 'on'], boundEnvironment(wire));
     assert.equal(run.code, 0);
     assert.deepEqual(JSON.parse(run.stdout), { id, hot: true });
   } finally {
@@ -219,7 +219,7 @@ test('the rituals are top-level doors — checkin and checkout, not under memory
       path: '/memories',
       body: { content: '# the note', kind: 'note', hot: true },
     });
-    const opening = await runBin(['checkin'], boundEnv(wire));
+    const opening = await runBin(['checkin'], boundEnvironment(wire));
     assert.equal(opening.code, 0);
     const report = JSON.parse(opening.stdout) as {
       hot: readonly unknown[];
@@ -228,11 +228,11 @@ test('the rituals are top-level doors — checkin and checkout, not under memory
     };
     assert.equal(report.stats.memories, 1);
     assert.equal(report.hot.length, 1);
-    const closing = await runBin(['checkout'], boundEnv(wire));
+    const closing = await runBin(['checkout'], boundEnvironment(wire));
     assert.equal(closing.code, 0);
     assert.equal((JSON.parse(closing.stdout) as { healthy: boolean }).healthy, true);
     // The nesting the client refuses: no memory family owns the rituals.
-    const misplaced = await runBin(['memory', 'checkin'], boundEnv(wire));
+    const misplaced = await runBin(['memory', 'checkin'], boundEnvironment(wire));
     assert.equal(misplaced.code, 1);
     assert.match(
       String((JSON.parse(misplaced.stdout) as { error: unknown }).error),
