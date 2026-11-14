@@ -117,21 +117,23 @@ memory
   );
 
 /** The one stdout gesture: exactly one JSON document, then the exit code —
- * the write is synchronous: the parser-error paths end the loop right
- * after it, and a piped stdout must not lose the verdict on exit. The
- * document's own serialization is guarded: a served tree the
- * serializer refuses is a refusal, not a crash (today the wire's own
- * c.json 500s first — this is the day that ever changes). */
+ * written synchronously at fd 1 (stdout): the parser-error paths end the
+ * loop right after the write, and a piped stdout must not lose the
+ * verdict on exit. The document's own serialization is guarded: a served
+ * tree the serializer refuses is a refusal, not a crash (today the
+ * wire's own c.json 500s first — this is the day that ever changes). */
 function emitAnswer(answer: SouvAnswer): void {
   let line: string;
   try {
     line = `${JSON.stringify(answer.document)}\n`;
   } catch {
-    line = `${JSON.stringify({
-      error: 'the answer does not travel as one JSON document — the serializer refused it',
-    })}\n`;
-    process.exitCode = 1;
-    writeSync(1, line);
+    // The served tree itself does not travel: the same envelope voice
+    // (`refusalOf`), the client's own verdict.
+    const refusal = refusalOf(
+      'the answer does not travel as one JSON document — the serializer refused it',
+    );
+    writeSync(1, `${JSON.stringify(refusal.document)}\n`);
+    process.exitCode = refusal.exitCode;
     return;
   }
   writeSync(1, line);
