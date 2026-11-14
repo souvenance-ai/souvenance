@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { test } from 'vitest';
+import { httpCall } from '../../modules.private/cli/http-call/http-call.ts';
 import { bootTestWire } from '../../modules.private/cli/test-wire/test-wire.ts';
 
 const REPO = process.cwd();
@@ -150,5 +151,94 @@ test('a rogue answer that parses but cannot re-serialize refuses in the envelope
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+/** The bin's environment over a booted wire — the spawn pins' shared posture. */
+function boundEnv(
+  wire: Awaited<ReturnType<typeof bootTestWire>>,
+): Record<string, string | undefined> {
+  return {
+    ...process.env,
+    SOUVENANCE_URL: wire.store.url,
+    SOUVENANCE_TOKEN: wire.store.token,
+  };
+}
+
+test('the merge’s repeated --id rides — the collector’s wiring, the fusion served', async () => {
+  const wire = await bootTestWire();
+  try {
+    const seed = async (content: string): Promise<string> => {
+      const answer = await httpCall(wire.store, {
+        method: 'post',
+        path: '/memories',
+        body: { content, kind: 'note' },
+      });
+      assert.equal(answer.status, 201);
+      return (answer.document as { id: string }).id;
+    };
+    const first = await seed('the first');
+    const second = await seed('the second');
+    const run = await runBin(
+      ['memory', 'merge', '--id', first, '--id', second, 'the fused'],
+      boundEnv(wire),
+    );
+    assert.equal(run.code, 0);
+    const head = JSON.parse(run.stdout) as { id: string };
+    assert.match(head.id, /^[0-9a-f-]{36}$/);
+    const served = await httpCall(wire.store, { method: 'get', path: `/memories/${head.id}` });
+    assert.equal((served.document as { content: string }).content, 'the fused');
+  } finally {
+    await wire.close();
+  }
+});
+
+test('the hot verdict rides both positionals — the bin’s own composition', async () => {
+  const wire = await bootTestWire();
+  try {
+    const answer = await httpCall(wire.store, {
+      method: 'post',
+      path: '/memories',
+      body: { content: 'the morning note', kind: 'note' },
+    });
+    assert.equal(answer.status, 201);
+    const id = (answer.document as { id: string }).id;
+    const run = await runBin(['memory', 'hot', id, 'on'], boundEnv(wire));
+    assert.equal(run.code, 0);
+    assert.deepEqual(JSON.parse(run.stdout), { id, hot: true });
+  } finally {
+    await wire.close();
+  }
+});
+
+test('the rituals are top-level doors — checkin and checkout, not under memory', async () => {
+  const wire = await bootTestWire();
+  try {
+    await httpCall(wire.store, {
+      method: 'post',
+      path: '/memories',
+      body: { content: '# the note', kind: 'note', hot: true },
+    });
+    const opening = await runBin(['checkin'], boundEnv(wire));
+    assert.equal(opening.code, 0);
+    const report = JSON.parse(opening.stdout) as {
+      hot: readonly unknown[];
+      stats: { memories: number };
+      guidance?: unknown;
+    };
+    assert.equal(report.stats.memories, 1);
+    assert.equal(report.hot.length, 1);
+    const closing = await runBin(['checkout'], boundEnv(wire));
+    assert.equal(closing.code, 0);
+    assert.equal((JSON.parse(closing.stdout) as { healthy: boolean }).healthy, true);
+    // The nesting the client refuses: no memory family owns the rituals.
+    const misplaced = await runBin(['memory', 'checkin'], boundEnv(wire));
+    assert.equal(misplaced.code, 1);
+    assert.match(
+      String((JSON.parse(misplaced.stdout) as { error: unknown }).error),
+      /unknown command/i,
+    );
+  } finally {
+    await wire.close();
   }
 });

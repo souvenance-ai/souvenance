@@ -8,6 +8,7 @@ import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts
 import { missingArg } from '../../../../modules.private/cli/missing-arg/missing-arg.ts';
 import type { Binding } from '../../../../modules.private/mcp/binding/binding.ts';
 import { answerOf, type SouvAnswer } from '../answer/answer.ts';
+import { dotSegmentRefusal } from '../dot-segment/dot-segment.ts';
 import { refusalOf } from '../refusal/refusal.ts';
 
 export interface GetMemoryArgs {
@@ -19,13 +20,8 @@ export async function getMemory(binding: Binding, args: GetMemoryArgs): Promise<
   if (missingArg(args.id)) {
     return refusalOf("the id is missing — pass the memory's id as the command's first argument");
   }
-  // The dot segments escape the path: encodeURIComponent leaves '..'
-  // unchanged, and the URL parser folds /memories/.. into / — the
-  // discovery door answering where a memory was asked. Refused before
-  // the URL is built; every other malformed id is the wire's verdict.
-  if (args.id === '.' || args.id === '..') {
-    return refusalOf('the id is not ours — a dot segment is not a memory id');
-  }
+  const dot = dotSegmentRefusal(args.id);
+  if (dot !== undefined) return dot;
   const query = new URLSearchParams();
   if (args.depth !== undefined) query.set('depth', String(args.depth));
   const answer = await httpCall(binding, {

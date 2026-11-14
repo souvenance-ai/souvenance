@@ -10,6 +10,7 @@ import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts
 import { missingArg } from '../../../../modules.private/cli/missing-arg/missing-arg.ts';
 import type { Binding } from '../../../../modules.private/mcp/binding/binding.ts';
 import { answerOf, type SouvAnswer } from '../answer/answer.ts';
+import { jsonFlag } from '../json-flag/json-flag.ts';
 import { refusalOf } from '../refusal/refusal.ts';
 
 export interface StoreMemoryArgs {
@@ -21,21 +22,6 @@ export interface StoreMemoryArgs {
   readonly hot?: boolean;
 }
 
-/** The JSON flags' local gate: parse or refuse — the shape is the wire's verdict. */
-interface ParsedFlag {
-  readonly parsed?: unknown;
-  readonly refusal?: SouvAnswer;
-}
-
-function parseFlag(flag: string, raw: string | undefined): ParsedFlag {
-  if (raw === undefined) return {};
-  try {
-    return { parsed: JSON.parse(raw) };
-  } catch {
-    return { refusal: refusalOf(`${flag} must be one JSON document — this does not parse`) };
-  }
-}
-
 export async function storeMemory(binding: Binding, args: StoreMemoryArgs): Promise<SouvAnswer> {
   if (missingArg(args.content)) {
     return refusalOf("the content is missing — pass it as the command's first argument");
@@ -45,9 +31,9 @@ export async function storeMemory(binding: Binding, args: StoreMemoryArgs): Prom
       'the kind is missing — pass --kind: a memory is born classified (the vocabulary is free)',
     );
   }
-  const metadata = parseFlag('--metadata', args.metadata);
+  const metadata = jsonFlag('--metadata', args.metadata);
   if (metadata.refusal !== undefined) return metadata.refusal;
-  const relations = parseFlag('--relations', args.relations);
+  const relations = jsonFlag('--relations', args.relations);
   if (relations.refusal !== undefined) return relations.refusal;
   const body: Record<string, unknown> = { content: args.content, kind: args.kind };
   if (args.summary !== undefined) body['summary'] = args.summary;
