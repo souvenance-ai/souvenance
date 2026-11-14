@@ -267,3 +267,10 @@ test('the mcp door\u2019s parser door — --help works bindingless', async () =>
   assert.equal(run.code, 0);
   assert.match(run.stdout, /bridge/);
 });
+
+test('the mcp door\u2019s parser refusals stay the bin\u2019s voice — the envelope on stdout, exit 1', async () => {
+  const run = await runBin(['mcp', '--nope'], bindingless());
+  assert.equal(run.code, 1);
+  const document = JSON.parse(run.stdout) as { error: unknown };
+  assert.match(String(document.error), /--nope/);
+});

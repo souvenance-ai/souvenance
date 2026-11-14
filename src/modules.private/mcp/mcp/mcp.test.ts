@@ -319,8 +319,8 @@ describe('runMcpServer', () => {
   });
 
   async function writeRawAndCollect(chunk: string): Promise<{
-    responses: string[];
-    ending: McpEnding;
+    readonly responses: readonly string[];
+    readonly ending: McpEnding;
   }> {
     const input = new PassThrough();
     const collected: string[] = [];
