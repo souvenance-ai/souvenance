@@ -34,7 +34,8 @@ The agent's PR routine, in order — each step completes before the next:
 
 1. **Review before PR**: run the `code-review` skill on the change (two axes: Standards, Spec), then fix what must be fixed and decline the rest with a recorded reason. A PR opens only after its findings are resolved.
 2. **Open the PR** on the agreed base branch.
-3. **Ask the user to review and merge.** The merge is always the user's gesture; the agent merges only when the user explicitly asks for it.
+3. **Iterate the `code-review` skill on the PR's diff**: each pass, legitimate findings land as fix commits on the PR and the declined ones get a recorded reason (as PR comments); the record rides every pass — a declined finding is not re-raised without new evidence. The loop ends when a pass reports no new findings beyond the record; hard cap of three passes, then the open items go to the user.
+4. **Ask the user to review and merge.** The merge is always the user's gesture; the agent merges only when the user explicitly asks for it.
 
 ## Agent skills
 
