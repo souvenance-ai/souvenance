@@ -34,14 +34,14 @@ export async function supersedeMemory(
     );
   }
   const metadata = jsonFlag('--metadata', args.metadata);
-  if (metadata.refusal !== undefined) return metadata.refusal;
+  if (metadata.state === 'refuse') return metadata.refusal;
   const relations = jsonFlag('--relations', args.relations);
-  if (relations.refusal !== undefined) return relations.refusal;
+  if (relations.state === 'refuse') return relations.refusal;
   const body: Record<string, unknown> = { content: args.content };
   if (args.kind !== undefined) body['kind'] = args.kind;
   if (args.summary !== undefined) body['summary'] = args.summary;
-  if (metadata.parsed !== undefined) body['metadata'] = metadata.parsed;
-  if (relations.parsed !== undefined) body['relations'] = relations.parsed;
+  if (metadata.state === 'ride') body['metadata'] = metadata.parsed;
+  if (relations.state === 'ride') body['relations'] = relations.parsed;
   const answer = await httpCall(binding, {
     method: 'post',
     path: `/memories/${encodeURIComponent(addressed.id)}/supersede`,

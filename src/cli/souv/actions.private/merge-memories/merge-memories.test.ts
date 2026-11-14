@@ -49,9 +49,12 @@ test('the ≥2 is the wire’s verdict — one source, its 400 teaching verbatim
     const answer = await mergeMemories(wire.store, { ids: [lone], content: 'the fused' });
     assert.equal(answer.exitCode, 1);
     assert.match(String((answer.document as { error: string }).error), /at least 2 memories/);
+    // The zero-source spelling is its own: the strict body names the key
+    // it lacks — the facade's "at least 2 memories" is the ONE-source
+    // verdict beside it.
     const absent = await mergeMemories(wire.store, { content: 'the fused' });
     assert.equal(absent.exitCode, 1);
-    assert.match(String((absent.document as { error: string }).error), /at least 2 memories|ids/);
+    assert.match(String((absent.document as { error: string }).error), /ids/i);
   } finally {
     await wire.close();
   }

@@ -31,12 +31,12 @@ export async function mergeMemories(
     );
   }
   const metadata = jsonFlag('--metadata', args.metadata);
-  if (metadata.refusal !== undefined) return metadata.refusal;
+  if (metadata.state === 'refuse') return metadata.refusal;
   const body: Record<string, unknown> = { content: args.content };
   if (args.ids !== undefined) body['ids'] = args.ids;
   if (args.kind !== undefined) body['kind'] = args.kind;
   if (args.summary !== undefined) body['summary'] = args.summary;
-  if (metadata.parsed !== undefined) body['metadata'] = metadata.parsed;
+  if (metadata.state === 'ride') body['metadata'] = metadata.parsed;
   const answer = await httpCall(binding, { method: 'post', path: '/merge', body });
   return answerOf(answer.status, answer.document);
 }
