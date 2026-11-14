@@ -282,6 +282,15 @@ describe('runMcpServer', () => {
     assert.equal((responses[2]?.error as { code: number }).code, -32601);
   });
 
+  it('a clean input end returns session-ended — the composition root carries the exit', async () => {
+    const { responses, ending } = await writeRawAndCollect(
+      `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })}\n`,
+    );
+    assert.equal(ending, 'session-ended');
+    assert.equal(responses.length, 1);
+    assert.deepEqual((JSON.parse(responses[0] ?? '') as { result: unknown }).result, {});
+  });
+
   it('an unterminated line past the 10 MiB cap refuses once and ends the session', async () => {
     // The cap: one giant unterminated chunk → exactly one refusal, then the loop ends.
     const { responses, ending } = await writeRawAndCollect('a'.repeat(10 * 1024 * 1024 + 1));

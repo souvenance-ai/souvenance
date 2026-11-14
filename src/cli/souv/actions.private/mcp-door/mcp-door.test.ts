@@ -12,6 +12,7 @@ import {
   bootTestWire,
   type TestWire,
 } from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import manifest from '../../../../../package.json' with { type: 'json' };
 
 const REPO = process.cwd();
 
@@ -112,7 +113,9 @@ test('the door serves the protocol over the real wire — and ends clean', async
     };
     assert.equal(result.protocolVersion, '2025-06-18');
     assert.equal(result.serverInfo.name, 'souvenance');
-    assert.equal(result.serverInfo.version, '0.2.0');
+    // The version the composition serves is the package's own — the pin
+    // rides the manifest, never a literal.
+    assert.equal(result.serverInfo.version, manifest.version);
     assert.match(result.instructions, /checkin FIRST/);
     const listing = await session.rpc('tools/list');
     const names = (listing['result'] as { tools: { name: string }[] }).tools.map(

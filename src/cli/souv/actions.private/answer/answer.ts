@@ -10,13 +10,13 @@
  * The absent side is `undefined`-typed, so the impossible state (both
  * documents riding) does not type.
  */
-export interface SouvDocumentAnswer {
+interface SouvDocumentAnswer {
   readonly document: unknown;
   readonly text?: undefined;
   readonly exitCode: 0 | 1 | 78;
 }
 
-export interface SouvTextAnswer {
+interface SouvTextAnswer {
   readonly document?: undefined;
   readonly text: string;
   readonly exitCode: 0 | 1 | 78;

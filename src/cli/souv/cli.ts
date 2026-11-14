@@ -279,7 +279,9 @@ program
   // stderr and the process exit carries the verdict.
   .action((): Promise<void> => mcpDoor(process.env));
 
-/** The one stdout gesture: exactly one JSON document, then the exit code —
+/** The one stdout gesture: the door's own document — one JSON document,
+ * or the wire's declared text verbatim (the skills' body) — then the
+ * exit code —
  * written synchronously at fd 1 (stdout): the parser-error paths end the
  * loop right after the write, and a piped stdout must not lose the
  * verdict on exit. The document's own serialization is guarded: a served
