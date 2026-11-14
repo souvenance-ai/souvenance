@@ -160,12 +160,12 @@ test('an IPv6 binding reaches the live server — the brackets leave at the pars
   }
 });
 
-test('the wire\u2019s declared markdown rides verbatim — the skills\u2019 body, carried as a string', async () => {
+test('the wire\u2019s declared markdown rides verbatim — the skills\u2019 body, carried as text', async () => {
   const wire = await bootTestWire();
   try {
     const answer = await httpCall(wire.store, { method: 'get', path: '/skills/waking' });
     assert.equal(answer.status, 200);
-    assert.equal(answer.document, readFileSync(join('skills', 'waking', 'SKILL.md'), 'utf8'));
+    assert.equal(answer.text, readFileSync(join('skills', 'waking', 'SKILL.md'), 'utf8'));
   } finally {
     await wire.close();
   }
@@ -179,7 +179,22 @@ test('a declared markdown body carries on a stub too — the content type is the
   try {
     const answer = await httpCall({ url: wire.url, token: 'souv-x' }, { method: 'get', path: '/' });
     assert.equal(answer.status, 200);
-    assert.equal(answer.document, '---\nname: probe\n---\n\nthe body');
+    assert.equal(answer.text, '---\nname: probe\n---\n\nthe body');
+  } finally {
+    await closeServer(wire.server);
+  }
+});
+
+test('a bare JSON string rides the PARSED document — the value\u2019s type never decides the shape', async () => {
+  const wire = await listen((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify('a bare string'));
+  });
+  try {
+    const answer = await httpCall({ url: wire.url, token: 'souv-x' }, { method: 'get', path: '/' });
+    assert.equal(answer.status, 200);
+    assert.equal(answer.document, 'a bare string');
+    assert.equal(answer.text, undefined, 'the declaration carried, not the runtime type');
   } finally {
     await closeServer(wire.server);
   }

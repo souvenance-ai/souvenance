@@ -28,8 +28,11 @@ export async function skills(binding: Binding, args: SkillsArgs): Promise<SouvAn
     method: 'get',
     path: name === undefined ? '/skills' : `/skills/${encodeURIComponent(name)}`,
   });
-  if (answer.status >= 200 && answer.status < 300 && typeof answer.document === 'string') {
-    return { text: answer.document, exitCode: 0 };
+  if (answer.text !== undefined) {
+    // The transport judged the DECLARATION — the verbatim carry of the
+    // wire's markdown rides as the text door's own shape, no newline
+    // added (the served file ends its own).
+    return { text: answer.text, exitCode: 0 };
   }
   return answerOf(answer.status, answer.document);
 }

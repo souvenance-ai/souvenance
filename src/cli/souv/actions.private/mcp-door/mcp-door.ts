@@ -9,6 +9,7 @@
  * status-0 verdict). A session that ends speaks: exit 0.
  */
 import { ConfigError } from '../../../../modules.private/config/config.ts';
+import type { Binding } from '../../../../modules.private/mcp/binding/binding.ts';
 import { Bridge } from '../../../../modules.private/mcp/bridge/bridge.ts';
 import { resolveBinding } from '../../../../modules.private/mcp/binding/binding.ts';
 import { runMcpServer } from '../../../../modules.private/mcp/mcp/mcp.ts';
@@ -18,7 +19,7 @@ import manifest from '../../../../../package.json' with { type: 'json' };
 export async function mcpDoor(
   environment: Readonly<Record<string, string | undefined>>,
 ): Promise<void> {
-  let binding;
+  let binding: Binding;
   try {
     binding = resolveBinding(environment);
   } catch (error) {
