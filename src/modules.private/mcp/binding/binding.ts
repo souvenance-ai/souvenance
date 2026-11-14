@@ -52,8 +52,12 @@ export function resolveBinding(environment: Readonly<Record<string, string | und
   };
 }
 
-/** Trailing slashes off, whitespace trimmed — the URL is otherwise verbatim. */
-function normalizeUrl(raw: string): string {
+/**
+ * Trailing slashes off, whitespace trimmed — the URL is otherwise verbatim.
+ * Exported for the shared grammar's second consumer (the manager's
+ * config-first binding): one URL grammar, both doors, ADR 0008.
+ */
+export function normalizeUrl(raw: string): string {
   const trimmed = raw.trim().replace(/\/+$/, '');
   let parsed: URL;
   try {

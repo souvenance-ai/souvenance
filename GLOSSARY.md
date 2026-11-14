@@ -75,11 +75,11 @@ The HTTP process where individuals exist: memory operations and store management
 _Avoid_: gateway, daemon, backend
 
 **Manager**:
-The `souvenance` CLI — the operator's tool for local state: server lifecycle, config, tokens, offline maintenance.
-_Avoid_: admin CLI, control CLI
+The `souvenance` CLI — the host's tool, one tool in two states: the file world when the server is down (server lifecycle, config, tokens, offline surgery) and the wire world when it runs (the management surface's remote gesture — the stores and their grants). Each state's refusals name the other's door.
+_Avoid_: admin CLI, control CLI, local-only CLI
 
 **Client**:
-The `souv` CLI — a thin consumer of the server API for agents and scripts; never touches local state.
+The `souv` CLI — a thin consumer of the server API for agents and scripts; never touches local state. Its verbs are the data surface's only — the management surface is the manager's gesture, never the individual's.
 _Avoid_: proxy CLI
 
 **MCP bridge**:
@@ -111,6 +111,10 @@ _Avoid_: direct verb, local verb
 **Grant**:
 A bearer credential's authority, authored in the config — nothing else exists to present. Two families: a **store grant** (one agent, one store, one mode `ro`/`rw` — a row of `tokens[]`) and a **management grant** (one agent over the host's management surface — create, fork, list, describe, delete stores, and mint and revoke the grants of the store family — reaching no store's data, a row of `management[]`). The store grant is the store's address on the wire (ADR 0007): one Bearer pins one store, the data routes carry no name. While the server runs, the live credential state is the server's (ADR 0009): the wire mints and revokes the store family; the file's credential rows are its echo.
 _Avoid_: token file (retired), API key, manage cap (retired)
+
+**Binding**:
+How a wire client learns where the server lives and which grant speaks for it: one base URL, one Bearer. One grammar, both doors (ADR 0008): the bridge binds by environment alone (`SOUVENANCE_URL`, `SOUVENANCE_TOKEN`); the manager binds by its config — the configured `host:port` and exactly one management row — and the same env pair overrides, per variable, for a remote host.
+_Avoid_: endpoint, connection, credentials (that's the grant), client config
 
 **Mint**:
 The authoring of a grant: a fresh secret is generated (`souv-` grammar), the row lands in the one config, the in-memory credential state seats it — and the secret is served exactly once. The wire's mint serves the store family on the management surface (ADR 0009); the manager's `grant … add` is the same gesture offline, its reveal TTY-only. Rotating a secret or changing a mode is revoke, then mint — the pair is one row per (agent, store).
