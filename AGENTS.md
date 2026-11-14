@@ -34,9 +34,7 @@ The agent's PR routine, in order — each step completes before the next:
 
 1. **Review before PR**: run the `code-review` skill on the change (two axes: Standards, Spec), then fix what must be fixed and decline the rest with a recorded reason. A PR opens only after its findings are resolved.
 2. **Open the PR** on the agreed base branch.
-3. **Request the Copilot code review** on the PR, and wait for the review to come back.
-4. **Process Copilot's comments through a subagent**: each comment is judged — legitimate ones land as fix commits on the PR, the declined ones get a recorded reason (as PR comments).
-5. **Ask the user to review and merge.** The merge is always the user's gesture; the agent merges only when the user explicitly asks for it.
+3. **Ask the user to review and merge.** The merge is always the user's gesture; the agent merges only when the user explicitly asks for it.
 
 ## Agent skills
 
