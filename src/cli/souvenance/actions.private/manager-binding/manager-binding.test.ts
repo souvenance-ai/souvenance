@@ -98,6 +98,26 @@ test('several management rows refuse naming the labels — the file is ambiguous
   );
 });
 
+test('an IPv6 literal host composes the URL bracketed — httpCall strips it back for the socket', () => {
+  const binding = resolveManagerBinding(
+    {},
+    { ...config([{ agent: 'valentin', secret: 'souv-aaaa' }]), host: '::1', port: 3141 },
+  );
+  assert.equal(binding.url, 'http://[::1]:3141');
+});
+
+test('a host the URL grammar cannot carry is the binding\u2019s verdict, not a crash', () => {
+  assert.throws(
+    () =>
+      resolveManagerBinding(
+        {},
+        { ...config([{ agent: 'valentin', secret: 'souv-aaaa' }]), host: 'a b', port: 3141 },
+      ),
+    (error: unknown): error is ConfigError =>
+      error instanceof ConfigError && error.message.includes('does not travel as a URL host'),
+  );
+});
+
 test('a malformed env URL refuses with the binding\u2019s teaching — the shared grammar (ADR 0008)', () => {
   assert.throws(
     () => resolve({ SOUVENANCE_URL: 'ftp://nope' }),

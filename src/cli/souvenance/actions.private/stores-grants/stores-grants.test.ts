@@ -1,29 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
 import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
-import type { Binding } from '../../../../modules.private/mcp/binding/binding.ts';
-import {
-  bootTestWire,
-  type TestWire,
-} from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import { onWire, UNREACHABLE } from '../../../../modules.private/cli/test-wire/test-wire.ts';
 import {
   AGENT_REQUIRED,
   DOT_AGENT_REFUSAL,
   MODE_TEACHING,
 } from '../../../../modules.private/config/mint-doors/mint-doors.ts';
 import { storesGrantsList, storesGrantsMint, storesGrantsRevoke } from './stores-grants.ts';
-
-/** A binding that reaches nothing — the local gates must precede any call. */
-const UNREACHABLE: Binding = { url: 'http://127.0.0.1:1', token: 'souv-0000' };
-
-async function onWire(run: (wire: TestWire) => Promise<void>): Promise<void> {
-  const wire = await bootTestWire();
-  try {
-    await run(wire);
-  } finally {
-    await wire.close();
-  }
-}
 
 test('mint serves the response verbatim — the secret included, no TTY gate', async () => {
   await onWire(async (wire) => {

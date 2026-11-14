@@ -23,13 +23,13 @@ import {
   resolveLogRequests,
 } from '../../modules.private/config/config.ts';
 import type { AnswerOf } from '../../modules.private/cli/answer-of/answer-of.ts';
+import { refusalOf } from '../../modules.private/cli/refusal-of/refusal-of.ts';
 import type { Binding } from '../../modules.private/mcp/binding/binding.ts';
 import { type ConfigAnswer, configAction } from './actions.private/config/config.ts';
 import { grantAction, type GrantAnswer } from './actions.private/grant/grant.ts';
 import { type ForkArgs, forkAction, type ForkAnswer } from './actions.private/fork/fork.ts';
 import { serve } from './actions.private/serve/serve.ts';
 import { resolveManagerBinding } from './actions.private/manager-binding/manager-binding.ts';
-import { refusalOf } from './actions.private/refusal/refusal.ts';
 import {
   storesCreate,
   storesDelete,

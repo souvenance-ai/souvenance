@@ -1,30 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
-import type { Binding } from '../../../../modules.private/mcp/binding/binding.ts';
-import {
-  bootTestWire,
-  type TestWire,
-} from '../../../../modules.private/cli/test-wire/test-wire.ts';
-import {
-  DOT_STORE_REFUSAL,
-  storesCreate,
-  storesDelete,
-  storesDescribe,
-  storesFork,
-  storesList,
-} from './stores.ts';
-
-/** A binding that reaches nothing — the local gates must precede any call. */
-const UNREACHABLE: Binding = { url: 'http://127.0.0.1:1', token: 'souv-0000' };
-
-async function onWire(run: (wire: TestWire) => Promise<void>): Promise<void> {
-  const wire = await bootTestWire();
-  try {
-    await run(wire);
-  } finally {
-    await wire.close();
-  }
-}
+import { onWire, UNREACHABLE } from '../../../../modules.private/cli/test-wire/test-wire.ts';
+import { storesCreate, storesDelete, storesDescribe, storesFork, storesList } from './stores.ts';
+import { DOT_STORE_REFUSAL } from '../store-doors/store-doors.ts';
 
 test('create serves the wire\u2019s 201 verbatim — the name back', async () => {
   await onWire(async (wire) => {
