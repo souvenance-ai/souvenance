@@ -20,15 +20,12 @@
  * (#17): the binding is the manager's config, a slipped hand teaches.
  */
 import { ConfigError, type Config } from '../../../../modules.private/config/config.ts';
-import { normalizeUrl, type Binding } from '../../../../modules.private/mcp/binding/binding.ts';
-
-/** The environment's shape — the record `process.env` gives. */
-type Environment = Readonly<Record<string, string | undefined>>;
-
-/** The env var is an override only when it is present and non-empty. */
-function override(value: string | undefined): string | undefined {
-  return value !== undefined && value.trim().length > 0 ? value : undefined;
-}
+import {
+  boundEnv,
+  normalizeUrl,
+  type Binding,
+  type Environment,
+} from '../../../../modules.private/mcp/binding/binding.ts';
 
 /**
  * The config's own URL. The host rides the URL bracketed when it is an
@@ -56,9 +53,9 @@ function composeConfigUrl(config: Config): string {
 }
 
 export function resolveManagerBinding(environment: Environment, config: Config): Binding {
-  const envUrl = override(environment['SOUVENANCE_URL']);
+  const envUrl = boundEnv(environment, 'SOUVENANCE_URL');
   const url = envUrl !== undefined ? normalizeUrl(envUrl) : composeConfigUrl(config);
-  const envToken = override(environment['SOUVENANCE_TOKEN']);
+  const envToken = boundEnv(environment, 'SOUVENANCE_TOKEN');
   if (envToken !== undefined) return { url, token: envToken };
   const soleRow = config.management.length === 1 ? config.management[0] : undefined;
   if (soleRow === undefined) {
