@@ -11,8 +11,8 @@
  */
 import { httpCall } from '../../../../modules.private/cli/http-call/http-call.ts';
 import type { Binding } from '../../../../modules.private/mcp/binding/binding.ts';
+import { isDotSegment } from '../../../../modules.private/cli/dot-segment/dot-segment.ts';
 import { answerOf, type SouvAnswer } from '../answer/answer.ts';
-import { isDotSegment } from '../dot-segment/dot-segment.ts';
 import { refusalOf } from '../refusal/refusal.ts';
 
 export interface SkillsArgs {

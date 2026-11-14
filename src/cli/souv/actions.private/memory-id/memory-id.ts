@@ -6,8 +6,8 @@
  * ride; every other malformed id is the wire's verdict.
  */
 import { missingArg } from '../../../../modules.private/cli/missing-arg/missing-arg.ts';
+import { isDotSegment } from '../../../../modules.private/cli/dot-segment/dot-segment.ts';
 import type { SouvAnswer } from '../answer/answer.ts';
-import { isDotSegment } from '../dot-segment/dot-segment.ts';
 import { refusalOf } from '../refusal/refusal.ts';
 
 export type MemoryIdVerdict =
