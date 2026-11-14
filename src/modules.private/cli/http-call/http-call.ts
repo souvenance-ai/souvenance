@@ -166,22 +166,21 @@ export function httpCall(binding: Binding, call: HttpCall): Promise<HttpAnswer> 
             }
             const status = response.statusCode ?? 0;
             const raw = Buffer.concat(chunks).toString('utf8');
-            const contentType = (response.headers['content-type'] ?? '').toLowerCase();
-            if (contentType.startsWith('application/json')) {
-              let parsed: unknown;
-              try {
-                parsed = JSON.parse(raw);
-              } catch {
-                settle(notOurs(status));
-                return;
-              }
+            // The wire's answer is forwarded, never judged: the body
+            // parses (one JSON document) — the grammar is the server's
+            // business, the reach is the client's. A body that does not
+            // parse rides verbatim when the wire declared markdown (the
+            // skills' SKILL.md — an installation is a copy, #77, #82);
+            // every other unparseable body is not ours.
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(raw);
               settle({ status, document: parsed });
               return;
+            } catch {
+              // not one JSON document — the declared markdown may ride
             }
-            // The one text shape the wire declares — the skills'
-            // SKILL.md body, an installation is a copy (#77, #82): the
-            // raw rides verbatim. Every other text (a proxy's html
-            // page, a redirect's prose) is not ours.
+            const contentType = (response.headers['content-type'] ?? '').toLowerCase();
             if (status >= 200 && status < 300 && contentType.startsWith('text/markdown')) {
               settle({ status, document: raw });
               return;

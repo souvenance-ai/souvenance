@@ -185,6 +185,20 @@ test('a declared markdown body carries on a stub too — the content type is the
   }
 });
 
+test('a parseable body rides whatever its declared type — the parse, not the header, carries JSON', async () => {
+  const wire = await listen((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  try {
+    const answer = await httpCall({ url: wire.url, token: 'souv-x' }, { method: 'get', path: '/' });
+    assert.equal(answer.status, 200);
+    assert.deepEqual(answer.document, { ok: true });
+  } finally {
+    await closeServer(wire.server);
+  }
+});
+
 /**
  * The deadline's fixture: a server that answers only in part, forever —
  * `headers` never completes the header block, `body` streams a body
