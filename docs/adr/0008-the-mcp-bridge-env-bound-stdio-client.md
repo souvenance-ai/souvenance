@@ -26,6 +26,13 @@ HTTP call per call, the server the only store owner (#17).
   with cwd `/` or `$HOME`), so a project-directory file is never a discovery mechanism; a
   token never rides argv (ps, /proc, consent dialogs). The dev's per-directory story is
   carried by the clients' own project configs, which carry the env block.
+  _Amended 2026-11-14 (the manager's management wire door, #105): the grammar is one,
+  both doors. The manager binds config-first — the URL from the configured `host:port`,
+  the token from the config's management rows (exactly one serves; several refuse naming
+  the labels; none teaches the offline mint, the rows' only birth) — and the same env
+  pair overrides, **per variable**, for a remote host; an explicit token silences the
+  config's ambiguity. The bridge's env-only rule is untouched: a bridge never reads the
+  config file — the agent's session never touches local state._
 - **The mirror rule re-anchored on the wire.** Tool names are the route verbs, tool
   arguments are the wire's field names, results are what the routes serve verbatim, and
   every refusal arrives as a tool-level `isError` carrying the envelope's message — an

@@ -1,42 +1,19 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'vitest';
 import { httpCall } from '../../modules.private/cli/http-call/http-call.ts';
+import { runBin } from '../../modules.private/cli/run-bin/run-bin.ts';
 import { seedMemory } from '../../modules.private/cli/seed-memory/seed-memory.ts';
 import { bootTestWire } from '../../modules.private/cli/test-wire/test-wire.ts';
 
-const REPO = process.cwd();
-
-interface Spawned {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly code: number | null;
-}
-
 /** The bin as the process runs it — the composition the publication ships. */
-function runBin(
+function runSouvBin(
   args: readonly string[],
   environment: Record<string, string | undefined>,
-): Promise<Spawned> {
-  return new Promise((resolve) => {
-    const child = spawn('node', ['src/cli/souv/cli.ts', ...args], {
-      cwd: REPO,
-      env: environment,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf8');
-    });
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8');
-    });
-    child.on('close', (code) => resolve({ stdout, stderr, code }));
-  });
+): ReturnType<typeof runBin> {
+  return runBin('src/cli/souv/cli.ts', args, environment);
 }
 
 /** The environment without the binding — the token's absence is the 78 verdict. */
@@ -48,34 +25,34 @@ function bindingless(): Record<string, string | undefined> {
 }
 
 test('the bin refuses without the binding — one envelope on stdout, exit 78', async () => {
-  const run = await runBin(['memory', 'list'], bindingless());
+  const run = await runSouvBin(['memory', 'list'], bindingless());
   assert.equal(run.code, 78);
   const document = JSON.parse(run.stdout) as { error: unknown };
   assert.match(String(document.error), /SOUVENANCE_TOKEN is absent/);
 });
 
 test('--help works bindingless — the bin\u2019s own door, no envelope demanded', async () => {
-  const run = await runBin(['--help'], bindingless());
+  const run = await runSouvBin(['--help'], bindingless());
   assert.equal(run.code, 0);
   assert.match(run.stdout, /memory/);
 });
 
 test('the parser\u2019s refusals teach on stdout — one envelope, exit 1 (a missing option value)', async () => {
-  const run = await runBin(['memory', 'store', 'hello', '--kind'], bindingless());
+  const run = await runSouvBin(['memory', 'store', 'hello', '--kind'], bindingless());
   assert.equal(run.code, 1);
   const document = JSON.parse(run.stdout) as { error: unknown };
   assert.match(String(document.error), /--kind/);
 });
 
 test('an unknown option refuses in the envelope\u2019s voice', async () => {
-  const run = await runBin(['memory', 'list', '--nope'], bindingless());
+  const run = await runSouvBin(['memory', 'list', '--nope'], bindingless());
   assert.equal(run.code, 1);
   const document = JSON.parse(run.stdout) as { error: unknown };
   assert.match(String(document.error), /--nope|unknown option/i);
 });
 
 test('an unknown command refuses in the envelope\u2019s voice', async () => {
-  const run = await runBin(['frobnicate'], bindingless());
+  const run = await runSouvBin(['frobnicate'], bindingless());
   assert.equal(run.code, 1);
   const document = JSON.parse(run.stdout) as { error: unknown };
   assert.match(String(document.error), /frobnicate|unknown command/i);
@@ -91,7 +68,7 @@ test('a malformed numeric flag rides to the wire\u2019s judge — the truth, not
       SOUVENANCE_URL: wire.store.url,
       SOUVENANCE_TOKEN: wire.store.token,
     };
-    const run = await runBin(['memory', 'list', '--limit', '2.5'], environment);
+    const run = await runSouvBin(['memory', 'list', '--limit', '2.5'], environment);
     assert.equal(run.code, 1);
     const document = JSON.parse(run.stdout) as { error: unknown };
     assert.match(String(document.error), /limit|integer|expected/i);
@@ -113,7 +90,7 @@ test('a body that does not travel refuses in the envelope\u2019s voice — valid
       SOUVENANCE_URL: wire.store.url,
       SOUVENANCE_TOKEN: wire.store.token,
     };
-    const run = await runBin(
+    const run = await runSouvBin(
       ['memory', 'store', 'hello', '--kind', 'note', '--metadata', deep],
       environment,
     );
@@ -147,7 +124,7 @@ test('a rogue answer that parses but cannot re-serialize refuses in the envelope
       SOUVENANCE_URL: `http://127.0.0.1:${address.port}`,
       SOUVENANCE_TOKEN: 'souv-x',
     };
-    const run = await runBin(['memory', 'list'], environment);
+    const run = await runSouvBin(['memory', 'list'], environment);
     assert.equal(run.code, 1);
     const document = JSON.parse(run.stdout) as { error: unknown };
     assert.match(String(document.error), /does not travel/);
@@ -173,7 +150,7 @@ test('the merge’s repeated --id rides — the collector’s wiring, the fusion
   try {
     const first = await seedMemory(wire, { content: 'the first', kind: 'note' });
     const second = await seedMemory(wire, { content: 'the second', kind: 'note' });
-    const run = await runBin(
+    const run = await runSouvBin(
       ['memory', 'merge', '--id', first, '--id', second, 'the fused'],
       boundEnvironment(wire),
     );
@@ -191,7 +168,7 @@ test('the hot verdict rides both positionals — the bin’s own composition', a
   const wire = await bootTestWire();
   try {
     const id = await seedMemory(wire, { content: 'the morning note', kind: 'note' });
-    const run = await runBin(['memory', 'hot', id, 'on'], boundEnvironment(wire));
+    const run = await runSouvBin(['memory', 'hot', id, 'on'], boundEnvironment(wire));
     assert.equal(run.code, 0);
     assert.deepEqual(JSON.parse(run.stdout), { id, hot: true });
   } finally {
@@ -203,7 +180,7 @@ test('the rituals are top-level doors — checkin and checkout, not under memory
   const wire = await bootTestWire();
   try {
     await seedMemory(wire, { content: '# the note', kind: 'note', hot: true });
-    const opening = await runBin(['checkin'], boundEnvironment(wire));
+    const opening = await runSouvBin(['checkin'], boundEnvironment(wire));
     assert.equal(opening.code, 0);
     const report = JSON.parse(opening.stdout) as {
       hot: readonly unknown[];
@@ -212,11 +189,11 @@ test('the rituals are top-level doors — checkin and checkout, not under memory
     };
     assert.equal(report.stats.memories, 1);
     assert.equal(report.hot.length, 1);
-    const closing = await runBin(['checkout'], boundEnvironment(wire));
+    const closing = await runSouvBin(['checkout'], boundEnvironment(wire));
     assert.equal(closing.code, 0);
     assert.equal((JSON.parse(closing.stdout) as { healthy: boolean }).healthy, true);
     // The nesting the client refuses: no memory family owns the rituals.
-    const misplaced = await runBin(['memory', 'checkin'], boundEnvironment(wire));
+    const misplaced = await runSouvBin(['memory', 'checkin'], boundEnvironment(wire));
     assert.equal(misplaced.code, 1);
     assert.match(
       String((JSON.parse(misplaced.stdout) as { error: unknown }).error),
@@ -230,7 +207,7 @@ test('the rituals are top-level doors — checkin and checkout, not under memory
 test('the skills door serves the index through the bin', async () => {
   const wire = await bootTestWire();
   try {
-    const run = await runBin(['skills'], boundEnvironment(wire));
+    const run = await runSouvBin(['skills'], boundEnvironment(wire));
     assert.equal(run.code, 0);
     const index = JSON.parse(run.stdout) as { skills: { name: string }[] };
     assert.equal(index.skills[0]?.name, 'waking');
@@ -242,7 +219,7 @@ test('the skills door serves the index through the bin', async () => {
 test('the skills door\u2019s body is byte-faithful through the bin — the copy the install takes', async () => {
   const wire = await bootTestWire();
   try {
-    const run = await runBin(['skills', 'waking'], boundEnvironment(wire));
+    const run = await runSouvBin(['skills', 'waking'], boundEnvironment(wire));
     assert.equal(run.code, 0);
     assert.equal(run.stdout, readFileSync(join('skills', 'waking', 'SKILL.md'), 'utf8'));
   } finally {
@@ -253,7 +230,7 @@ test('the skills door\u2019s body is byte-faithful through the bin — the copy 
 test('a dot segment is not a skill name — the local verdict through the bin', async () => {
   const wire = await bootTestWire();
   try {
-    const run = await runBin(['skills', '..'], boundEnvironment(wire));
+    const run = await runSouvBin(['skills', '..'], boundEnvironment(wire));
     assert.equal(run.code, 1);
     const document = JSON.parse(run.stdout) as { error: unknown };
     assert.match(String(document.error), /a dot segment is not a skill name/);
@@ -263,13 +240,13 @@ test('a dot segment is not a skill name — the local verdict through the bin', 
 });
 
 test('the mcp door\u2019s parser door — --help works bindingless', async () => {
-  const run = await runBin(['mcp', '--help'], bindingless());
+  const run = await runSouvBin(['mcp', '--help'], bindingless());
   assert.equal(run.code, 0);
   assert.match(run.stdout, /bridge/);
 });
 
 test('the mcp door\u2019s parser refusals stay the bin\u2019s voice — the envelope on stdout, exit 1', async () => {
-  const run = await runBin(['mcp', '--nope'], bindingless());
+  const run = await runSouvBin(['mcp', '--nope'], bindingless());
   assert.equal(run.code, 1);
   const document = JSON.parse(run.stdout) as { error: unknown };
   assert.match(String(document.error), /--nope/);

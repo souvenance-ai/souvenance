@@ -29,16 +29,29 @@ export interface Binding {
 /** The default binding's URL — the server's own boot defaults, composed once. */
 const DEFAULT_URL = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 
+/** The environment's shape — the record `process.env` gives, both doors' source. */
+export type Environment = Readonly<Record<string, string | undefined>>;
+
+/**
+ * The env var is the binding's value only when it is present and
+ * non-blank — one grammar, both doors (ADR 0008): the bridge refuses a
+ * blank token with the teaching, the manager treats a blank var as no
+ * override. The value rides untrimmed; each door judges its own shape.
+ */
+export function boundEnv(environment: Environment, key: string): string | undefined {
+  const value = environment[key];
+  return value !== undefined && value.trim().length > 0 ? value : undefined;
+}
+
 /**
  * Resolves the binding from an environment record (the shape of
  * `process.env`). Throws ConfigError with the teaching when the grant is
  * absent or the URL is malformed — the bridge refuses to speak before
  * it can address its own store.
  */
-export function resolveBinding(environment: Readonly<Record<string, string | undefined>>): Binding {
-  const rawUrl = environment['SOUVENANCE_URL'];
-  const token = environment['SOUVENANCE_TOKEN'];
-  if (token === undefined || token.trim().length === 0) {
+export function resolveBinding(environment: Environment): Binding {
+  const token = boundEnv(environment, 'SOUVENANCE_TOKEN');
+  if (token === undefined) {
     throw new ConfigError(
       'invalid binding — SOUVENANCE_TOKEN is absent: the bridge carries exactly one store ' +
         'grant (one Bearer = one store, the grant is the address). Set SOUVENANCE_TOKEN in the ' +
@@ -46,8 +59,9 @@ export function resolveBinding(environment: Readonly<Record<string, string | und
         'answer on the default loopback port. The operator mints the grant.',
     );
   }
+  const rawUrl = boundEnv(environment, 'SOUVENANCE_URL');
   return {
-    url: rawUrl === undefined || rawUrl.trim().length === 0 ? DEFAULT_URL : normalizeUrl(rawUrl),
+    url: rawUrl === undefined ? DEFAULT_URL : normalizeUrl(rawUrl),
     token,
   };
 }
