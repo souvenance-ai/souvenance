@@ -20,7 +20,7 @@ function runBin(
   return new Promise((resolve) => {
     const child = spawn('node', ['src/cli/souv/cli.ts', ...args], {
       cwd: REPO,
-      environment,
+      env: environment,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
