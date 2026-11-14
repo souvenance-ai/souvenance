@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { join } from 'node:path';
 import { test, vi } from 'vitest';
 import { bootTestWire } from '../test-wire/test-wire.ts';
 import { httpCall } from './http-call.ts';
@@ -155,6 +157,31 @@ test('an IPv6 binding reaches the live server — the brackets leave at the pars
     assert.deepEqual(answer.document, { ok: true });
   } finally {
     await closeServer(server);
+  }
+});
+
+test('the wire\u2019s declared markdown rides verbatim — the skills\u2019 body, carried as a string', async () => {
+  const wire = await bootTestWire();
+  try {
+    const answer = await httpCall(wire.store, { method: 'get', path: '/skills/waking' });
+    assert.equal(answer.status, 200);
+    assert.equal(answer.document, readFileSync(join('skills', 'waking', 'SKILL.md'), 'utf8'));
+  } finally {
+    await wire.close();
+  }
+});
+
+test('a declared markdown body carries on a stub too — the content type is the judge', async () => {
+  const wire = await listen((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' });
+    res.end('---\nname: probe\n---\n\nthe body');
+  });
+  try {
+    const answer = await httpCall({ url: wire.url, token: 'souv-x' }, { method: 'get', path: '/' });
+    assert.equal(answer.status, 200);
+    assert.equal(answer.document, '---\nname: probe\n---\n\nthe body');
+  } finally {
+    await closeServer(wire.server);
   }
 });
 

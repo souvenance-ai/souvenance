@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'vitest';
 import { httpCall } from '../../modules.private/cli/http-call/http-call.ts';
 import { seedMemory } from '../../modules.private/cli/seed-memory/seed-memory.ts';
@@ -223,4 +225,45 @@ test('the rituals are top-level doors — checkin and checkout, not under memory
   } finally {
     await wire.close();
   }
+});
+
+test('the skills door serves the index through the bin', async () => {
+  const wire = await bootTestWire();
+  try {
+    const run = await runBin(['skills'], boundEnvironment(wire));
+    assert.equal(run.code, 0);
+    const index = JSON.parse(run.stdout) as { skills: { name: string }[] };
+    assert.equal(index.skills[0]?.name, 'waking');
+  } finally {
+    await wire.close();
+  }
+});
+
+test('the skills door\u2019s body is byte-faithful through the bin — the copy the install takes', async () => {
+  const wire = await bootTestWire();
+  try {
+    const run = await runBin(['skills', 'waking'], boundEnvironment(wire));
+    assert.equal(run.code, 0);
+    assert.equal(run.stdout, readFileSync(join('skills', 'waking', 'SKILL.md'), 'utf8'));
+  } finally {
+    await wire.close();
+  }
+});
+
+test('a dot segment is not a skill name — the local verdict through the bin', async () => {
+  const wire = await bootTestWire();
+  try {
+    const run = await runBin(['skills', '..'], boundEnvironment(wire));
+    assert.equal(run.code, 1);
+    const document = JSON.parse(run.stdout) as { error: unknown };
+    assert.match(String(document.error), /a dot segment is not a skill name/);
+  } finally {
+    await wire.close();
+  }
+});
+
+test('the mcp door\u2019s parser door — --help works bindingless', async () => {
+  const run = await runBin(['mcp', '--help'], bindingless());
+  assert.equal(run.code, 0);
+  assert.match(run.stdout, /bridge/);
 });

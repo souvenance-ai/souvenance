@@ -26,9 +26,11 @@ import { linkMemories } from './actions.private/link-memories/link-memories.ts';
 import type { ListMemoriesArgs } from './actions.private/list-memories/list-memories.ts';
 import { listMemories } from './actions.private/list-memories/list-memories.ts';
 import { mergeMemories } from './actions.private/merge-memories/merge-memories.ts';
+import { mcpDoor } from './actions.private/mcp-door/mcp-door.ts';
 import { refusalOf } from './actions.private/refusal/refusal.ts';
 import type { SearchMemoriesArgs } from './actions.private/search-memories/search-memories.ts';
 import { searchMemories } from './actions.private/search-memories/search-memories.ts';
+import { skills } from './actions.private/skills/skills.ts';
 import { storeMemory } from './actions.private/store-memory/store-memory.ts';
 import { supersedeMemory } from './actions.private/supersede-memory/supersede-memory.ts';
 import { unlinkMemories } from './actions.private/unlink-memories/unlink-memories.ts';
@@ -261,6 +263,22 @@ program
   .description('close a session — the consolidation verdict, healthy or the payable findings')
   .action((): Promise<void> => run((binding) => checkout(binding)));
 
+program
+  .command('skills')
+  .description(
+    'the orientation door\u2019s mirror — the skills index, or one skill\u2019s body verbatim',
+  )
+  .argument('[name]', 'the skill\u2019s name — the index serves it; absent, the index itself')
+  .action((name: string | undefined): Promise<void> => run((binding) => skills(binding, { name })));
+
+program
+  .command('mcp')
+  .description('the bridge\u2019s bin door — MCP over stdio, the environment binds')
+  // Not the run() door: stdout is protocol-only here (the MCP client
+  // parses it byte-for-byte), so the door's own refusals speak on
+  // stderr and the process exit carries the verdict.
+  .action((): Promise<void> => mcpDoor(process.env));
+
 /** The one stdout gesture: exactly one JSON document, then the exit code —
  * written synchronously at fd 1 (stdout): the parser-error paths end the
  * loop right after the write, and a piped stdout must not lose the
@@ -268,6 +286,14 @@ program
  * tree the serializer refuses is a refusal, not a crash (today the
  * wire's own c.json 500s first — this is the day that ever changes). */
 function emitAnswer(answer: SouvAnswer): void {
+  if (answer.text !== undefined) {
+    // The text door's own shape: the wire's declared body verbatim —
+    // no newline added (the served file ends its own); the help's and
+    // the version's precedent, extended.
+    writeSync(1, answer.text);
+    process.exitCode = answer.exitCode;
+    return;
+  }
   let line: string;
   try {
     line = `${JSON.stringify(answer.document)}\n`;

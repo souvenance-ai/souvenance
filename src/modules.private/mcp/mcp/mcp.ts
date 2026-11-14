@@ -27,9 +27,10 @@
  *
  * The eager probe (#22): when options carry one, it runs before the
  * first line is read — the bridge refuses to speak for a store it
- * cannot reach; the teaching lands on stderr and the loop ends, leaving
- * the process a non-zero exit (the composition root's gesture). A
- * server that dies mid-session cannot crash the protocol: the Bridge
+ * cannot reach; the teaching lands on stderr and the loop ends, the
+ * returned verdict telling the composition root which end it was
+ * ('probe-refused' — the process exits non-zero — or 'session-ended').
+ * A server that dies mid-session cannot crash the protocol: the Bridge
  * throws its reachability teaching and the tools answer `isError`.
  */
 import { BridgeError } from '../bridge/bridge.ts';
@@ -82,6 +83,14 @@ export interface McpStreams {
   readonly output: { write(data: string): void };
 }
 
+/**
+ * The session's end-cause, as the composition root receives it:
+ * 'probe-refused' when the eager probe refused (nothing was ever
+ * spoken — the process exits non-zero), 'session-ended' when the loop
+ * ended (the input closed, or the line cap ended a garbage stream).
+ */
+export type McpEnding = 'probe-refused' | 'session-ended';
+
 export interface McpServerOptions {
   readonly bridge: BridgeLike;
   readonly tools: readonly McpTool[];
@@ -89,17 +98,21 @@ export interface McpServerOptions {
   readonly version?: string;
   /**
    * The eager probe (#22): liveness before speaking. Refuses → the
-   * teaching lands on stderr and the session ends; nothing is answered.
+   * teaching lands on stderr, the session ends with the
+   * 'probe-refused' verdict, nothing is answered.
    */
   readonly probe?: () => Promise<void>;
 }
 
 /**
  * Reads newline-delimited JSON-RPC from input, writes responses to
- * output, returns when input ends (the composition root ends the
- * process after this).
+ * output, returns the session's end-cause when the loop ends (the
+ * composition root carries the exit gesture).
  */
-export async function runMcpServer(streams: McpStreams, options: McpServerOptions): Promise<void> {
+export async function runMcpServer(
+  streams: McpStreams,
+  options: McpServerOptions,
+): Promise<McpEnding> {
   if (options.probe !== undefined) {
     try {
       await options.probe();
@@ -107,7 +120,7 @@ export async function runMcpServer(streams: McpStreams, options: McpServerOption
       process.stderr.write(
         `souvenance mcp refuses to speak: ${error instanceof Error ? error.message : String(error)}\n`,
       );
-      return;
+      return 'probe-refused';
     }
   }
   const respond: Responder = (id, payload) => {
@@ -127,15 +140,16 @@ export async function runMcpServer(streams: McpStreams, options: McpServerOption
       if (line.length === 0) continue;
       if (Buffer.byteLength(line) > MAX_LINE_BYTES) {
         refuseLineCap(respond);
-        return;
+        return 'session-ended';
       }
       handleMessage(options, line, respond);
     }
     if (Buffer.byteLength(buffer) > MAX_LINE_BYTES) {
       refuseLineCap(respond);
-      return;
+      return 'session-ended';
     }
   }
+  return 'session-ended';
 }
 
 /**
