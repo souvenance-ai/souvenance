@@ -30,9 +30,9 @@ export async function linkMemories(binding: Binding, args: LinkMemoriesArgs): Pr
     return refusalOf('the kind is missing — an edge is born classified (pass --kind)');
   }
   const metadata = jsonFlag('--metadata', args.metadata);
-  if (metadata.refusal !== undefined) return metadata.refusal;
+  if (metadata.state === 'refuse') return metadata.refusal;
   const body: Record<string, unknown> = { to: args.target, kind: args.kind };
-  if (metadata.parsed !== undefined) body['metadata'] = metadata.parsed;
+  if (metadata.state === 'ride') body['metadata'] = metadata.parsed;
   const answer = await httpCall(binding, {
     method: 'post',
     path: `/memories/${encodeURIComponent(addressed.id)}/link`,

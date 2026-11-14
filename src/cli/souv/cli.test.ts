@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { test } from 'vitest';
 import { httpCall } from '../../modules.private/cli/http-call/http-call.ts';
+import { seedMemory } from '../../modules.private/cli/seed-memory/seed-memory.ts';
 import { bootTestWire } from '../../modules.private/cli/test-wire/test-wire.ts';
 
 const REPO = process.cwd();
@@ -168,17 +169,8 @@ function boundEnvironment(
 test('the merge’s repeated --id rides — the collector’s wiring, the fusion served', async () => {
   const wire = await bootTestWire();
   try {
-    const seed = async (content: string): Promise<string> => {
-      const answer = await httpCall(wire.store, {
-        method: 'post',
-        path: '/memories',
-        body: { content, kind: 'note' },
-      });
-      assert.equal(answer.status, 201);
-      return (answer.document as { id: string }).id;
-    };
-    const first = await seed('the first');
-    const second = await seed('the second');
+    const first = await seedMemory(wire, { content: 'the first', kind: 'note' });
+    const second = await seedMemory(wire, { content: 'the second', kind: 'note' });
     const run = await runBin(
       ['memory', 'merge', '--id', first, '--id', second, 'the fused'],
       boundEnvironment(wire),
@@ -196,13 +188,7 @@ test('the merge’s repeated --id rides — the collector’s wiring, the fusion
 test('the hot verdict rides both positionals — the bin’s own composition', async () => {
   const wire = await bootTestWire();
   try {
-    const answer = await httpCall(wire.store, {
-      method: 'post',
-      path: '/memories',
-      body: { content: 'the morning note', kind: 'note' },
-    });
-    assert.equal(answer.status, 201);
-    const id = (answer.document as { id: string }).id;
+    const id = await seedMemory(wire, { content: 'the morning note', kind: 'note' });
     const run = await runBin(['memory', 'hot', id, 'on'], boundEnvironment(wire));
     assert.equal(run.code, 0);
     assert.deepEqual(JSON.parse(run.stdout), { id, hot: true });
@@ -214,11 +200,7 @@ test('the hot verdict rides both positionals — the bin’s own composition', a
 test('the rituals are top-level doors — checkin and checkout, not under memory', async () => {
   const wire = await bootTestWire();
   try {
-    await httpCall(wire.store, {
-      method: 'post',
-      path: '/memories',
-      body: { content: '# the note', kind: 'note', hot: true },
-    });
+    await seedMemory(wire, { content: '# the note', kind: 'note', hot: true });
     const opening = await runBin(['checkin'], boundEnvironment(wire));
     assert.equal(opening.code, 0);
     const report = JSON.parse(opening.stdout) as {
